@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.DS_Store
+__MACOSX/
+temp/*.pdf
+temp/results_cache.json
+temp/ipo_history.json
+data/backups/
+.env
+*.egg-info/
+dist/
+build/
+.trae/
+output/
+.pytest_cache/
+.ruff_cache/
