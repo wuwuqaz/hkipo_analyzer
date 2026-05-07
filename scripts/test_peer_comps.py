@@ -516,9 +516,140 @@ def test_biotech_valuation():
     assert val.get('valuation_framework_type') == '18A_biotech', "应检测为18A生物科技"
     assert val.get('valuation_label') != '缺失', f"估值不应为缺失: {val.get('valuation_label')}"
     assert val.get('ps_ratio') is not None, "PS应存在"
-    assert 'PS辅助' in str(val.get('valuation_label', '')), "标签应包含PS辅助或管线估值"
+    assert val.get('valuation_label', '') in ('PS辅助估值', 'PS失真，仅作参考', '管线阶段估值'), "标签应为PS辅助或管线估值"
     assert 'PE不适用' in str(val.get('valuation_reasons', [])), "应提示PE不适用"
     print("\n✅ Test 8 PASSED")
+
+
+def test_issuer_alias_overlap_skipped():
+    """测试发行人别名重叠的 candidate 被正确跳过"""
+    print("\n" + "=" * 60)
+    print("Test 9: 发行人别名重叠 candidate 应被排除")
+    print("=" * 60)
+
+    from ipo_analyzer.peer_comps import _filter_peer_candidates, _build_issuer_aliases
+
+    ipo = {"company_name": "LdsRobotics Limited", "shortname": "LdsRobotics"}
+    pi = {"extracted_company_name": "LdsRobotics Limited", "company_name_aliases": ["LdsRobotics"]}
+    issuer_aliases = _build_issuer_aliases(pi, ipo)
+
+    candidates = [
+        {"name": "LdsRobotics Technology", "confidence": "high", "reason": "test", "source": "test"},
+        {"name": "True Peer Company", "confidence": "high", "reason": "test", "source": "test"},
+    ]
+    filtered = _filter_peer_candidates(candidates, [], issuer_aliases)
+    print(f"过滤后候选: {filtered}")
+    assert "LdsRobotics Technology" not in filtered, "发行人别名重叠的 candidate 应被排除"
+    assert "True Peer Company" in filtered, "真实同行应保留"
+    print("\n✅ Test 9 PASSED")
+
+
+def test_private_peer_not_in_quantitative():
+    """测试 private peer 不进入 quantitative median"""
+    print("\n" + "=" * 60)
+    print("Test 10: private peer 不进入 quantitative median")
+    print("=" * 60)
+
+    from ipo_analyzer.peer_comps import PeerComparableAnalyzer
+
+    ipo = _build_mock_ipo(sector="hardtech")
+    pi = ipo["prospectus_info"]
+    text = "We compete with listed robotics companies."
+
+    analyzer = PeerComparableAnalyzer()
+    result = analyzer.analyze(pi, text, ipo)
+
+    quantitative = result.get("quantitative_peers", [])
+    qualitative = result.get("qualitative_peers", [])
+    print(f"quantitative: {len(quantitative)}  qualitative: {len(qualitative)}")
+
+    for p in quantitative:
+        assert p.get("type") == "listed", f"quantitative 不应包含非 listed: {p.get('name')}"
+        assert p.get("data_quality") != "low", f"quantitative 不应包含低质量: {p.get('name')}"
+        assert not p.get("needs_refresh", False), f"quantitative 不应包含需刷新: {p.get('name')}"
+
+    print("\n✅ Test 10 PASSED")
+
+
+def test_single_quantitative_peer_weak_conclusion():
+    """测试只有 1 个 quantitative peer 时不输出强结论"""
+    print("\n" + "=" * 60)
+    print("Test 11: 1 个 quantitative peer → 弱结论")
+    print("=" * 60)
+
+    from ipo_analyzer.peer_comps import PeerComparableAnalyzer
+
+    ipo = _build_mock_ipo(sector="hardtech")
+    pi = ipo["prospectus_info"]
+    text = "We compete with listed robotics companies."
+
+    analyzer = PeerComparableAnalyzer()
+    result = analyzer.analyze(pi, text, ipo)
+
+    # 如果 quantitative peers < 2, valuation_position 应为"样本不足，仅作定性参考"
+    if len(result.get("quantitative_peers", [])) < 2:
+        vp = result.get("valuation_position", "")
+        assert vp == "样本不足，仅作定性参考", f"期望'样本不足，仅作定性参考', 实际: {vp}"
+        assert result.get("peer_score", 0) <= 5, f"peer_score 应受限: {result.get('peer_score')}"
+        print(f"valuation_position: {vp}  (符合预期)")
+    else:
+        print(f"quantitative peers >= 2, 跳过此断言")
+
+    print("\n✅ Test 11 PASSED")
+
+
+def test_loss_making_valuation_not_missing():
+    """测试亏损公司估值标签不是'缺失'"""
+    print("\n" + "=" * 60)
+    print("Test 12: 亏损公司估值标签")
+    print("=" * 60)
+
+    ipo = _build_mock_ipo(
+        revenue=200,
+        net_profit=-50,
+        market_cap_hkd_million=3000,
+        sector="healthcare",
+    )
+    pi = ipo["prospectus_info"]
+    pi["financial_currency"] = "RMB"
+    pi["_extracted_text"] = "18A biotech clinical stage"
+
+    val = ValuationAnalyzer().analyze(pi, ipo)
+    label = val.get("valuation_label", "")
+    print(f"估值标签: {label}")
+    assert label != "缺失", f"亏损公司估值不应为'缺失': {label}"
+    assert label in ("PS辅助估值", "PS失真，仅作参考", "管线阶段估值", "数据不足，需人工核对"), \
+        f" unexpected label: {label}"
+    print("\n✅ Test 12 PASSED")
+
+
+def test_pe_uses_hkd_net_profit():
+    """测试 PE 使用 HKD 口径净利润"""
+    print("\n" + "=" * 60)
+    print("Test 13: PE 使用 HKD 口径净利润")
+    print("=" * 60)
+
+    ipo = _build_mock_ipo(
+        revenue=1000,
+        net_profit=100,  # RMB million
+        market_cap_hkd_million=2000,
+        sector="hardtech",
+    )
+    pi = ipo["prospectus_info"]
+    pi["financial_currency"] = "RMB"
+
+    val = ValuationAnalyzer().analyze(pi, ipo)
+    pe = val.get("pe_ratio")
+    np_hkd = val.get("net_profit_hkd_million")
+    print(f"net_profit(RMB): 100  → HKD: {np_hkd}")
+    print(f"PE: {pe}")
+
+    assert np_hkd is not None, "net_profit_hkd_million 应存在"
+    assert abs(np_hkd - 108.0) < 1.0, f"HKD 净利润应为约 108, 实际: {np_hkd}"
+    assert pe is not None, "PE 应存在"
+    expected_pe = round(2000 / np_hkd, 2)
+    assert abs(pe - expected_pe) < 0.5, f"PE 应为 {expected_pe}, 实际: {pe}"
+    print("\n✅ Test 13 PASSED")
 
 
 if __name__ == "__main__":
@@ -530,6 +661,11 @@ if __name__ == "__main__":
     test_competitor_context_detection()
     test_issuer_exclusion()
     test_biotech_valuation()
+    test_issuer_alias_overlap_skipped()
+    test_private_peer_not_in_quantitative()
+    test_single_quantitative_peer_weak_conclusion()
+    test_loss_making_valuation_not_missing()
+    test_pe_uses_hkd_net_profit()
     print("\n" + "=" * 60)
     print("✅ 所有同行对比测试通过")
     print("=" * 60)

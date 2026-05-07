@@ -457,7 +457,7 @@ class PeerMetricsUpdater:
 
     def _batch_update(self, stale_only, dry_run):
         results = {"updated": 0, "skipped_private": 0, "failed": 0,
-                   "stale_count": 0, "details": [], "total": 0}
+                   "stale_count": 0, "details": [], "total": 0, "previewed": 0}
 
         if stale_only:
             peers = self.store.get_stale_peers()
@@ -478,6 +478,7 @@ class PeerMetricsUpdater:
                 self.store.apply_metrics_to_data(data, ticker, r.get("metrics", {}))
             results["updated"] += r.get("updated", 0)
             results["failed"] += r.get("failed", 0)
+            results["previewed"] += r.get("previewed", 0)
             results["details"].append(r)
 
         if not dry_run and results["updated"] > 0 and data is not None:
@@ -489,7 +490,7 @@ class PeerMetricsUpdater:
         try:
             metrics = self.provider.fetch_metrics(ticker)
         except Exception as e:
-            return {"ticker": ticker, "updated": 0, "failed": 1, "error": str(e),
+            return {"ticker": ticker, "updated": 0, "failed": 1, "previewed": 1, "error": str(e),
                     "warning": str(e) if not _is_num(getattr(e, 'args', [None])[0]) else None}
 
         r = {
@@ -508,9 +509,11 @@ class PeerMetricsUpdater:
         if metrics.get("update_error"):
             r["failed"] = 0  # 仍标记为已处理
             r["updated"] = 1 if not dry_run else 0
+            r["previewed"] = 1
             r["warning"] = metrics["update_error"]
         else:
             r["failed"] = 0
             r["updated"] = 1 if not dry_run else 0
+            r["previewed"] = 1
 
         return r

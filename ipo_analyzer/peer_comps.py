@@ -436,13 +436,17 @@ def _filter_peer_candidates(candidates, all_peer_names, issuer_aliases):
         # 排除部分匹配：候选名包含发行人别名的一个完整词
         if issuer_aliases:
             candidate_words = set(words)
+            should_skip = False
             for alias in issuer_aliases:
                 alias_words = set(alias.split())
                 if candidate_words & alias_words:
                     # 如果超过一半的词相同，排除
                     overlap = len(candidate_words & alias_words)
                     if overlap >= len(candidate_words) / 2 and overlap > 0:
-                        continue
+                        should_skip = True
+                        break
+            if should_skip:
+                continue
 
         # 排除已在同行库里
         if lower in all_peer_lower:
@@ -761,6 +765,8 @@ class PeerComparableAnalyzer:
             "prospectus_peer_candidates": [],
             "unmatched_peer_candidates": [],
             "matched_peers": [],
+            "quantitative_peers": [],
+            "qualitative_peers": [],
             "company_ps": None, "company_pe": None, "company_pb": None,
             "peer_median_ps": None, "peer_median_pe": None, "peer_median_pb": None,
             "peer_ps_count": 0, "peer_pe_count": 0,
@@ -844,6 +850,18 @@ class PeerComparableAnalyzer:
             m["name"] for m in matched if m.get("matched_by", "").startswith("招股书")
         ]
 
+        # 区分 quantitative / qualitative peers
+        quantitative_peers = [
+            p for p in matched
+            if p.get("type") == "listed"
+            and not (p.get("ps") is None and p.get("pe") is None and p.get("market_cap_hkd_million") is None)
+            and p.get("data_quality") != "low"
+            and not p.get("needs_refresh", False)
+        ]
+        qualitative_peers = [p for p in matched if p not in quantitative_peers]
+        result["quantitative_peers"] = quantitative_peers
+        result["qualitative_peers"] = qualitative_peers
+
         # 5. 公司 PS/PE
         valuation = prospectus_info.get("valuation", {}) or {}
         company_ps = valuation.get("ps_ratio")
@@ -861,8 +879,8 @@ class PeerComparableAnalyzer:
         result["company_pe"] = company_pe
         result["company_pb"] = company_pb
 
-        # 6-7. 同行中位数 + 相对溢价
-        medians = _calc_peer_medians(matched)
+        # 6-7. 同行中位数 + 相对溢价 (仅基于 quantitative peers)
+        medians = _calc_peer_medians(quantitative_peers)
         result.update(medians)
         peer_median_ps = result["peer_median_ps"]
         peer_median_pe = result["peer_median_pe"]
@@ -902,9 +920,12 @@ class PeerComparableAnalyzer:
             peer_scr = 0
         result["peer_score"] = peer_scr
 
-        result["valuation_position"] = _calc_valuation_position(
-            company_ps, peer_median_ps, scarcity, result["relative_ps_premium_pct"]
-        )
+        if len(quantitative_peers) < 2:
+            result["valuation_position"] = "样本不足，仅作定性参考"
+        else:
+            result["valuation_position"] = _calc_valuation_position(
+                company_ps, peer_median_ps, scarcity, result["relative_ps_premium_pct"]
+            )
 
         # 11. 总结
         try:
@@ -922,15 +943,15 @@ class PeerComparableAnalyzer:
 
         # 12. 警告
         if result["peer_ps_count"] == 0:
-            result["warnings"].append("缺少同行的PS数据，无法计算相对估值")
+            result["warnings"].append("quantitative peers 缺少有效PS数据")
         if company_ps is None:
             result["warnings"].append("公司PS不可用，相对估值仅做定性参考")
         if result["peer_ps_count"] < 2:
-            result["warnings"].append("同行样本量不足，中位数参考价值有限")
+            result["warnings"].append("quantitative peers 样本量不足，中位数参考价值有限")
         rev = prospectus_info.get("revenue")
         if _is_num(rev) and rev < 500 and matched_sector in ("healthcare", "hardtech"):
             result["warnings"].append("收入基数小，PS可能失真，需结合管线/技术阶段/平台价值判断")
-            if result["valuation_position"] not in ("缺失",):
+            if result["valuation_position"] not in ("缺失", "样本不足，仅作定性参考"):
                 result["valuation_position"] = f"PS辅助({result['valuation_position']})"
 
         if self.meta.get("peer_data_is_stale"):

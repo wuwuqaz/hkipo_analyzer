@@ -422,7 +422,9 @@ class DetailView:
 
         pc_subsector = pc.get("subsector")
         pc_peers = pc.get("matched_peers", [])
-        if not pc_subsector or not pc_peers:
+        extracted_comps = pc.get("extracted_competitors", [])
+        unmatched_candidates = pc.get("unmatched_peer_candidates", [])
+        if not pc_subsector or (not pc_peers and not extracted_comps and not unmatched_candidates):
             return
 
         pc_company_ps = pc.get("company_ps")
@@ -435,6 +437,8 @@ class DetailView:
         pc_position = pc.get("valuation_position", "缺失")
         pc_summary = pc.get("summary", "")
         pc_warnings = pc.get("warnings", [])
+        quantitative_peers = pc.get("quantitative_peers", [])
+        qualitative_peers = pc.get("qualitative_peers", [])
 
         pc_html_parts = [
             f'<div style="margin-bottom:8px;"><b>细分赛道:</b> {self.html.escape(str(pc_subsector).replace("_", " / "))}</div>'
@@ -479,6 +483,11 @@ class DetailView:
             "PS辅助（明显偏贵）": ("PS辅助(偏贵，收入基数小)", "yellow"),
             "PS辅助(偏高但稀缺赛道)": ("PS辅助(偏高但赛道稀缺)", "yellow"),
             "PS辅助（偏高但稀缺赛道）": ("PS辅助(偏高但赛道稀缺)", "yellow"),
+            "样本不足，仅作定性参考": ("样本不足，仅作定性参考", "gray"),
+            "PS辅助估值": ("PS辅助估值", "yellow"),
+            "PS失真，仅作参考": ("PS失真，仅作参考", "yellow"),
+            "管线阶段估值": ("管线阶段估值", "yellow"),
+            "数据不足，需人工核对": ("数据不足，需人工核对", "gray"),
         }
         pos_label, pos_color = position_map.get(pc_position, (pc_position, "gray"))
         pc_html_parts.append(
@@ -515,14 +524,26 @@ class DetailView:
                 f'<div style="margin-top:8px;"><b>可比公司 ({len(pc_peers_short)}家):</b></div>{peer_rows}'
             )
 
+        # quantitative / qualitative 区分展示
+        if quantitative_peers or qualitative_peers:
+            q_rows = ""
+            for p in quantitative_peers[:6]:
+                q_rows += f'<div style="font-size:12px;color:#475569;">• {self.html.escape(p.get("name", ""))} (quantitative)</div>'
+            for p in qualitative_peers[:4]:
+                q_rows += f'<div style="font-size:12px;color:#94a3b8;">• {self.html.escape(p.get("name", ""))} (qualitative)</div>'
+            if q_rows:
+                pc_html_parts.append(
+                    f'<div style="margin-top:8px;font-size:12px;color:#64748b;">'
+                    f'<b>quantitative peers:</b> 参与估值中位数计算；<b>qualitative peers:</b> 仅作定性参考'
+                    f'</div>{q_rows}'
+                )
+
         for w in pc_warnings:
             pc_html_parts.append(
                 f'<div style="font-size:12px;color:#f87171;margin-top:4px;">⚠️ {self.html.escape(w)}</div>'
             )
 
         # 招股书提及的同行候选
-        extracted_comps = pc.get("extracted_competitors", [])
-        unmatched_candidates = pc.get("unmatched_peer_candidates", [])
         if extracted_comps:
             names = "、".join(self.html.escape(n) for n in extracted_comps[:10])
             pc_html_parts.append(
@@ -534,8 +555,10 @@ class DetailView:
             names = "、".join(self.html.escape(n) for n in unmatched_candidates[:8])
             pc_html_parts.append(
                 f'<div style="font-size:12px;color:#b45309;margin-top:4px;">'
-                f'🔍 招股书竞争/行业章节疑似提及但本地同行库未收录: {names}'
-                f'</div>'
+                f'🔍 招股书提及但本地同行库未收录: {names}'
+                f'<div style="font-size:11px;color:#94a3b8;margin-top:2px;">'
+                f'（不参与估值中位数，仅供人工维护同行库）'
+                f'</div></div>'
             )
 
         st.markdown(
@@ -551,21 +574,21 @@ class DetailView:
 
         dl_col1, dl_col2 = st.columns(2)
         with dl_col1:
-            if st.button("📄 下载PDF报告", key=f"pdf_{ipo.get('hk_code', 'x')}", width="stretch"):
+            if st.button("📄 下载PDF报告", key=f"pdf_{ipo.get('hk_code', 'x')}", use_container_width=True):
                 try:
                     pdf_path = generate_pdf_report([ipo], TEMP_DIR)
                     pdf_name = os.path.basename(pdf_path)
                     pdf_data = read_file_bytes_and_remove(pdf_path)
-                    st.download_button("⬇️ 点击下载PDF", pdf_data, pdf_name, "application/pdf", width="stretch")
+                    st.download_button("⬇️ 点击下载PDF", pdf_data, pdf_name, "application/pdf", use_container_width=True)
                 except Exception as e:
                     st.error(f"PDF生成失败: {e}")
         with dl_col2:
-            if st.button("📋 下载JSON数据", key=f"json_{ipo.get('hk_code', 'x')}", width="stretch"):
+            if st.button("📋 下载JSON数据", key=f"json_{ipo.get('hk_code', 'x')}", use_container_width=True):
                 try:
                     json_path = save_json_report([ipo], TEMP_DIR)
                     json_name = os.path.basename(json_path)
                     json_data = read_file_bytes_and_remove(json_path)
-                    st.download_button("⬇️ 点击下载JSON", json_data, json_name, "application/json", width="stretch")
+                    st.download_button("⬇️ 点击下载JSON", json_data, json_name, "application/json", use_container_width=True)
                 except Exception as e:
                     st.error(f"JSON保存失败: {e}")
 

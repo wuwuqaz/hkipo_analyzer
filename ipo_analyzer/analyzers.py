@@ -86,15 +86,23 @@ class ValuationAnalyzer:
                 fx = 1.0
 
             revenue = None
+            net_profit_hkd = None
+            adjusted_profit_hkd = None
             if _is_num(revenue_raw):
                 revenue = round(revenue_raw * fx, 2)
+            if _is_num(net_profit):
+                net_profit_hkd = round(net_profit * fx, 2)
+            if _is_num(adjusted_profit):
+                adjusted_profit_hkd = round(adjusted_profit * fx, 2)
             result['revenue_hkd_million'] = revenue
+            result['net_profit_hkd_million'] = net_profit_hkd
+            result['adjusted_profit_hkd_million'] = adjusted_profit_hkd
             result['market_cap_hkd_million'] = market_cap_m
 
-            if _is_num(market_cap_m) and _is_num(net_profit) and net_profit > 0:
-                result['pe_ratio'] = round(market_cap_m / net_profit, 2)
-            if _is_num(market_cap_m) and _is_num(adjusted_profit) and adjusted_profit > 0:
-                result['adjusted_pe_ratio'] = round(market_cap_m / adjusted_profit, 2)
+            if _is_num(market_cap_m) and _is_num(net_profit_hkd) and net_profit_hkd > 0:
+                result['pe_ratio'] = round(market_cap_m / net_profit_hkd, 2)
+            if _is_num(market_cap_m) and _is_num(adjusted_profit_hkd) and adjusted_profit_hkd > 0:
+                result['adjusted_pe_ratio'] = round(market_cap_m / adjusted_profit_hkd, 2)
             if _is_num(offer_price) and _is_num(nta_per_share) and nta_per_share > 0:
                 result['pb_ratio'] = round(offer_price / nta_per_share, 2)
             if _is_num(market_cap_m) and _is_num(revenue) and revenue > 0:
@@ -240,6 +248,23 @@ class ValuationAnalyzer:
             else:
                 final_label = absolute_label
 
+            # 未盈利/生物科技细化标签
+            if _is_num(net_profit) and net_profit <= 0:
+                if _is_num(revenue) and revenue > 0:
+                    if revenue < SETTINGS.valuation.biotech_revenue_small:
+                        final_label = "PS失真，仅作参考"
+                    else:
+                        final_label = "PS辅助估值"
+                elif is_biotech:
+                    final_label = "管线阶段估值"
+                else:
+                    final_label = "数据不足，需人工核对"
+            elif not _is_num(net_profit) and not _is_num(revenue):
+                if is_biotech:
+                    final_label = "管线阶段估值"
+                else:
+                    final_label = "数据不足，需人工核对"
+
             if relative_label and relative_label != '缺失' and not is_biotech:
                 if absolute_label in ('很贵',) and relative_label in ('合理', '相对低估', '偏贵但可解释'):
                     final_label = '偏贵但可解释'
@@ -268,6 +293,8 @@ class ValuationAnalyzer:
                 reasons.append(f"PS {ps_val:.1f}x")
             if result.get('market_cap_to_rd_ratio') is not None and is_biotech:
                 reasons.append(f"市值/R&D {result['market_cap_to_rd_ratio']:.1f}x")
+            if result.get('cash_runway_years') is not None:
+                reasons.append(f"现金runway {result['cash_runway_years']:.1f}年")
 
             revenue_y1 = prospectus_info.get('revenue_y1')
             if _is_num(revenue) and _is_num(revenue_y1) and revenue_y1 > 0:

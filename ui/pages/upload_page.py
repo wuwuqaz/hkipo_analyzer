@@ -36,7 +36,7 @@ class UploadPage:
             stock_code = st.text_input("股票代码（可选）", "", placeholder="如 01236")
             company_name = st.text_input("公司名称（可选）", "", placeholder="如 乐动机器人")
 
-        if uploaded_file and st.button("🔍 开始分析", type="primary", width="stretch"):
+        if uploaded_file and st.button("🔍 开始分析", type="primary", use_container_width=True):
             from ui.utils.file_utils import MAX_UPLOAD_SIZE_MB
 
             if uploaded_file.size > MAX_UPLOAD_SIZE_MB * 1024 * 1024:

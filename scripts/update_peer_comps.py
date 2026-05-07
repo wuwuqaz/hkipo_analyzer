@@ -92,10 +92,12 @@ def main():
 
 
 def _print_batch_summary(r, dry_run):
-    action_label = "预览可更新" if dry_run else "已更新"
     print(f"\n=== 更新摘要 ===")
     print(f"  总处理: {r.get('total', 0)}")
-    print(f"  {action_label}: {r['updated']}")
+    if dry_run:
+        print(f"  已预览: {r.get('previewed', 0)}")
+    else:
+        print(f"  已写入: {r['updated']}")
     print(f"  跳过(private): {r['skipped_private']}")
     print(f"  失败: {r['failed']}")
     if r.get("stale_count"):

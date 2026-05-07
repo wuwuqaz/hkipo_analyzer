@@ -54,7 +54,7 @@ class HistoryPage:
         else:
             df = pd.DataFrame(rows)
             df = df.drop(columns=["_score_num"])
-            st.dataframe(df, width="stretch", hide_index=True, height=min(420, len(df) * 40 + 50))
+            st.dataframe(df, use_container_width=True, hide_index=True, height=min(420, len(df) * 40 + 50))
 
             st.markdown('<div class="section-card">', unsafe_allow_html=True)
             st.markdown('<div class="section-title">📋 选择历史IPO查看详情</div>', unsafe_allow_html=True)
@@ -72,7 +72,7 @@ class HistoryPage:
                 export_payload,
                 "ipo_history.json",
                 "application/json",
-                width="stretch",
+                use_container_width=True,
             )
 
             if selected:
