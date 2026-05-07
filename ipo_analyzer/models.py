@@ -554,8 +554,16 @@ class IPOData:
     score_reasons: list[str] = field(default_factory=list)
     score_breakdown: dict[str, ScoreBreakdownComponent] = field(default_factory=dict)
     risk_penalty: int = 0
+    # 新五维评分（0.4.0-alpha）
+    trade_score: int = 0
+    valuation_score: int = 0
+    theme_score: int = 0
+    data_quality_score: int = 0
+    # 兼容旧字段（deprecated）
     advanced_framework_score: int = 0
     advanced_score_adjustment: int = 0
+    # 交易信号拆解（供 UI 展示）
+    signal_breakdown: dict[str, Any] = field(default_factory=dict)
 
     # 解析元信息
     pdf_downloaded: bool = False

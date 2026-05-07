@@ -60,17 +60,20 @@ hkipo_analyzer/
 └── temp/                           # 临时文件 / 缓存 / 输出
 ```
 
-## 评分体系
+## 评分体系（0.4.0-alpha 已重构）
 
-最终评分 = 申购热度 x 0.35 + 基本面 x 0.45 + 基础分(20) + 调整项
+最终评分 = trade_score × 0.35 + fundamental_score × 0.30 + valuation_score × 0.20 + theme_score × 0.10 + data_quality_score × 0.05 − risk_penalty
 
-### 调整项
-
-| 类型 | 范围 | 说明 |
+| 维度 | 权重 | 说明 |
 |------|------|------|
-| 风险扣分 | 0~-20 | 招股书风险因子 + VBP + 客户集中度 |
-| 进阶框架 | -10~+10 | 7维度框架（真实资金/筹码/基石/估值/主线/入通/数据质量） |
-| **同行估值调整** | **-5~+6** | **0.2新增：基于同行对比评分的估值修正** |
+| **trade_score** | 35% | 孖展、超购、集资规模、筹码结构（含 real_money + float_structure） |
+| **fundamental_score** | 30% | 收入、毛利率、盈利、现金流、客户集中度、研发/管线 |
+| **valuation_score** | 20% | PE/PS/PB、同行估值、未盈利专项估值（市值/R&D、现金runway） |
+| **theme_score** | 10% | 主线候选、赛道稀缺性、港股通路径（最多贡献约 5 分） |
+| **data_quality_score** | 5% | 解析置信度；同时作为 confidence_gate，数据差时限制总分上限 |
+| **risk_penalty** | − | 招股书风险因子 + VBP + 客户集中度 |
+
+> **注意**：旧版「进阶框架 100分」独立卡片已废弃（`advanced_framework_score` 仍保留兼容输出，但不再作为独立主指标）。7 个维度拆分为「交易信号拆解」展示，每项显示 强/中/弱/缺失。
 
 ## 估值逻辑（0.4 当前）
 
@@ -90,11 +93,14 @@ hkipo_analyzer/
 ## 更新日志
 
 ### 0.4.0-alpha — 2026-05-07
+- **refactor: 进阶框架拆分为交易信号拆解**：`AdvancedIPOFrameworkAnalyzer` 重命名为 `SignalComponentAnalyzer`，不再输出独立 100 分主指标；新增 `signal_breakdown` 字段供 UI 展示（资金热度/筹码弹性/基石质量/估值解释/主题催化/港股通路径/数据置信度）
+- **refactor: ScoringSystem.calculate 新五维权重**：`trade_score×0.35 + fundamental_score×0.30 + valuation_score×0.20 + theme_score×0.10 + data_quality_score×0.05 − risk_penalty`；`advanced_score_adjustment` 已废弃（固定为 0）
+- **feat: 未盈利 biotech 特殊处理**：PE 显示"PE不适用"；估值框架显示"PS辅助/管线估值/市值-R&D/现金runway"；收入极小时禁止 PS 单独拉高/拉低分；同行样本不足时仅显示"定性参考"
 - **fix: dataclass 字段同步**：ValuationResult 新增 `net_profit_hkd_million`、`adjusted_profit_hkd_million`、`financial_currency`；PeerComparisonResult 新增 `quantitative_peers`、`qualitative_peers`、`quantitative_peer_count`、`qualitative_peer_count`、`peer_sample_warning`
 - **fix: peer_comps.py quantitative/qualitative 分层**：`_split_peer_samples` 提取为独立函数，median 和 premium 仅使用 quantitative peers；少于 2 家时不输出强相对估值结论
 - **fix: 未盈利公司估值展示**：detail_view.py 中亏损公司 PE 显示"PE不适用"，增加估值框架、市值/R&D、现金runway、临床阶段展示
 - **fix: 统一 dry-run/write 统计**：peer_data.py、update_peer_comps.py、peer_admin_page.py 统一返回 `total/processed/previewed/updated/skipped/failed/details`
-- **feat: 新增 tests/test_regression_cases.py**：5 个回归测试覆盖 alias 过滤、quantitative 分层、样本不足、未盈利标签、字段持久化
+- **feat: 新增 tests/test_regression_cases.py**：8 个回归测试覆盖 alias 过滤、quantitative 分层、样本不足、未盈利标签、字段持久化、信号拆解、新权重、进阶框架废弃
 
 ### 0.3.0-alpha — 2026-05-06
 - **fix: 基础依赖隔离**：`__init__.py` 不再 eager import parser/core/report 等重模块，`import ipo_analyzer` 不再触发 PyPDF2

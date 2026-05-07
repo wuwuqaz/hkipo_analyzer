@@ -32,6 +32,7 @@ class DetailView:
         self._render_header(ipo)
         self._render_prospectus_warning(has_prospectus, key_financials_empty)
         self._render_metrics(ipo)
+        self._render_signal_breakdown(ipo)
         self._render_score_reasons(ipo)
         self._render_diagnosis(ipo)
         self._render_warnings(ipo, key_financials_empty)
@@ -75,8 +76,6 @@ class DetailView:
             st.warning("⚠️ 未成功解析招股书，当前评分仅基于孖展/默认值，不能用于判断基本面。")
 
     def _render_metrics(self, ipo: dict) -> None:
-        pi = ipo.get("prospectus_info", {}) or {}
-        af = pi.get("advanced_framework", {}) or {}
         score = ipo.get('score', 0)
 
         cols = st.columns(5)
@@ -84,8 +83,8 @@ class DetailView:
             ("总评分", f"{score}/100", "", score_class(score)),
             ("申购热度", f"{ipo.get('subscription_score', 0)}/100", "", score_class(ipo.get('subscription_score', 0))),
             ("基本面", f"{ipo.get('fundamental_score', 0)}/100", "", score_class(ipo.get('fundamental_score', 0))),
+            ("估值面", f"{ipo.get('valuation_score', 0)}/100", "", score_class(ipo.get('valuation_score', 0))),
             ("风险扣分", f"-{ipo.get('risk_penalty', 0)}", "", "score-poor" if ipo.get('risk_penalty', 0) > 5 else ""),
-            ("进阶框架", f"{af.get('score', 0)}/100", "", score_class(af.get('score', 0))),
         ]
         self.html.metric_card_st(cols, metrics)
 
@@ -96,6 +95,55 @@ class DetailView:
         <div class="section-card">
             <div class="section-title">📝 评分理由</div>
             {chips_html}
+        </div>
+        """, unsafe_allow_html=True)
+
+    def _render_signal_breakdown(self, ipo: dict) -> None:
+        sb = ipo.get("signal_breakdown") or {}
+        if not sb:
+            # 尝试从旧结构回退
+            pi = ipo.get("prospectus_info", {}) or {}
+            af = pi.get("advanced_framework") or {}
+            sb = af.get("signal_breakdown", {})
+        if not sb:
+            return
+
+        items = [
+            ("real_money", "资金热度", "🔥"),
+            ("float_structure", "筹码弹性", "📊"),
+            ("cornerstone_quality", "基石质量", "🏛️"),
+            ("valuation_reading", "估值解释", "📈"),
+            ("theme_bonus", "主题催化", "🚀"),
+            ("liquidity_bonus", "港股通路径", "🌐"),
+            ("data_confidence", "数据置信度", "🛡️"),
+        ]
+
+        rows_html = ""
+        for key, title, emoji in items:
+            item = sb.get(key, {})
+            strength = item.get("strength", "缺失")
+            detail = item.get("detail", "")
+            color = "#94a3b8"
+            if strength in ("强", "高"):
+                color = "#16a34a"
+            elif strength == "中":
+                color = "#d97706"
+            elif strength in ("弱", "低"):
+                color = "#dc2626"
+            rows_html += (
+                f'<div style="display:flex;justify-content:space-between;align-items:center;'
+                f'padding:8px 0;border-bottom:1px solid #f1f5f9;">'
+                f'<div style="font-size:14px;color:#334155;"><b>{emoji} {title}</b></div>'
+                f'<div style="text-align:right;">'
+                f'<div style="font-size:14px;font-weight:700;color:{color};">{strength}</div>'
+                f'<div style="font-size:12px;color:#64748b;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'
+                f'{self.html.escape(detail)}</div></div></div>'
+            )
+
+        st.markdown(f"""
+        <div class="section-card">
+            <div class="section-title">📡 交易信号拆解</div>
+            {rows_html}
         </div>
         """, unsafe_allow_html=True)
 
@@ -200,7 +248,7 @@ class DetailView:
             ("技术壁垒", f"{rnd.get('pipeline_quality_label', '--')} ({rnd.get('technology_moat_score', 0)}/10)"),
             ("产能利用率", self.fmt.format_percentage(cap.get('utilization_rate'))),
             ("风险扣分", str(risk.get('total_penalty', 0))),
-            ("估值框架", val.get('valuation_framework_type') or '--'),
+            ("估值框架", self._render_valuation_framework_label(ipo, val)),
             ("市值/R&D", self.fmt.format_number(val.get('market_cap_to_rd_ratio'), 'x')),
             ("现金runway", f"{val.get('cash_runway_years', '--')}年" if val.get('cash_runway_years') is not None else '--'),
             ("临床阶段", val.get('latest_clinical_stage') or '--'),
@@ -232,6 +280,23 @@ class DetailView:
             st.warning("⚠️ 收入基数极小，PS严重失真，仅作参考，需结合管线/技术阶段/平台价值判断")
         if pc.get("peer_sample_warning"):
             st.info(f"ℹ️ {pc['peer_sample_warning']}")
+
+    def _render_valuation_framework_label(self, ipo: dict, val: dict) -> str:
+        """未盈利 biotech 显示更友好的估值框架标签"""
+        # 优先使用 signal_breakdown 中的估值解释
+        sb = ipo.get('signal_breakdown') or {}
+        if not sb:
+            pi = ipo.get('prospectus_info', {}) or {}
+            af = pi.get('advanced_framework') or {}
+            sb = af.get('signal_breakdown', {})
+        val_reading = sb.get('valuation_reading', {})
+        if val_reading.get('label'):
+            return val_reading['label']
+        # 回退到 valuation 标签
+        vtype = val.get('valuation_framework_type')
+        if vtype == '18A_biotech':
+            return val.get('valuation_label') or '18A biotech'
+        return vtype or val.get('valuation_label') or '--'
 
     def _render_rd_ratio(self, rnd: dict) -> str:
         rd_ratio = rnd.get('rd_expense_ratio')

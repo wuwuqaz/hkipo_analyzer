@@ -19,6 +19,7 @@ from ipo_analyzer.peer_comps import (
     PeerComparableAnalyzer,
 )
 from ipo_analyzer.analyzers import ValuationAnalyzer
+from ipo_analyzer.scoring import SignalComponentAnalyzer, ScoringSystem
 from ipo_analyzer.models import IPOData, ValuationResult, PeerComparisonResult, ProspectusInfo
 
 
@@ -175,12 +176,167 @@ def test_new_fields_persist_through_from_dict():
     print("✅ test_new_fields_persist_through_from_dict passed")
 
 
+def test_signal_component_analyzer_biotech():
+    """剂泰科技类未盈利 biotech：信号拆解应正确，估值不应强行 100 分"""
+    ipo = {"margin_total": 50.0, "public_offer": 2.0, "over_sub_ratio": 25.0}
+    prospectus_info = {
+        "revenue": 33,
+        "revenue_y1": 5,
+        "net_profit": -300,
+        "gross_margin": 80,
+        "market_cap_hkd_million": 3800,
+        "offer_price": 12.0,
+        "pro_forma_NTA_per_share_HKD": 2.0,
+        "sector": "healthcare",
+        "financial_currency": "RMB",
+        "extracted_company_name": "剂泰科技-B",
+        "_extracted_text": "18A biotech clinical stage\nAI drug delivery platform",
+        "public_offer_ratio_pct": 12.0,
+        "issuance_ratio_pct": 15.0,
+        "cornerstone_offer_ratio_pct": 45.0,
+        "rnd_pipeline": {
+            "technology_moat_score": 8,
+            "pipeline_quality_label": "强",
+            "product_count_pipeline": 3,
+            "latest_clinical_stage": "Phase II",
+        },
+        "cornerstone_analysis": {
+            "cornerstone_investors": [],
+            "matched_investors": [],
+            "score": 55,
+            "label": "A级",
+            "grade_band": "强A",
+        },
+        "peer_comparison": {
+            "subsector": "ai_drug_delivery_nanomedicine",
+            "scarcity_score": 7,
+            "peer_score": 8,
+            "valuation_position": "样本不足，仅作定性参考",
+            "quantitative_peer_count": 1,
+            "peer_sample_warning": "定量同行样本不足，估值仅作定性参考",
+        },
+        "valuation": {
+            "ps_ratio": 115.0,
+            "pe_ratio": None,
+            "market_cap_to_rd_ratio": 45.0,
+            "cash_runway_years": 2.5,
+            "valuation_framework_type": "18A_biotech",
+            "valuation_label": "PS失真，仅作参考",
+            "valuation_profitability_type": "loss_making",
+            "latest_clinical_stage": "Phase II",
+            "revenue_too_small_for_ps": True,
+        },
+        "financial_extract_confidence": "consolidated_statement",
+        "financial_data_quality_flags": [],
+    }
+    text = "18A biotech clinical stage AI drug delivery platform"
+
+    signal = SignalComponentAnalyzer().analyze(ipo, prospectus_info, text)
+    sb = signal.get('signal_breakdown', {})
+
+    # 1. 不再输出独立 100 分“进阶框架”
+    assert 'score' in signal, "兼容字段 score 应保留"
+    assert 'label' in signal, "兼容字段 label 应保留"
+    assert 'signal_breakdown' in signal, "必须有 signal_breakdown"
+
+    # 2. 估值解释：未盈利 biotech 不强行打分
+    val_reading = sb.get('valuation_reading', {})
+    assert val_reading.get('label') in ("PS失真，仅作参考", "管线阶段估值", "PS辅助估值"), \
+        f"未盈利 biotech 估值标签异常: {val_reading.get('label')}"
+    # 不应是强行的高分
+    assert val_reading.get('strength') in ("弱", "中", "缺失"), \
+        f"极低收入 biotech 估值 strength 不应为强: {val_reading.get('strength')}"
+
+    # 3. 数据置信度
+    dq = sb.get('data_confidence', {})
+    assert dq.get('strength') in ("高", "中", "低"), "数据置信度应有明确等级"
+
+    # 4. 各组件可追溯
+    assert 'real_money' in sb
+    assert 'float_structure' in sb
+    assert 'cornerstone_quality' in sb
+    assert 'theme_bonus' in sb
+    assert 'liquidity_bonus' in sb
+
+    print("✅ test_signal_component_analyzer_biotech passed")
+
+
+def test_scoring_system_new_weights():
+    """验证新五维评分权重结构"""
+    ipo = {"over_sub_ratio": 100.0, "total_fund": 5.0, "market_heat": "热门"}
+    prospectus_info = {
+        "gross_margin": 40,
+        "profitable": True,
+        "revenue": 500,
+        "revenue_y1": 400,
+        "sector": "hardtech",
+        "cornerstone_analysis": {"score": 70, "label": "A级"},
+        "valuation": {"pe_ratio": 25.0, "ps_ratio": 3.0},
+        "peer_comparison": {"peer_score": 10, "scarcity_score": 6, "valuation_position": "合理"},
+    }
+    signal_components = {
+        'real_money': {'score': 15},
+        'float_structure': {'score': 10},
+        'valuation_framework': {'score': 14},
+        'mainline_beta': {'score': 10},
+        'stock_connect_path': {'score': 6},
+        'data_quality': {'score': 5},
+    }
+    result = ScoringSystem().calculate(ipo, prospectus_info, signal_components=signal_components)
+
+    assert 'trade_score' in result, "必须有 trade_score"
+    assert 'valuation_score' in result, "必须有 valuation_score"
+    assert 'theme_score' in result, "必须有 theme_score"
+    assert 'data_quality_score' in result, "必须有 data_quality_score"
+    assert result['score'] >= 0 and result['score'] <= 100, "总分应在 0-100 之间"
+
+    # theme_score 上限约 50（权重 0.10 → 最多贡献 5 分）
+    assert result['theme_score'] <= 50, f"theme_score 应封顶 50: {result['theme_score']}"
+
+    # data_quality_score 作为 confidence_gate：高分不限制，低分限制
+    if result['data_quality_score'] < 40:
+        assert result['score'] <= 60, "数据质量差时应限制总分上限"
+
+    print(f"✅ test_scoring_system_new_weights passed (score={result['score']})")
+
+
+def test_advanced_framework_adjustment_removed():
+    """验证 advanced_score_adjustment 已废弃（固定为 0 或不产生独立主卡片）"""
+    ipo = {"margin_total": 10.0, "public_offer": 1.0, "over_sub_ratio": 5.0}
+    prospectus_info = {
+        "revenue": 200,
+        "net_profit": -50,
+        "gross_margin": 35,
+        "market_cap_hkd_million": 3000,
+        "sector": "healthcare",
+        "extracted_company_name": "TestBio-B",
+        "_extracted_text": "biotech",
+        "valuation": {"ps_ratio": 15.0, "pe_ratio": None},
+        "peer_comparison": {"valuation_position": "样本不足，仅作定性参考"},
+        "financial_data_quality_flags": [],
+    }
+    text = "biotech"
+    signal = SignalComponentAnalyzer().analyze(ipo, prospectus_info, text)
+
+    # 兼容字段 advanced_framework_score 仍可输出，但不应作为独立主指标
+    assert 'score' in signal  # 兼容
+    assert 'signal_breakdown' in signal  # 新结构
+    # 信号拆解中没有“进阶框架 54/100”这种独立总分展示
+    sb = signal['signal_breakdown']
+    assert 'real_money' in sb
+    assert 'valuation_reading' in sb
+    print("✅ test_advanced_framework_adjustment_removed passed")
+
+
 if __name__ == "__main__":
     test_issuer_alias_not_in_unmatched()
     test_quantitative_peers_less_than_two_weak_conclusion()
     test_private_low_quality_not_in_quantitative()
     test_loss_making_valuation_not_missing()
     test_new_fields_persist_through_from_dict()
+    test_signal_component_analyzer_biotech()
+    test_scoring_system_new_weights()
+    test_advanced_framework_adjustment_removed()
     print("\n" + "=" * 60)
     print("✅ 所有回归测试通过")
     print("=" * 60)

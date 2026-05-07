@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 from ipo_analyzer.peer_comps import PeerComparableAnalyzer
 from ipo_analyzer.analyzers import ValuationAnalyzer, BusinessBreakdownAnalyzer
-from ipo_analyzer.scoring import AdvancedIPOFrameworkAnalyzer, ScoringSystem, ProspectusQualityAnalyzer
+from ipo_analyzer.scoring import SignalComponentAnalyzer, ScoringSystem, ProspectusQualityAnalyzer
 from ipo_analyzer.utils import _is_num
 
 
@@ -107,7 +107,7 @@ def test_robot_comparison():
     print(f"估值理由: {val.get('valuation_reasons', [])}")
 
     # 进阶框架
-    adv = AdvancedIPOFrameworkAnalyzer()
+    adv = SignalComponentAnalyzer()
     adv_result = adv.analyze(ipo, pi, text)
     val_comp = adv_result.get("components", {}).get("valuation_framework", {})
     print(f"\n进阶框架估值评分: {val_comp.get('score')}/{val_comp.get('max_score')}")
@@ -184,7 +184,7 @@ def test_biotech_comparison():
     print(f"估值理由: {val.get('valuation_reasons', [])}")
 
     # 进阶框架
-    adv = AdvancedIPOFrameworkAnalyzer()
+    adv = SignalComponentAnalyzer()
     adv_result = adv.analyze(ipo, pi, text)
     val_comp = adv_result.get("components", {}).get("valuation_framework", {})
     print(f"\n进阶框架估值评分: {val_comp.get('score')}/{val_comp.get('max_score')}")
@@ -239,7 +239,7 @@ def test_no_peer_match():
     print(f"估值理由: {val.get('valuation_reasons', [])}")
 
     # 进阶框架应回退
-    adv = AdvancedIPOFrameworkAnalyzer()
+    adv = SignalComponentAnalyzer()
     adv_result = adv.analyze(ipo, pi, text)
     val_comp = adv_result.get("components", {}).get("valuation_framework", {})
     print(f"进阶框架估值评分: {val_comp.get('score')}/{val_comp.get('max_score')}")
@@ -274,7 +274,7 @@ def test_incremental_analysis():
 
     scorer = ScoringSystem()
     qa = ProspectusQualityAnalyzer()
-    adv = AdvancedIPOFrameworkAnalyzer()
+    adv = SignalComponentAnalyzer()
 
     _calculate_final_score(scorer, qa, adv, ipo, pi, text)
 

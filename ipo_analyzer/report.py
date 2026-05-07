@@ -389,67 +389,65 @@ def export_pdf_report(results, output_file):
             ]))
             return tbl
 
-        def build_advanced_framework_table(ipo):
-            prospectus_info = ipo.get('prospectus_info', {}) or {}
-            advanced = prospectus_info.get('advanced_framework') or {}
-            components = advanced.get('components') or {}
-            if not advanced or not components:
+        def build_signal_breakdown_table(ipo):
+            """交易信号拆解表（替代旧版进阶框架表）"""
+            signal_breakdown = ipo.get('signal_breakdown') or {}
+            if not signal_breakdown:
+                # 回退到旧结构（兼容缓存数据）
+                prospectus_info = ipo.get('prospectus_info', {}) or {}
+                advanced = prospectus_info.get('advanced_framework') or {}
+                if not advanced:
+                    return None
+                signal_breakdown = advanced.get('signal_breakdown', {})
+            if not signal_breakdown:
                 return None
 
             def short_text(value, limit=68):
                 text = str(value or '--')
                 return text if len(text) <= limit else text[:limit - 3] + '...'
 
-            component_labels = [
-                ('real_money', '真实资金', _C['red']),
-                ('float_structure', '筹码结构', _C['blue']),
-                ('cornerstone_structure', '基石结构', _C['gold']),
-                ('valuation_framework', '估值范式', _C['amber']),
-                ('mainline_beta', '主线候选', _C['purple']),
-                ('stock_connect_path', '入通路径', _C['teal']),
-                ('data_quality', '数据校验', _C['green']),
+            # UI 展示名称映射
+            items = [
+                ('real_money', '资金热度', _C['red']),
+                ('float_structure', '筹码弹性', _C['blue']),
+                ('cornerstone_quality', '基石质量', _C['gold']),
+                ('valuation_reading', '估值解释', _C['amber']),
+                ('theme_bonus', '主题催化', _C['purple']),
+                ('liquidity_bonus', '港股通路径', _C['teal']),
+                ('data_confidence', '数据置信度', _C['green']),
             ]
 
-            score = advanced.get('score', 0)
-            adjustment = ipo.get('advanced_score_adjustment', 0)
             rows = [[
-                Paragraph("<b>进阶框架</b>", styles["TableHeader"]),
-                Paragraph(f"<b>{advanced.get('label', '--')} {score}/100</b>", styles["TableHeader"]),
-                Paragraph(f"<b>总分调整 {adjustment:+d}</b>", styles["TableHeader"]),
-            ], [
-                Paragraph("<b>模块</b>", styles["Label"]),
-                Paragraph("<b>结论</b>", styles["Label"]),
-                Paragraph("<b>说明</b>", styles["Label"]),
+                Paragraph("<b>交易信号拆解</b>", styles["TableHeader"]),
+                Paragraph("<b>强度</b>", styles["TableHeader"]),
+                Paragraph("<b>说明</b>", styles["TableHeader"]),
             ]]
             row_styles = [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_C['brand'])),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor(_C['slate_100'])),
             ]
 
-            for key, title, accent in component_labels:
-                component = components.get(key, {})
-                component_score = component.get('score', 0)
-                max_score = component.get('max_score', 0)
-                label = component.get('label', '--')
-                detail = short_text(component.get('detail', '--'))
+            for key, title, accent in items:
+                item = signal_breakdown.get(key, {})
+                strength = item.get('strength', '缺失')
+                detail = short_text(item.get('detail', '--'))
                 row_idx = len(rows)
+                strength_color = _C['slate_600']
+                if strength in ('强', '高'):
+                    strength_color = _C['green']
+                elif strength in ('中'):
+                    strength_color = _C['amber']
+                elif strength in ('弱', '低'):
+                    strength_color = _C['red']
                 rows.append([
                     Paragraph(f"<font color='{accent}'><b>{title}</b></font>", styles["Value"]),
-                    Paragraph(f"<b>{label}</b><br/><font size='7' color='{_C['slate_400']}'>{component_score}/{max_score}</font>", styles["Value"]),
+                    Paragraph(f"<font color='{strength_color}'><b>{strength}</b></font>", styles["Value"]),
                     Paragraph(detail, styles["MutedValue"]),
                 ])
-                if component.get('red_flags'):
+                if item.get('red_flags'):
                     row_styles.append(("BACKGROUND", (0, row_idx), (-1, row_idx), colors.HexColor(_C['red_bg'])))
 
-            hold_strategy = short_text(advanced.get('hold_strategy', '--'), limit=96)
-            rows.append([
-                Paragraph("<b>持有观察</b>", styles["Value"]),
-                Paragraph(advanced.get('confidence', '--'), styles["MutedValue"]),
-                Paragraph(hold_strategy, styles["MutedValue"]),
-            ])
-
-            tbl = Table(rows, colWidths=[82, 90, 328], hAlign="LEFT", repeatRows=2)
+            tbl = Table(rows, colWidths=[120, 80, 300], hAlign="LEFT", repeatRows=1)
             tbl.setStyle(TableStyle([
                 ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor(_C['slate_300'])),
                 ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor(_C['slate_200'])),
@@ -461,7 +459,7 @@ def export_pdf_report(results, output_file):
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
                 ("LEFTPADDING", (0, 0), (-1, -1), 6),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                ("ROWBACKGROUNDS", (0, 2), (-1, -1), [colors.white, colors.HexColor(_C['slate_50'])]),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(_C['slate_50'])]),
                 *row_styles,
             ]))
             return tbl
@@ -613,9 +611,9 @@ def export_pdf_report(results, output_file):
         ipo_elements.append(prospectus_info_table)
         ipo_elements.append(Spacer(1, 10))
 
-        advanced_framework_table = build_advanced_framework_table(ipo)
-        if advanced_framework_table:
-            ipo_elements.append(advanced_framework_table)
+        signal_breakdown_table = build_signal_breakdown_table(ipo)
+        if signal_breakdown_table:
+            ipo_elements.append(signal_breakdown_table)
             ipo_elements.append(Spacer(1, 10))
 
         breakdown = ipo.get('score_breakdown', {})

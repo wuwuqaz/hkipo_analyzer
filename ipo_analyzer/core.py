@@ -20,7 +20,7 @@ from .analyzers import (
     RnDPipelineAnalyzer,
     RiskFactorAnalyzer,
 )
-from .scoring import ProspectusQualityAnalyzer, AdvancedIPOFrameworkAnalyzer, ScoringSystem
+from .scoring import ProspectusQualityAnalyzer, SignalComponentAnalyzer, ScoringSystem
 from .peer_comps import PeerComparableAnalyzer
 from .report import export_pdf_report
 
@@ -170,7 +170,7 @@ def _fetch_margin_data(client, ipo, margin_detail=None):
     return ipo_data
 
 
-def _calculate_final_score(scorer, quality_analyzer, advanced_analyzer, ipo_data, prospectus_info, prospectus_text):
+def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, prospectus_info, prospectus_text):
     business_result = BusinessBreakdownAnalyzer().analyze(prospectus_text, prospectus_info)
     geographic_result = GeographicExpansionAnalyzer().analyze(prospectus_text, prospectus_info)
     customer_result = CustomerSupplierAnalyzer().analyze(prospectus_text, prospectus_info)
@@ -199,35 +199,36 @@ def _calculate_final_score(scorer, quality_analyzer, advanced_analyzer, ipo_data
     valuation_result = ValuationAnalyzer().analyze(prospectus_info, ipo_data)
     prospectus_info['valuation'] = valuation_result
 
-    advanced_result = advanced_analyzer.analyze(ipo_data, prospectus_info, prospectus_text)
-    prospectus_info['advanced_framework'] = advanced_result
+    signal_result = signal_analyzer.analyze(ipo_data, prospectus_info, prospectus_text)
+    prospectus_info['advanced_framework'] = signal_result  # 兼容旧字段
 
     stock_quality = quality_analyzer.analyze(prospectus_info)
-    scoring = scorer.calculate(ipo_data, prospectus_info)
+    scoring = scorer.calculate(ipo_data, prospectus_info, signal_components=signal_result.get('components'))
 
     risk_penalty = risk_result.get('total_penalty', 0)
     vbp_risk = business_result.get('vbp_risk_score', 0)
     conc_penalty = customer_result.get('concentration_score_penalty', 0)
     rf = SETTINGS.risk_factor
     total_risk_penalty = min(rf.max_total_penalty, risk_penalty + vbp_risk // 5 + conc_penalty)
-    advanced_score = advanced_result.get('score', 0)
-    advanced_adjustment = max(-rf.advanced_adjustment_range, min(rf.advanced_adjustment_range, round((advanced_score - rf.advanced_adjustment_center) / rf.advanced_adjustment_scale * rf.advanced_adjustment_range)))
-    data_quality = advanced_result.get('components', {}).get('data_quality', {})
-    if data_quality.get('red_flags'):
-        advanced_adjustment = min(0, advanced_adjustment)
 
-    adjusted_score = max(0, min(100, scoring['score'] + advanced_adjustment - total_risk_penalty))
+    final_score = max(0, min(100, scoring['score'] - total_risk_penalty))
 
-    ipo_data['score'] = adjusted_score
+    ipo_data['score'] = final_score
     ipo_data['subscription_score'] = scoring.get('subscription_score', 0)
     ipo_data['fundamental_score'] = stock_quality.get('score', scoring.get('fundamental_score', 0))
     ipo_data['score_reasons'] = scoring['reasons']
-    if advanced_adjustment:
-        ipo_data['score_reasons'].append(f"进阶框架调整 {advanced_adjustment:+d} 分")
     ipo_data['score_breakdown'] = scoring.get('components', {})
     ipo_data['risk_penalty'] = total_risk_penalty
-    ipo_data['advanced_framework_score'] = advanced_score
-    ipo_data['advanced_score_adjustment'] = advanced_adjustment
+    # 新五维分数
+    ipo_data['trade_score'] = scoring.get('trade_score', 0)
+    ipo_data['valuation_score'] = scoring.get('valuation_score', 0)
+    ipo_data['theme_score'] = scoring.get('theme_score', 0)
+    ipo_data['data_quality_score'] = scoring.get('data_quality_score', 0)
+    # 兼容旧字段（deprecated）
+    ipo_data['advanced_framework_score'] = signal_result.get('score', 0)
+    ipo_data['advanced_score_adjustment'] = 0  # 已废弃，固定为0
+    # 新字段
+    ipo_data['signal_breakdown'] = signal_result.get('signal_breakdown', {})
     ipo_data['prospectus_info'] = prospectus_info
     ipo_data['stock_quality'] = stock_quality
     for field in _PROSPECTUS_COPY_FIELDS:
@@ -236,7 +237,7 @@ def _calculate_final_score(scorer, quality_analyzer, advanced_analyzer, ipo_data
 
 
 def _init_analyzers():
-    return ScoringSystem(), ProspectusQualityAnalyzer(), AdvancedIPOFrameworkAnalyzer()
+    return ScoringSystem(), ProspectusQualityAnalyzer(), SignalComponentAnalyzer()
 
 
 def _process_ipo(client, downloader, parser, scorer, quality_analyzer, advanced_analyzer, ipo, output_dir, force_refresh=False):

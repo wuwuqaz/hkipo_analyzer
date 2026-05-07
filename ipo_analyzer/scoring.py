@@ -223,8 +223,34 @@ class ProspectusQualityAnalyzer:
             'dimensions': dimensions,
         }
 
-class AdvancedIPOFrameworkAnalyzer:
-    """把进阶打新方法论转成可自动化的辅助评分。"""
+class SignalComponentAnalyzer:
+    """交易信号拆解分析器（原 AdvancedIPOFrameworkAnalyzer）。
+
+    不再输出独立 100 分“进阶框架”，而是把 7 个维度拆成信号组件，
+    供主评分系统 (ScoringSystem) 统一加权。
+    """
+
+    # strength 映射辅助
+    @staticmethod
+    def _strength(score, max_score, high_ratio=0.6, mid_ratio=0.3):
+        if not max_score or score <= 0:
+            return '缺失'
+        ratio = score / max_score
+        if ratio >= high_ratio:
+            return '强'
+        if ratio >= mid_ratio:
+            return '中'
+        return '弱'
+
+    @staticmethod
+    def _data_confidence_level(score, max_score):
+        if score <= 0:
+            return '缺失'
+        if score >= max_score * 0.8:
+            return '高'
+        if score >= max_score * 0.4:
+            return '中'
+        return '低'
 
     SOVEREIGN_CAPITAL = [
         ("GIC", ["gic", "新加坡政府投资"]),
@@ -311,24 +337,83 @@ class AdvancedIPOFrameworkAnalyzer:
                 if reason and reason not in watch_items:
                     watch_items.append(reason)
 
+        # ---- 兼容旧结构：保留 score / label / components ----
         score = sum(component.get('score', 0) for component in components.values())
         vsl = SETTINGS.valuation_score
         if score >= vsl.advanced_high:
-            label = '进阶强信号'
+            legacy_label = '进阶强信号'
         elif score >= vsl.advanced_mid_high:
-            label = '进阶正向'
+            legacy_label = '进阶正向'
         elif score >= vsl.advanced_mid:
-            label = '进阶观察'
+            legacy_label = '进阶观察'
         else:
-            label = '进阶谨慎'
+            legacy_label = '进阶谨慎'
 
         confidence = 'mixed_rule_keyword' if components['mainline_beta'].get('confidence') == 'keyword_only' else 'rule_based'
         if red_flags:
             confidence = f'{confidence}_with_flags'
 
+        # ---- 新结构：signal_breakdown（供 UI 展示） ----
+        vm = components['valuation_framework']
+        valuation_label = vm.get('label', '')
+        # 未盈利 biotech：valuation strength 不纯看分数，看定性标签
+        is_biotech_unprofitable = (
+            prospectus_info.get('sector') == 'healthcare'
+            and prospectus_info.get('profitable') is False
+            and ('-b' in str(prospectus_info.get('extracted_company_name', '')).lower()
+                 or 'biotech' in str(prospectus_info.get('_extracted_text', '')).lower())
+        )
+        if is_biotech_unprofitable and valuation_label in ('缺失', '估值压力'):
+            # 如果 valuation_framework 返回缺失但实际有管线数据，提升到“中”
+            if prospectus_info.get('rnd_pipeline', {}).get('pipeline_quality_label'):
+                vm_strength = '中'
+            else:
+                vm_strength = '弱'
+        elif is_biotech_unprofitable:
+            vm_strength = '中'  # PS辅助/管线估值等统一视为“中”性信号
+        else:
+            vm_strength = self._strength(vm.get('score', 0), vm.get('max_score', 20))
+
+        signal_breakdown = {
+            'real_money': {
+                'strength': self._strength(components['real_money'].get('score', 0), 20),
+                'detail': components['real_money'].get('detail', ''),
+            },
+            'float_structure': {
+                'strength': self._strength(components['float_structure'].get('score', 0), 15),
+                'detail': components['float_structure'].get('detail', ''),
+                'float_signal': components['float_structure'].get('label', ''),
+            },
+            'cornerstone_quality': {
+                'strength': self._strength(components['cornerstone_structure'].get('score', 0), 15),
+                'detail': components['cornerstone_structure'].get('detail', ''),
+            },
+            'valuation_reading': {
+                'strength': vm_strength,
+                'detail': vm.get('detail', ''),
+                'label': valuation_label,
+            },
+            'theme_bonus': {
+                'strength': self._strength(components['mainline_beta'].get('score', 0), 15, high_ratio=0.67, mid_ratio=0.33),
+                'detail': components['mainline_beta'].get('detail', ''),
+            },
+            'liquidity_bonus': {
+                'strength': self._strength(components['stock_connect_path'].get('score', 0), 10, high_ratio=0.7, mid_ratio=0.4),
+                'detail': components['stock_connect_path'].get('detail', ''),
+            },
+            'data_confidence': {
+                'strength': self._data_confidence_level(components['data_quality'].get('score', 0), 5),
+                'detail': components['data_quality'].get('detail', ''),
+                'red_flags': components['data_quality'].get('red_flags', []),
+            },
+        }
+
         return {
+            # 新字段
+            'signal_breakdown': signal_breakdown,
+            # 兼容旧字段（deprecated）
             'score': int(self._clamp(score, 0, 100)),
-            'label': label,
+            'label': legacy_label,
             'components': components,
             'red_flags': red_flags,
             'watch_items': watch_items[:8],
@@ -542,9 +627,46 @@ class AdvancedIPOFrameworkAnalyzer:
         vt = SETTINGS.valuation
         vsl = SETTINGS.valuation_score
         pt = SETTINGS.peer_comps
+
+        # ---- 未盈利 biotech 识别 ----
+        name = str(prospectus_info.get('extracted_company_name', '') or '').lower()
+        is_biotech = (sector == 'healthcare' and ('-b' in name or 'biotech' in name))
+        is_unprofitable = _is_num(net_profit) and net_profit <= 0
+        is_low_rev_biotech = is_biotech and _is_num(revenue) and revenue < vt.biotech_revenue_small
+
         # ---- 绝对估值 (8分上限) ----
         abs_score = 0
-        if _is_num(pe) and pe > 0:
+        if is_low_rev_biotech:
+            # 极低收入 biotech：PE 不适用，PS 失真，改用管线/平台估值视角
+            reasons.append("未盈利 biotech，PE不适用")
+            if _is_num(ps):
+                # PS 只能给极低权重，防止拉高或拉低
+                abs_score = 2 if ps <= vt.ps_expensive else 1
+                reasons.append(f"PS {ps:.1f}x（收入基数极小，仅作参考）")
+            # 市值/R&D、现金runway 作为补充信号
+            mc_rd = valuation.get('market_cap_to_rd_ratio')
+            if _is_num(mc_rd):
+                if mc_rd <= 20:
+                    abs_score += 3
+                    reasons.append(f"市值/R&D {mc_rd:.1f}x，研发转化效率看起来合理")
+                elif mc_rd <= 50:
+                    abs_score += 2
+                    reasons.append(f"市值/R&D {mc_rd:.1f}x")
+                else:
+                    abs_score += 1
+                    reasons.append(f"市值/R&D {mc_rd:.1f}x，偏高")
+            runway = valuation.get('cash_runway_years')
+            if _is_num(runway):
+                if runway >= 2:
+                    abs_score += 2
+                    reasons.append(f"现金runway {runway:.1f}年，运营资金较充裕")
+                elif runway >= 1:
+                    abs_score += 1
+                    reasons.append(f"现金runway {runway:.1f}年")
+                else:
+                    red_flags.append(f"现金runway仅{runway:.1f}年，融资紧迫性高")
+            abs_score = min(6, abs_score)  # 未盈利 biotech 绝对估值上限 6
+        elif _is_num(pe) and pe > 0:
             if growth and growth > SETTINGS.valuation_score.peg_growth_min:
                 peg = pe / (growth * 100)
                 reasons.append(f"PEG约{peg:.2f}")
@@ -576,6 +698,7 @@ class AdvancedIPOFrameworkAnalyzer:
         peer_valuation_pos = peer_comparison.get('valuation_position', '缺失')
         scarcity = peer_comparison.get('scarcity_score', 0)
         premium = peer_comparison.get('relative_ps_premium_pct')
+        quant_count = peer_comparison.get('quantitative_peer_count', 0)
 
         is_overpriced = ('明显偏贵' in str(peer_valuation_pos) or
                          'PS辅助(明显偏贵)' in str(peer_valuation_pos))
@@ -587,15 +710,19 @@ class AdvancedIPOFrameworkAnalyzer:
             red_flags.append('相对同行PS溢价过高' if is_very_overpriced else '同行相对估值: 明显偏贵')
             if is_overpriced:
                 reasons.append(f'相对估值: {peer_valuation_pos}')
-        elif _is_num(peer_score_val) and peer_score_val > 0:
-            # peer_score 0-15, 映射到0-8分
+        elif _is_num(peer_score_val) and peer_score_val > 0 and quant_count >= 2:
+            # peer_score 0-15, 映射到0-8分；样本充足时才正常映射
             relative_score = min(pt.peer_map_max, round(peer_score_val / 15 * pt.peer_map_max))
             reasons.append(f"同行对比得分{peer_score_val}/15")
             if peer_valuation_pos and peer_valuation_pos != '缺失':
                 reasons.append(f"相对估值: {peer_valuation_pos}")
             if scarcity >= pt.scarcity_high:
                 reasons.append(f"稀缺赛道(scarcity={scarcity}/10)提供估值容忍度")
-        elif _is_num(ps):
+        elif _is_num(peer_score_val) and peer_score_val > 0 and quant_count < 2:
+            # 样本不足：最多给 2 分，标记为定性参考
+            relative_score = min(2, round(peer_score_val / 15 * pt.peer_map_max))
+            reasons.append(f"同行样本不足({quant_count}家定量)，仅作定性参考")
+        elif _is_num(ps) and not is_low_rev_biotech:
             # 没有同行数据，回退到使用原有PS规则（上限6分）
             if ps <= vt.ps_fair:
                 relative_score = pt.peer_fallback_ps_low
@@ -633,19 +760,38 @@ class AdvancedIPOFrameworkAnalyzer:
 
         # Red flags（不扣分但记录）
         if _is_num(net_profit) and _is_num(revenue) and revenue > 0 and abs(net_profit / revenue) < 0.001:
-            red_flags.append("净利率接近0，疑似利润解析或盈利质量异常")
+            if not is_biotech:
+                red_flags.append("净利率接近0，疑似利润解析或盈利质量异常")
 
         detail_parts = []
-        if pe:
+        if pe and not is_low_rev_biotech:
             detail_parts.append(f"PE {pe:.1f}x")
-        elif ps:
+        elif is_low_rev_biotech:
+            detail_parts.append("PE不适用")
+        if ps:
             detail_parts.append(f"PS {ps:.1f}x")
+        if is_low_rev_biotech:
+            if valuation.get('market_cap_to_rd_ratio'):
+                detail_parts.append(f"市值/R&D {valuation['market_cap_to_rd_ratio']:.1f}x")
+            if valuation.get('cash_runway_years') is not None:
+                detail_parts.append(f"现金runway {valuation['cash_runway_years']:.1f}年")
         if peer_comparison.get('subsector'):
             detail_parts.append(f"同行:{peer_comparison['subsector']}")
+        if quant_count < 2 and peer_comparison.get('subsector'):
+            detail_parts.append("定性参考")
         detail = '；'.join(detail_parts) if detail_parts else 'PE/PS可得口径初筛'
 
         vsl = SETTINGS.valuation_score
-        label = '估值有垫' if score >= vsl.valuation_high else ('估值可看' if score >= vsl.valuation_mid else ('估值压力' if score > 0 else '缺失'))
+        if is_low_rev_biotech:
+            # 未盈利 biotech 专用标签
+            if _is_num(revenue) and revenue > 0 and revenue < vt.biotech_revenue_small:
+                label = "PS失真，仅作参考"
+            elif is_biotech and valuation.get('latest_clinical_stage'):
+                label = "管线阶段估值"
+            else:
+                label = "PS辅助估值"
+        else:
+            label = '估值有垫' if score >= vsl.valuation_high else ('估值可看' if score >= vsl.valuation_mid else ('估值压力' if score > 0 else '缺失'))
         return self._component(score, 20, label, detail, reasons=reasons, red_flags=red_flags)
 
     def _analyze_mainline_beta(self, prospectus_info, text):
@@ -830,7 +976,7 @@ class ScoringSystem:
             return "缺失"
         return "N/A"
     
-    def calculate(self, ipo, prospectus_info):
+    def calculate(self, ipo, prospectus_info, signal_components=None):
         reasons = []
 
         components = {
@@ -887,6 +1033,7 @@ class ScoringSystem:
                 reasons.append(f"毛利率一般({gm_pct:.1f}%)")
             else:
                 components['quality']['score'] += 10
+                reasons.append(f"毛利率偏低({gm_pct:.1f}%)")
             components['quality']['detail'] = f"毛利率{gm_pct:.1f}%"
 
         if prospectus_info.get('profitable'):
@@ -1014,24 +1161,72 @@ class ScoringSystem:
                 components['market']['label'] = "缺失"
             components['market']['detail'] = f"当前热度 {market_heat}" if market_heat else "未获取到热度"
 
+        # ---- 兼容旧结构：subscription_score / fundamental_score ----
         subscription_raw = components['heat']['score'] + components['scale']['score'] + components['market']['score'] + components['cornerstone']['score']
         subscription_raw_max = _HEAT_SCORE_MAX + _SCALE_SCORE_MAX + _MARKET_SCORE_MAX + _CORNERSTONE_SCORE_MAX
         subscription_score = min(100, round(subscription_raw / subscription_raw_max * 100))
         fundamental_score = min(100, round(components['quality']['score'] / _QUALITY_SCORE_MAX * 100))
-        score = round(subscription_score * sw.subscription_weight + fundamental_score * sw.fundamental_weight + sw.base_score)
 
-        valuation = prospectus_info.get('valuation', {})
+        # ---- 新五维评分 ----
+        sc = signal_components or {}
+
+        # trade_score (0-100)：孖展、超购、筹码结构
+        trade_raw = (
+            components['heat']['score'] + components['scale']['score']
+            + components['market']['score'] + components['cornerstone']['score']
+        )
+        trade_max = _HEAT_SCORE_MAX + _SCALE_SCORE_MAX + _MARKET_SCORE_MAX + _CORNERSTONE_SCORE_MAX
+        if sc:
+            trade_raw += sc.get('real_money', {}).get('score', 0)
+            trade_raw += sc.get('float_structure', {}).get('score', 0)
+            trade_max += 20 + 15
+        trade_score = min(100, round(trade_raw / trade_max * 100)) if trade_max else 0
+
+        # valuation_score (0-100)：PE/PS/PB、同行估值、未盈利专项
+        val_framework = sc.get('valuation_framework', {}) if sc else {}
+        val_raw = val_framework.get('score', 0)
+        valuation_score = min(100, round(val_raw / 20 * 100))
+
+        # theme_score (0-50)：主线 + 港股通 + 稀缺性；权重0.10，满分50→最多贡献5分
+        theme_raw = 0
+        if sc:
+            theme_raw += sc.get('mainline_beta', {}).get('score', 0)      # 0-15
+            theme_raw += sc.get('stock_connect_path', {}).get('score', 0)  # 0-10
         peer_comparison = prospectus_info.get('peer_comparison', {}) or {}
-        peer_score_val = peer_comparison.get('peer_score', 0)
         scarcity = peer_comparison.get('scarcity_score', 0)
-        abs_val_label = valuation.get('absolute_valuation_label', '')
-        rel_val_label = valuation.get('relative_valuation_label', '')
-        val_label = valuation.get('valuation_label', '')
+        theme_raw += min(10, scarcity)  # 0-10
+        theme_score = min(50, round(theme_raw / 35 * 50)) if theme_raw else 0
 
-        # ---- 同行估值调整(peer_valuation_adjustment) ----
-        peer_adj = 0
+        # data_quality_score (0-100)：解析置信度；权重0.05，满分100→最多贡献5分
+        dq = sc.get('data_quality', {}) if sc else {}
+        data_quality_score = min(100, round(dq.get('score', 3) / 5 * 100))
+
+        # confidence_gate：数据质量差时限制综合评分上限
+        data_confidence_gate_warning = None
+        if data_quality_score < 40:
+            data_confidence_gate_warning = "数据质量高风险，综合评分上限已限制"
+        elif data_quality_score < 60:
+            data_confidence_gate_warning = "数据质量中等，部分指标建议复核"
+
+        # ---- 新 final_score 公式 ----
+        # final_score = trade*0.35 + fundamental*0.30 + valuation*0.20 + theme*0.10 + data_quality*0.05
+        raw_final = (
+            trade_score * 0.35
+            + fundamental_score * 0.30
+            + valuation_score * 0.20
+            + theme_score * 0.10
+            + data_quality_score * 0.05
+        )
+
+        # 保留原有的 peer_adj 和 valuation 扣分作为微调，但权重降低
+        valuation = prospectus_info.get('valuation', {}) or {}
+        peer_score_val = peer_comparison.get('peer_score', 0)
         peer_valuation_pos = peer_comparison.get('valuation_position', '')
         relative_ps_premium = peer_comparison.get('relative_ps_premium_pct')
+        val_label = valuation.get('valuation_label', '')
+        rel_val_label = valuation.get('relative_valuation_label', '')
+
+        peer_adj = 0
         is_clearly_overvalued = (
             ('明显偏贵' in str(peer_valuation_pos)) or
             ('PS辅助(明显偏贵)' in str(peer_valuation_pos)) or
@@ -1040,7 +1235,6 @@ class ScoringSystem:
         is_somewhat_overvalued = (
             _is_num(relative_ps_premium) and float(relative_ps_premium) > 50
         )
-
         if is_clearly_overvalued:
             peer_adj = -5
             reasons.append("同行估值明显偏贵：公司PS显著高于同行中位数")
@@ -1061,25 +1255,28 @@ class ScoringSystem:
             elif peer_score_val <= 3:
                 peer_adj = -5
                 reasons.append("同行对比偏弱: 相对同行估值偏高(-5分)")
-        score = max(0, score + peer_adj)
 
-        # ---- 估值扣分(考虑同行对比, 减轻绝对估值惩罚) ----
+        # 估值扣分(考虑同行对比, 减轻绝对估值惩罚)
+        val_penalty = 0
         if isinstance(valuation, dict):
             if val_label in ('很贵',):
                 if rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
-                    score = max(0, score - 2)  # 同行相对还行，仅扣2分
+                    val_penalty = -2
                 else:
-                    score = max(0, score - 5)  # 真贵，扣5分
+                    val_penalty = -5
             elif val_label in ('偏贵', '明显偏贵'):
                 if rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
-                    score = max(0, score - 1)
+                    val_penalty = -1
                 else:
-                    score = max(0, score - 3)
+                    val_penalty = -3
             # 稀缺性对冲
             if scarcity >= 7 and val_label in ('很贵', '偏贵', '明显偏贵'):
-                score = min(100, score + 2)
+                val_penalty += 2
                 reasons.append(f"稀缺赛道高估值容忍(+2)")
 
+        score = round(raw_final + peer_adj + val_penalty)
+
+        # cornerstone 弱时限制
         if _is_num(cornerstone_score) and cornerstone_score < 50:
             score = min(score, 55)
         if cornerstone_label in ('弱基石', '未披露'):
@@ -1087,10 +1284,21 @@ class ScoringSystem:
         if cornerstone_analysis.get('red_flags'):
             score = min(score, 40)
 
+        # confidence_gate 上限限制
+        if data_quality_score < 40:
+            score = min(score, 60)
+        elif data_quality_score < 60:
+            score = min(score, 85)
+
         return {
-            'score': min(100, score),
+            'score': min(100, max(0, score)),
             'subscription_score': subscription_score,
             'fundamental_score': fundamental_score,
+            'trade_score': trade_score,
+            'valuation_score': valuation_score,
+            'theme_score': theme_score,
+            'data_quality_score': data_quality_score,
             'reasons': reasons,
             'components': components,
+            'data_confidence_gate_warning': data_confidence_gate_warning,
         }
