@@ -117,8 +117,11 @@ def test_robot_comparison():
     scorer = ScoringSystem()
     qa = ProspectusQualityAnalyzer()
     quality = qa.analyze(pi)
-    scoring = scorer.calculate(ipo, pi)
+    pi['stock_quality'] = quality
+    scoring = scorer.calculate(ipo, pi, signal_components=adv_result.get('components'))
     print(f"\n最终评分: {scoring.get('score')}/100")
+    print(f"  trade_score: {scoring.get('trade_score')}, fundamental_score: {scoring.get('fundamental_score')}")
+    print(f"  valuation_score: {scoring.get('valuation_score')}, theme_score: {scoring.get('theme_score')}")
     for r in scoring.get("reasons", []):
         print(f"  • {r}")
 
@@ -194,8 +197,11 @@ def test_biotech_comparison():
     scorer = ScoringSystem()
     qa = ProspectusQualityAnalyzer()
     quality = qa.analyze(pi)
-    scoring = scorer.calculate(ipo, pi)
+    pi['stock_quality'] = quality
+    scoring = scorer.calculate(ipo, pi, signal_components=adv_result.get('components'))
     print(f"\n最终评分: {scoring.get('score')}/100")
+    print(f"  trade_score: {scoring.get('trade_score')}, fundamental_score: {scoring.get('fundamental_score')}")
+    print(f"  valuation_score: {scoring.get('valuation_score')}, theme_score: {scoring.get('theme_score')}")
     for r in scoring.get("reasons", []):
         print(f"  • {r}")
 
