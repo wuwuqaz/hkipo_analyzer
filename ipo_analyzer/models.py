@@ -101,6 +101,9 @@ class ValuationResult:
     cash_runway_years: Optional[float] = None
     pipeline_concentration_warning: Optional[str] = None
     revenue_too_small_for_ps: bool = False
+    net_profit_hkd_million: Optional[float] = None
+    adjusted_profit_hkd_million: Optional[float] = None
+    financial_currency: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -306,6 +309,11 @@ class PeerComparisonResult:
     semantic_id: str = "peer_comparison"
     relative_market_cap_pct: Optional[float] = None
     company_market_cap_vs_peer_pct: Optional[float] = None
+    quantitative_peers: list[dict[str, Any]] = field(default_factory=list)
+    qualitative_peers: list[dict[str, Any]] = field(default_factory=list)
+    quantitative_peer_count: int = 0
+    qualitative_peer_count: int = 0
+    peer_sample_warning: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

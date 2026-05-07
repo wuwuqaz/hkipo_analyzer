@@ -1,6 +1,8 @@
 # 轻量 __init__.py — 不 eager import 重依赖模块
 # 各业务模块按需自行 import
 
+__version__ = "0.4.0-alpha"
+
 # 数据模型（仅标准库依赖，安全暴露）
 from .models import (  # noqa: F401
     ProspectusInfo,

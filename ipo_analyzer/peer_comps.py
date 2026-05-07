@@ -579,6 +579,20 @@ def _extract_keywords_subsector(prospectus_info, prospectus_text, peer_data=None
 # 中位数 / 稀缺性 / 评分
 # ---------------------------------------------------------------------------
 
+def _split_peer_samples(matched_peers):
+    """将 peers 分为 quantitative（可参与中位数计算）和 qualitative（仅参考）"""
+    quantitative_peers = [
+        p for p in matched_peers
+        if p.get("type") == "listed"
+        and not (p.get("ps") is None and p.get("pe") is None and p.get("market_cap_hkd_million") is None)
+        and p.get("data_quality") != "low"
+        and not p.get("needs_refresh", False)
+    ]
+    quantitative_set = {id(p) for p in quantitative_peers}
+    qualitative_peers = [p for p in matched_peers if id(p) not in quantitative_set]
+    return quantitative_peers, qualitative_peers
+
+
 def _calc_peer_medians(peers, exclude_private=True):
     ps_v, pe_v, pb_v, mc_v = [], [], [], []
     for p in peers:
@@ -851,16 +865,15 @@ class PeerComparableAnalyzer:
         ]
 
         # 区分 quantitative / qualitative peers
-        quantitative_peers = [
-            p for p in matched
-            if p.get("type") == "listed"
-            and not (p.get("ps") is None and p.get("pe") is None and p.get("market_cap_hkd_million") is None)
-            and p.get("data_quality") != "low"
-            and not p.get("needs_refresh", False)
-        ]
-        qualitative_peers = [p for p in matched if p not in quantitative_peers]
+        quantitative_peers, qualitative_peers = _split_peer_samples(matched)
         result["quantitative_peers"] = quantitative_peers
         result["qualitative_peers"] = qualitative_peers
+        result["quantitative_peer_count"] = len(quantitative_peers)
+        result["qualitative_peer_count"] = len(qualitative_peers)
+        if len(quantitative_peers) < 2:
+            result["peer_sample_warning"] = f"quantitative peers 仅 {len(quantitative_peers)} 家，不参与强估值判断，仅作定性参考"
+        else:
+            result["peer_sample_warning"] = None
 
         # 5. 公司 PS/PE
         valuation = prospectus_info.get("valuation", {}) or {}

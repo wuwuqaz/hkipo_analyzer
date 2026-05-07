@@ -422,13 +422,15 @@ class PeerMetricsUpdater:
         return self._batch_update(stale_only=stale_only, dry_run=dry_run)
 
     def update_subsector(self, sector, subsector, dry_run=True):
-        results = {"updated": 0, "skipped": 0, "failed": 0, "details": []}
+        results = {"total": 0, "processed": 0, "previewed": 0,
+                   "updated": 0, "skipped": 0, "failed": 0, "details": []}
         data = self.store.load()
         if not data:
             return results
         sec_data = data.get(sector, {})
         sub_data = sec_data.get(subsector, {})
         peers = sub_data.get("peers", [])
+        results["total"] = len(peers)
         for peer in peers:
             ticker = peer.get("ticker", "")
             if not ticker or ticker == "private":
@@ -439,12 +441,13 @@ class PeerMetricsUpdater:
                 self.store.apply_metrics_to_data(data, ticker, r.get("metrics", {}))
             results["updated"] += r.get("updated", 0)
             results["failed"] += r.get("failed", 0)
+            results["previewed"] += r.get("previewed", 0)
             results["details"].append(r)
 
+        results["processed"] = results["total"] - results["skipped"]
         if not dry_run and results["updated"] > 0:
             self.store.save(data)
 
-        results["total"] = len(peers)
         return results
 
     def update_ticker(self, ticker, dry_run=True):
@@ -456,12 +459,11 @@ class PeerMetricsUpdater:
     # -- 内部 --
 
     def _batch_update(self, stale_only, dry_run):
-        results = {"updated": 0, "skipped_private": 0, "failed": 0,
-                   "stale_count": 0, "details": [], "total": 0, "previewed": 0}
+        results = {"total": 0, "processed": 0, "previewed": 0,
+                   "updated": 0, "skipped": 0, "failed": 0, "details": []}
 
         if stale_only:
             peers = self.store.get_stale_peers()
-            results["stale_count"] = len(peers)
         else:
             peers = list(self.store.iter_listed_peers())
 
@@ -471,7 +473,7 @@ class PeerMetricsUpdater:
         for sec, sub, peer in peers:
             ticker = peer.get("ticker", "")
             if not ticker or ticker == "private":
-                results["skipped_private"] += 1
+                results["skipped"] += 1
                 continue
             r = self._fetch_one(ticker, dry_run)
             if not dry_run and not r.get("failed") and data:
@@ -481,6 +483,7 @@ class PeerMetricsUpdater:
             results["previewed"] += r.get("previewed", 0)
             results["details"].append(r)
 
+        results["processed"] = results["total"] - results["skipped"]
         if not dry_run and results["updated"] > 0 and data is not None:
             self.store.save(data)
 

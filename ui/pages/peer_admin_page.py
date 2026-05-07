@@ -108,7 +108,7 @@ class PeerAdminPage:
                 with st.spinner("正在写入过期同行..."):
                     try:
                         r = self.updater.update_all(stale_only=True, dry_run=False)
-                        st.success(f"已写入: 更新{r['updated']} 跳过{r['skipped_private']} 失败{r['failed']}")
+                        st.success(f"已写入: 更新{r['updated']} 跳过{r['skipped']} 失败{r['failed']}")
                     except Exception as e:
                         st.warning(f"⚠ 更新失败: {e}")
         with col_preview_all:
@@ -122,7 +122,7 @@ class PeerAdminPage:
                 with st.spinner("正在写入全部同行..."):
                     try:
                         r = self.updater.update_all(stale_only=False, dry_run=False)
-                        st.success(f"已写入: 更新{r['updated']} 跳过{r['skipped_private']} 失败{r['failed']}")
+                        st.success(f"已写入: 更新{r['updated']} 跳过{r['skipped']} 失败{r['failed']}")
                     except Exception as e:
                         st.warning(f"⚠ 更新失败: {e}")
 
@@ -133,9 +133,11 @@ class PeerAdminPage:
             previewed = r.get("previewed", 0)
             updated = r.get("updated", 0)
             failed = r.get("failed", 0)
+            skipped = r.get("skipped", 0)
+            processed = r.get("processed", 0)
             title = f"📋 预览结果 ({ptype}): 已预览{previewed} 失败{failed}"
             with st.expander(title, expanded=True):
-                st.caption(f"总处理: {r.get('total', 0)} | 已预览: {previewed} | 失败: {failed}")
+                st.caption(f"总计: {r.get('total', 0)} | 处理: {processed} | 跳过(private): {skipped} | 已预览: {previewed} | 失败: {failed}")
                 for d in r.get("details", []):
                     t = d.get("ticker", "?")
                     if d.get("failed"):

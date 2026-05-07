@@ -156,6 +156,7 @@ class DetailView:
         cf = pi.get("cashflow", {}) or {}
         cap = pi.get("capacity", {}) or {}
         risk = pi.get("risk_factors", {}) or {}
+        pc = pi.get("peer_comparison", {}) or {}
 
         info_kpis = [
             ("招股期", f"{ipo.get('apply_start_date', '--')} ~ {ipo.get('apply_end_date', '--')}"),
@@ -170,11 +171,18 @@ class DetailView:
             ("行业", pi.get('sector', '--')),
         ]
 
+        # 亏损/未盈利公司 PE 显示 "PE不适用"
+        pe_display = self.fmt.format_number(val.get('pe_ratio'), 'x')
+        if val.get('valuation_profitability_type') == 'loss_making':
+            pe_display = "PE不适用"
+        elif val.get('pe_ratio') is None and val.get('valuation_framework_type') == '18A_biotech':
+            pe_display = "PE不适用"
+
         fin_kpis = [
             ("收入", self.fmt.format_revenue_with_yoy(pi)),
             ("净利润", self.fmt.format_net_profit_with_yoy(pi)),
             ("毛利率", self.fmt.format_gross_margin_with_yoy(pi)),
-            ("PE", self.fmt.format_number(val.get('pe_ratio'), 'x')),
+            ("PE", pe_display),
             ("PS", self.fmt.format_number(val.get('ps_ratio'), 'x')),
             ("PB", self.fmt.format_number(val.get('pb_ratio'), 'x')),
             ("研发费率", self._render_rd_ratio(rnd)),
@@ -183,6 +191,7 @@ class DetailView:
             ("海外扩张", geo.get('overseas_growth_label', '--')),
         ]
 
+        # 估值框架、市值/R&D、现金runway、临床阶段
         detail_kpis = [
             ("客户集中度", cs.get('concentration_risk_label', '--')),
             ("Top5客户占比", self.fmt.format_percentage(cs.get('top5_customer_revenue_pct'))),
@@ -191,6 +200,10 @@ class DetailView:
             ("技术壁垒", f"{rnd.get('pipeline_quality_label', '--')} ({rnd.get('technology_moat_score', 0)}/10)"),
             ("产能利用率", self.fmt.format_percentage(cap.get('utilization_rate'))),
             ("风险扣分", str(risk.get('total_penalty', 0))),
+            ("估值框架", val.get('valuation_framework_type') or '--'),
+            ("市值/R&D", self.fmt.format_number(val.get('market_cap_to_rd_ratio'), 'x')),
+            ("现金runway", f"{val.get('cash_runway_years', '--')}年" if val.get('cash_runway_years') is not None else '--'),
+            ("临床阶段", val.get('latest_clinical_stage') or '--'),
         ]
 
         biz_seg_html = self._render_biz_segments(biz)
@@ -215,6 +228,10 @@ class DetailView:
             st.warning(f"⚠️ {biz['business_breakdown_warning']}")
         if biz.get("vbp_risk_score", 0) > 0:
             st.warning(f"⚠️ 集采/VBP风险: {biz.get('vbp_summary', '')}")
+        if val.get("revenue_too_small_for_ps"):
+            st.warning("⚠️ 收入基数极小，PS严重失真，仅作参考，需结合管线/技术阶段/平台价值判断")
+        if pc.get("peer_sample_warning"):
+            st.info(f"ℹ️ {pc['peer_sample_warning']}")
 
     def _render_rd_ratio(self, rnd: dict) -> str:
         rd_ratio = rnd.get('rd_expense_ratio')
@@ -496,6 +513,13 @@ class DetailView:
             f'<b>同行对比评分:</b> {self.fmt.format_number(pc_score, precision=0)}/15'
             f'</div>'
         )
+
+        if pc.get("peer_sample_warning"):
+            pc_html_parts.append(
+                f'<div style="font-size:12px;color:#64748b;margin:6px 0;padding:6px 10px;background:#f8fafc;border-radius:8px;">'
+                f'ℹ️ {self.html.escape(pc["peer_sample_warning"])}'
+                f'</div>'
+            )
 
         if pc_peers:
             pc_peers_short = pc_peers[:8]

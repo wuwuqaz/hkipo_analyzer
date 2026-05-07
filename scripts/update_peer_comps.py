@@ -74,7 +74,7 @@ def main():
     if args.sector and args.subsector:
         print(f"→ 更新 sector={args.sector} subsector={args.subsector}")
         r = updater.update_subsector(args.sector, args.subsector, dry_run=dry_run)
-        print(f"  更新: {r['updated']}  跳过(private): {r['skipped']}  失败: {r['failed']}")
+        _print_batch_summary(r, dry_run)
         for d in r.get("details", []):
             _print_result(d, dry_run)
         return
@@ -93,15 +93,14 @@ def main():
 
 def _print_batch_summary(r, dry_run):
     print(f"\n=== 更新摘要 ===")
-    print(f"  总处理: {r.get('total', 0)}")
+    print(f"  总计: {r.get('total', 0)}")
+    print(f"  处理: {r.get('processed', 0)}")
     if dry_run:
         print(f"  已预览: {r.get('previewed', 0)}")
     else:
-        print(f"  已写入: {r['updated']}")
-    print(f"  跳过(private): {r['skipped_private']}")
-    print(f"  失败: {r['failed']}")
-    if r.get("stale_count"):
-        print(f"  过期: {r['stale_count']}")
+        print(f"  已写入: {r.get('updated', 0)}")
+    print(f"  跳过(private): {r.get('skipped', 0)}")
+    print(f"  失败: {r.get('failed', 0)}")
     for d in r.get("details", []):
         _print_result(d, dry_run, compact=True)
     if dry_run:
