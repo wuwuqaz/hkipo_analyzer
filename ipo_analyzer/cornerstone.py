@@ -506,49 +506,160 @@ class CornerstoneAnalyzer:
         (p['name'], p['aliases']) for p in INVESTOR_PROFILES if p['tier'] == 'A'
     ]
 
-    def _cornerstone_context(self, text):
-        lower_text = text.lower()
-        anchors = [
-            lower_text.find('cornerstone investors'),
-            lower_text.find('cornerstone placing'),
-            lower_text.find('cornerstone investor'),
-            text.find('基石投资者'),
-            text.find('基石投資者'),
-            text.find('基石配售'),
-            text.find('基石投資協議'),
-            text.find('基石投資者的資料'),
-        ]
-        anchors = [idx for idx in anchors if idx >= 0]
-        if not anchors:
-            # fallback: 扫描全文中的投资者名称匹配
-            return text
-        # 取最早的锚点开始扫描（避免错过前面的基石表格）
-        start = min(anchors)
-        context = text[start:start + 120000]
-        return context
+    # 章节锚点：用于判断是否存在基石投资者章节
+    CORNERSTONE_ANCHORS = [
+        'cornerstone investors',
+        'cornerstone placing',
+        'cornerstone investor',
+        '基石投资者',
+        '基石投資者',
+        '基石配售',
+        '基石投資協議',
+        '基石投資者的資料',
+    ]
 
-    def _matched_investors(self, context):
+    # 排除上下文：命中这些章节时，不得将投资者算作基石
+    EXCLUSION_ANCHORS = [
+        'pre-ipo investment',
+        'pre-ipo investors',
+        'pre-ipo financing',
+        'shareholders',
+        'substantial shareholders',
+        'sophisticated independent investors',
+        'pathfinder sophisticated independent investors',
+        'previous investors',
+        'prior investors',
+        '历史投资者',
+        '上市前投资',
+        '首次公开发售前投资',
+        '资深独立投资者',
+        '领航资深独立投资者',
+        '股东',
+        '主要股东',
+    ]
+
+    def _find_section_anchor(self, text, anchors):
+        """在 text 中查找 anchors 的最早出现位置，返回 (idx, anchor) 或 (-1, None)"""
+        lower_text = text.lower()
+        best_idx = -1
+        best_anchor = None
+        for anchor in anchors:
+            idx = text.find(anchor) if any(ord(c) > 127 for c in anchor) else lower_text.find(anchor)
+            if idx >= 0 and (best_idx < 0 or idx < best_idx):
+                best_idx = idx
+                best_anchor = anchor
+        return best_idx, best_anchor
+
+    def _cornerstone_context(self, text):
+        """返回 (context, has_cornerstone_section)。
+        如果没有找到基石锚点，不再 fallback 到全文扫描。"""
+        idx, _ = self._find_section_anchor(text, self.CORNERSTONE_ANCHORS)
+        if idx < 0:
+            return "", False
+        context = text[idx:idx + 120000]
+        return context, True
+
+    def _is_in_excluded_section(self, text, hit_idx):
+        """判断 hit_idx 位置是否落在排除章节（pre-IPO/股东/资深独立投资者等）内。
+        排除章节从锚点开始，到下一个同等级标题或文档末尾结束。
+        关键规则：如果 hit_idx 之前存在基石章节锚点，且 hit_idx 在基石章节锚点之后，
+        则 hit_idx 属于基石章节，不再受前面排除章节的影响。"""
+        lower_text = text.lower()
+        # 找到 hit_idx 之前最近的基石章节锚点位置
+        cs_anchor_pos = -1
+        for anchor in self.CORNERSTONE_ANCHORS:
+            idx = text.find(anchor) if any(ord(c) > 127 for c in anchor) else lower_text.find(anchor)
+            if idx >= 0 and idx < hit_idx and idx > cs_anchor_pos:
+                cs_anchor_pos = idx
+
+        # 如果 hit_idx 在基石章节锚点之后，则不属于排除章节
+        if cs_anchor_pos >= 0 and hit_idx > cs_anchor_pos:
+            return False
+
+        # 收集所有排除章节的起始位置
+        exclusion_ranges = []
+        for anchor in self.EXCLUSION_ANCHORS:
+            start = text.find(anchor) if any(ord(c) > 127 for c in anchor) else lower_text.find(anchor)
+            if start < 0:
+                continue
+            # 章节结束：找下一个看起来像标题的行（大写开头、较短）或下一个排除锚点
+            end = len(text)
+            for other in self.EXCLUSION_ANCHORS:
+                if other == anchor:
+                    continue
+                ostart = text.find(other) if any(ord(c) > 127 for c in other) else lower_text.find(other)
+                if ostart > start:
+                    end = min(end, ostart)
+            # 同时以下一个空行+大写行作为章节边界
+            next_block = text.find('\n\n', start + len(anchor))
+            if next_block > start:
+                # 再往后找下一个可能的标题行
+                for m in re.finditer(r'\n\n([A-Z][A-Za-z\s]{3,60})\s*\n', text[next_block:]):
+                    end = min(end, next_block + m.start())
+                    break
+            exclusion_ranges.append((start, end))
+        for start, end in exclusion_ranges:
+            if start <= hit_idx < end:
+                return True
+        return False
+
+    def _matched_investors(self, context, full_text="", context_start_idx=0):
+        """在基石章节内匹配投资者，排除 pre-IPO/股东等上下文中的命中。
+        返回的 payload 中带有 source 字段：
+        - 'cornerstone_section': 从基石章节中匹配到的投资者
+        - 'pre_ipo_section': 从排除章节中匹配到的投资者（不计入基石评分）
+        """
+        profiles = self._matched_profiles_with_exclusion(context, full_text, context_start_idx)
         return [
-            self._profile_match_payload(profile)
-            for profile in self._matched_profiles(context)
+            self._profile_match_payload_with_source(profile)
+            for profile in profiles
             if profile.get('tier') in ('S', 'A')
         ]
 
-    def _matched_profiles(self, context):
+    def _matched_profiles_with_exclusion(self, context, full_text="", context_start_idx=0):
+        """匹配投资者档案，排除落在 pre-IPO/股东章节中的命中。
+        返回的 profile dict 中带有 _source 字段。"""
         if not context:
             return []
         matched = []
         seen = set()
         for profile in self.INVESTOR_PROFILES:
-            if not _contains_any(context, profile.get('aliases', [])):
+            aliases = profile.get('aliases', [])
+            hit_alias = None
+            hit_idx = -1
+            for alias in aliases:
+                idx = context.lower().find(alias.lower())
+                if idx >= 0:
+                    hit_alias = alias
+                    hit_idx = idx
+                    break
+            if hit_alias is None:
                 continue
+            # 检查命中位置是否在排除章节内
+            source = 'cornerstone_section'
+            if full_text:
+                absolute_idx = context_start_idx + hit_idx
+                if self._is_in_excluded_section(full_text, absolute_idx):
+                    source = 'pre_ipo_section'
             key = profile['name']
             if key in seen:
                 continue
             seen.add(key)
-            matched.append(profile)
+            profile_copy = dict(profile)
+            profile_copy['_source'] = source
+            matched.append(profile_copy)
         matched.sort(key=lambda item: {'S': 0, 'A': 1, 'B': 2, '弱': 3}.get(item.get('tier'), 4))
         return matched
+
+    @staticmethod
+    def _profile_match_payload_with_source(profile):
+        return {
+            'name': profile.get('name'),
+            'tier': profile.get('tier'),
+            'category': profile.get('category'),
+            'role_note': profile.get('role_note'),
+            'source': profile.get('_source', 'cornerstone_section'),
+        }
 
     @staticmethod
     def _profile_match_payload(profile):
@@ -560,8 +671,21 @@ class CornerstoneAnalyzer:
         }
 
     def _best_profile(self, text):
-        profiles = self._matched_profiles(text)
-        return profiles[0] if profiles else None
+        """从 text 中匹配最佳投资者档案（不区分 source，仅用于行内名称解析）。"""
+        if not text:
+            return None
+        matched = []
+        seen = set()
+        for profile in self.INVESTOR_PROFILES:
+            if not _contains_any(text, profile.get('aliases', [])):
+                continue
+            key = profile['name']
+            if key in seen:
+                continue
+            seen.add(key)
+            matched.append(profile)
+        matched.sort(key=lambda item: {'S': 0, 'A': 1, 'B': 2, '弱': 3}.get(item.get('tier'), 4))
+        return matched[0] if matched else None
 
     @staticmethod
     def _tier_label_for_legacy(tier):
@@ -1446,11 +1570,12 @@ class CornerstoneAnalyzer:
             'recommendation': recommendation,
             'cornerstone_investors': profile_rows,
             'matched_investors': [
-                self._profile_match_payload(self._best_profile(row.get('match_names') or row.get('name') or '') or {
+                self._profile_match_payload_with_source(self._best_profile(row.get('match_names') or row.get('name') or '') or {
                     'name': row.get('short_name') or row.get('name'),
                     'tier': row.get('tier'),
                     'category': row.get('category'),
                     'role_note': row.get('role_note'),
+                    '_source': 'cornerstone_section',
                 })
                 for row in profile_rows
                 if row.get('tier') in ('S', 'A')
@@ -1474,36 +1599,46 @@ class CornerstoneAnalyzer:
         }
 
     def analyze(self, text):
-        context = self._cornerstone_context(text)
-        if not context:
+        context, has_cornerstone_section = self._cornerstone_context(text)
+        if not has_cornerstone_section:
             return {
                 'label': '未披露',
                 'grade_band': '缺失',
                 'score': 0,
-                'recommendation': '谨慎参考',
+                'recommendation': '无基石',
                 'matched_investors': [],
                 'cornerstone_investors': [],
                 'cornerstone_pct': None,
                 'dimension_scores': {},
                 'strengths': [],
-                'concerns': ['未提取到基石投资者章节'],
-                'red_flags': ['未提取到基石投资者章节'],
-                'reasons': ['未提取到基石投资者章节，暂无法按基石V2模型判断'],
+                'concerns': [],
+                'red_flags': [],
+                'reasons': ['未发现基石投资者章节，不进行全文投资者匹配'],
                 'formula_pass_count': 0,
                 'sector': 'unknown',
                 'sector_match': None,
+                'has_cornerstone_section': False,
+                'detail': '未发现基石投资者章节，不进行全文投资者匹配',
                 'model_version': 'cornerstone_v2_2026_05',
             }
 
-        matched = self._matched_investors(context)
+        # 计算 context 在全文中的起始位置，用于排除章节检测
+        context_start_idx = text.find(context) if context else 0
+        matched = self._matched_investors(context, full_text=text, context_start_idx=context_start_idx)
+        # 过滤掉 source='pre_ipo_section' 的命中，不计入基石评分
+        cornerstone_matched = [m for m in matched if m.get('source') == 'cornerstone_section']
         cornerstone_rows = self._enrich_cornerstone_rows(context, self._extract_cornerstone_rows(context))
         cornerstone_pct = self._extract_cornerstone_pct(context)
         sector = self._sector(text)
         sector_match = self._sector_match(sector, context)
         spv_flags = self._spv_risk_flags(context)
-        return self._build_v2_result(
-            cornerstone_rows, matched, cornerstone_pct, sector, sector_match, spv_flags
+        result = self._build_v2_result(
+            cornerstone_rows, cornerstone_matched, cornerstone_pct, sector, sector_match, spv_flags
         )
+        result['has_cornerstone_section'] = True
+        # 保留所有 matched_investors（含 pre_ipo_section），但分开标记
+        result['all_matched_investors'] = matched
+        return result
 
 
 # ---------------------------------------------------------------------------

@@ -638,6 +638,106 @@ def test_jitai_hot_with_strong_cornerstone():
     print("✅ test_jitai_hot_with_strong_cornerstone passed")
 
 
+def test_yifei_no_cornerstone_misidentified():
+    """翼菲科技：无基石章节，只有 pre-IPO 投资者，不应被误判为有基石"""
+    from ipo_analyzer.cornerstone import CornerstoneAnalyzer
+
+    text = """
+    Our Company has received investments from a number of sophisticated independent investors.
+    The pathfinder sophisticated independent investors include Primavera Capital,
+    China Broadband Capital, Tsinghua Holdings Capital, and other previous investors.
+    These pre-ipo investors have supported our growth since Series A.
+    """
+
+    result = CornerstoneAnalyzer().analyze(text)
+    assert result.get('has_cornerstone_section') is False, \
+        f"应判定为无基石章节，实际: {result.get('has_cornerstone_section')}"
+    assert result.get('score') == 0, f"无基石时 score 应为 0，实际: {result.get('score')}"
+    assert result.get('label') == '未披露', f"无基石时 label 应为'未披露'，实际: {result.get('label')}"
+    assert result.get('recommendation') == '无基石', f"无基石时 recommendation 应为'无基石'，实际: {result.get('recommendation')}"
+    assert result.get('matched_investors') == [], f"无基石时 matched_investors 应为空，实际: {result.get('matched_investors')}"
+    assert result.get('red_flags') == [], f"无基石时 red_flags 应为空，实际: {result.get('red_flags')}"
+    print("✅ test_yifei_no_cornerstone_misidentified passed")
+
+
+def test_jitai_cornerstone_detected_correctly():
+    """剂泰科技：有基石章节，应正确识别强基石"""
+    from ipo_analyzer.cornerstone import CornerstoneAnalyzer
+
+    text = """
+    Cornerstone Investors
+    The following cornerstone investors have agreed to subscribe for the Offer Shares:
+    BlackRock, Inc. has agreed to subscribe for 5,000,000 Offer Shares.
+    UBS Asset Management has agreed to subscribe for 3,000,000 Offer Shares.
+    HHLR Fund, L.P. has agreed to subscribe for 2,000,000 Offer Shares.
+    RTW Investments, LP has agreed to subscribe for 1,500,000 Offer Shares.
+    """
+
+    result = CornerstoneAnalyzer().analyze(text)
+    assert result.get('has_cornerstone_section') is True, \
+        f"应判定为有基石章节，实际: {result.get('has_cornerstone_section')}"
+    assert result.get('score', 0) > 0, f"有强基石时 score 应>0，实际: {result.get('score')}"
+    matched_names = [m['name'] for m in result.get('matched_investors', [])]
+    assert 'BlackRock' in matched_names, f"应识别 BlackRock，实际: {matched_names}"
+    assert 'Hillhouse/HHLR' in matched_names, f"应识别 Hillhouse/HHLR，实际: {matched_names}"
+    assert 'UBS Asset Management' in matched_names, f"应识别 UBS，实际: {matched_names}"
+    assert 'RTW' in matched_names, f"应识别 RTW，实际: {matched_names}"
+    print("✅ test_jitai_cornerstone_detected_correctly passed")
+
+
+def test_yifei_pre_ipo_investors_not_counted_as_cornerstone():
+    """翼菲科技：pre-IPO 投资者即使在全文出现，也不应计入基石评分"""
+    from ipo_analyzer.cornerstone import CornerstoneAnalyzer
+
+    # 同时包含基石章节和 pre-IPO 章节，pre-IPO 章节的投资者不应计入
+    text = """
+    Pre-IPO Investment
+    Our pre-ipo investors include Primavera Capital and Hillhouse.
+    They invested in Series B and C rounds.
+
+    Cornerstone Investors
+    The following cornerstone investors have agreed to subscribe:
+    BlackRock, Inc. has agreed to subscribe for 5,000,000 Offer Shares.
+    UBS Asset Management has agreed to subscribe for 3,000,000 Offer Shares.
+    Hillhouse Capital has agreed to subscribe for 1,000,000 Offer Shares.
+    """
+
+    result = CornerstoneAnalyzer().analyze(text)
+    assert result.get('has_cornerstone_section') is True
+    matched_names = [m['name'] for m in result.get('matched_investors', [])]
+    # Hillhouse 出现在基石章节中，应计入
+    assert 'Hillhouse/HHLR' in matched_names, f"应识别 Hillhouse，实际: {matched_names}"
+    assert 'BlackRock' in matched_names, f"应识别 BlackRock，实际: {matched_names}"
+    assert 'UBS Asset Management' in matched_names, f"应识别 UBS，实际: {matched_names}"
+    # 所有匹配都应标记为 cornerstone_section（因为它们都在基石章节内）
+    for m in result.get('matched_investors', []):
+        assert m.get('source') == 'cornerstone_section', \
+            f"基石章节内的投资者应标记为 cornerstone_section，实际: {m}"
+    print("✅ test_yifei_pre_ipo_investors_not_counted_as_cornerstone passed")
+
+
+def test_pre_ipo_investors_excluded_from_cornerstone():
+    """pre-IPO 章节中的投资者不应被计入基石评分"""
+    from ipo_analyzer.cornerstone import CornerstoneAnalyzer
+
+    text = """
+    Pre-IPO Investment
+    Our pre-ipo investors include Primavera Capital and Hillhouse.
+    They invested in Series B and C rounds.
+
+    Shareholders
+    The following shareholders hold substantial interests:
+    China Broadband Capital holds 10% of shares.
+    Tsinghua Holdings Capital holds 5% of shares.
+    """
+
+    result = CornerstoneAnalyzer().analyze(text)
+    assert result.get('has_cornerstone_section') is False
+    assert result.get('score') == 0
+    assert result.get('matched_investors') == []
+    print("✅ test_pre_ipo_investors_excluded_from_cornerstone passed")
+
+
 if __name__ == "__main__":
     test_issuer_alias_not_in_unmatched()
     test_quantitative_peers_less_than_two_weak_conclusion()
@@ -653,6 +753,10 @@ if __name__ == "__main__":
     test_core_fundamental_score_matches_scoring_breakdown()
     test_jitai_pre_ipo_score_not_too_low()
     test_jitai_hot_with_strong_cornerstone()
+    test_yifei_no_cornerstone_misidentified()
+    test_jitai_cornerstone_detected_correctly()
+    test_yifei_pre_ipo_investors_not_counted_as_cornerstone()
+    test_pre_ipo_investors_excluded_from_cornerstone()
     print("\n" + "=" * 60)
     print("✅ 所有回归测试通过")
     print("=" * 60)

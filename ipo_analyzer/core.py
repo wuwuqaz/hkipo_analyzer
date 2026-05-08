@@ -375,46 +375,55 @@ def main():
 
         cornerstone_analysis = ipo.get('prospectus_info', {}).get('cornerstone_analysis', {})
         if cornerstone_analysis:
-            logger.info("   基石信号: %s / %s (%d/100)", cornerstone_analysis.get('label', '--'), cornerstone_analysis.get('recommendation', '--'), cornerstone_analysis.get('score', 0))
-            if cornerstone_analysis.get('cornerstone_pct') is not None:
-                logger.info("   基石占比: %.1f%%", cornerstone_analysis['cornerstone_pct'])
-            matched = cornerstone_analysis.get('matched_investors', [])
-            cornerstone_rows = cornerstone_analysis.get('cornerstone_investors', [])
-            if cornerstone_rows:
-                logger.info("   招股书基石投资者名单（%d家）:", len(cornerstone_rows))
-                for row in cornerstone_rows:
-                    row_name = row.get('name', '--')
-                    matched_investors = row.get('matched_investors', [])
-                    is_matched = row.get('is_matched', False)
-                    tier = row.get('tier')
+            has_cs_section = cornerstone_analysis.get('has_cornerstone_section', True)
+            cs_score = cornerstone_analysis.get('score', 0)
+            if has_cs_section and cs_score > 0:
+                logger.info("   基石信号: %s / %s (%d/100)", cornerstone_analysis.get('label', '--'), cornerstone_analysis.get('recommendation', '--'), cs_score)
+                if cornerstone_analysis.get('cornerstone_pct') is not None:
+                    logger.info("   基石占比: %.1f%%", cornerstone_analysis['cornerstone_pct'])
+                matched = cornerstone_analysis.get('matched_investors', [])
+                cornerstone_rows = cornerstone_analysis.get('cornerstone_investors', [])
+                if cornerstone_rows:
+                    logger.info("   招股书基石投资者名单（%d家）:", len(cornerstone_rows))
+                    for row in cornerstone_rows:
+                        row_name = row.get('name', '--')
+                        matched_investors = row.get('matched_investors', [])
+                        is_matched = row.get('is_matched', False)
+                        tier = row.get('tier')
 
-                    extra = []
-                    if row.get('offer_shares_pct') is not None:
-                        extra.append(f"占发售股份{row.get('offer_shares_pct'):.2f}%")
-                    amount_text = _format_cornerstone_amount(row)
-                    if amount_text != "--":
-                        extra.append(amount_text)
-                    extra_text = f"｜{'，'.join(extra)}" if extra else ""
+                        extra = []
+                        if row.get('offer_shares_pct') is not None:
+                            extra.append(f"占发售股份{row.get('offer_shares_pct'):.2f}%")
+                        amount_text = _format_cornerstone_amount(row)
+                        if amount_text != "--":
+                            extra.append(amount_text)
+                        extra_text = f"｜{'，'.join(extra)}" if extra else ""
 
-                    if is_matched and matched_investors:
-                        match_names = "、".join(f"{item.get('name')}({item.get('tier')})" for item in matched_investors)
-                        logger.info("     - %s（V2分级 → %s）%s", row_name, match_names, extra_text)
-                    elif is_matched and tier:
-                        logger.info("     - %s（V2分级 → %s级）%s", row_name, tier, extra_text)
-                    else:
-                        logger.info("     - %s（V2未分级）%s", row_name, extra_text)
-            elif matched:
-                logger.info("   招股书基石投资者名单未完整提取，以下为V2重点机构:")
-                for item in matched:
-                    tier = item.get('tier', 'N/A')
-                    name = item.get('name', 'N/A')
-                    logger.info("     - %s（%s级）", name, tier)
-            if matched and not cornerstone_rows:
-                pass
-            elif not matched:
-                logger.info("   V2未识别到S级或A级重点基石")
-            for red_flag in cornerstone_analysis.get('red_flags', []):
-                logger.info("   基石红旗: %s", red_flag)
+                        if is_matched and matched_investors:
+                            match_names = "、".join(f"{item.get('name')}({item.get('tier')})" for item in matched_investors)
+                            logger.info("     - %s（V2分级 → %s）%s", row_name, match_names, extra_text)
+                        elif is_matched and tier:
+                            logger.info("     - %s（V2分级 → %s级）%s", row_name, tier, extra_text)
+                        else:
+                            logger.info("     - %s（V2未分级）%s", row_name, extra_text)
+                elif matched:
+                    logger.info("   招股书基石投资者名单未完整提取，以下为V2重点机构:")
+                    for item in matched:
+                        tier = item.get('tier', 'N/A')
+                        name = item.get('name', 'N/A')
+                        logger.info("     - %s（%s级）", name, tier)
+                if matched and not cornerstone_rows:
+                    pass
+                elif not matched:
+                    logger.info("   V2未识别到S级或A级重点基石")
+                for red_flag in cornerstone_analysis.get('red_flags', []):
+                    logger.info("   基石红旗: %s", red_flag)
+            elif not has_cs_section:
+                logger.info("   基石信号: 未披露基石投资者")
+            else:
+                logger.info("   基石信号: %s / %s (%d/100)", cornerstone_analysis.get('label', '--'), cornerstone_analysis.get('recommendation', '--'), cs_score)
+                for red_flag in cornerstone_analysis.get('red_flags', []):
+                    logger.info("   基石红旗: %s", red_flag)
 
         stock_quality = ipo.get('stock_quality', {})
         if stock_quality:
