@@ -100,7 +100,8 @@ SECTOR_KEYWORDS = {
             'clinical trial', 'biotech', 'biopharmaceutical', 'pharmaceutical',
             'surgery', 'orthopaedic', 'fda', 'drug candidate', 'life sciences',
             '18a', 'medicine', 'therapy', 'surgical implant', 'medical device',
-            'hospital', 'diagnostic', 'therapeutic',
+            'hospital', 'diagnostic', 'therapeutic', 'innovative drug',
+            '医疗器械', '创新药',
         ],
         'mainline': ['medical device', 'surgery', 'orthopaedic', 'innovative drug', 'biotech', 'pharmaceutical', '医疗器械', '创新药'],
         'industrial': ['healthcare', 'medical', 'pharma', 'biotech', 'life sciences', '医疗', '医药'],
@@ -111,6 +112,7 @@ SECTOR_KEYWORDS = {
             'sensor', 'lidar', 'hardware', 'software', 'saas', 'cloud',
             'intelligent', 'automation', 'platform', 'algorithm',
             'visual perception', 'deep learning', 'neural network',
+            'ai', 'compute', '芯片', '半导体', '人工智能',
         ],
         'mainline': ['ai', 'artificial intelligence', 'semiconductor', 'chip', 'robot', 'compute', 'cloud', 'hardware', '芯片', '半导体', '人工智能'],
         'industrial': ['technology', 'semiconductor', 'industrial', 'ai', 'innovation', '科技', '半导体'],
@@ -118,6 +120,7 @@ SECTOR_KEYWORDS = {
     'consumer': {
         'classify': [
             'consumer', 'retail', 'restaurant', 'food', 'beverage', 'beauty', 'fashion',
+            'gold', 'jewelry', 'brand', '黄金', '珠宝', '美妆',
         ],
         'mainline': ['gold', 'jewelry', 'brand', 'beauty', 'retail', '黄金', '珠宝', '美妆'],
         'industrial': ['consumer', 'brand', 'retail', 'food', '消费', '品牌'],

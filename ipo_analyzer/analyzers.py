@@ -39,7 +39,7 @@ class ValuationAnalyzer:
             return True
         return False
 
-    def analyze(self, prospectus_info, ipo_data=None):
+    def analyze(self, prospectus_info, text='', ipo_data=None):
         result = {
             'pe_ratio': None, 'adjusted_pe_ratio': None, 'pb_ratio': None, 'ps_ratio': None,
             'valuation_label': '缺失', 'absolute_valuation_label': '缺失',
@@ -356,7 +356,7 @@ class BusinessBreakdownAnalyzer:
         'total revenue', 'total', 'amount',
     ]
 
-    def analyze(self, text, prospectus_info):
+    def analyze(self, prospectus_info, text='', ipo_data=None):
         result = {
             'segments': [],
             'main_segment': None,
@@ -768,7 +768,7 @@ class GeographicExpansionAnalyzer:
                 is_overseas = False
         return is_china, is_overseas
 
-    def analyze(self, text, prospectus_info):
+    def analyze(self, prospectus_info, text='', ipo_data=None):
         result = {
             'china_revenue_latest': None,
             'overseas_revenue_latest': None,
@@ -931,7 +931,7 @@ class CustomerSupplierAnalyzer:
         except ValueError:
             return None
 
-    def analyze(self, text, prospectus_info):
+    def analyze(self, prospectus_info, text='', ipo_data=None):
         result = {
             'top5_customer_revenue_pct': None,
             'largest_customer_revenue_pct': None,
@@ -1039,7 +1039,7 @@ class WorkingCapitalCashFlowAnalyzer:
             latest = latest / 1000
         return round(latest, 3)
 
-    def analyze(self, text, prospectus_info):
+    def analyze(self, prospectus_info, text='', ipo_data=None):
         result = {
             'operating_cash_flow': None,
             'ocf_to_net_profit': None,
@@ -1121,7 +1121,7 @@ class ProductionCapacityAnalyzer:
             return float(capacity_match.group(1))
         return None
 
-    def analyze(self, text, prospectus_info):
+    def analyze(self, prospectus_info, text='', ipo_data=None):
         result = {
             'utilization_rate': None,
             'expansion_plan': None,
@@ -1173,7 +1173,7 @@ class RnDPipelineAnalyzer:
         r'pipeline',
     ]
 
-    def analyze(self, text, prospectus_info):
+    def analyze(self, prospectus_info, text='', ipo_data=None):
         result = {
             'rd_expense_latest': None, 'rd_expense_ratio': None,
             'product_count_approved': None, 'product_count_pipeline': None,
@@ -1324,7 +1324,7 @@ class RnDPipelineAnalyzer:
 
 
 class RiskFactorAnalyzer:
-    def analyze(self, text, prospectus_info):
+    def analyze(self, prospectus_info, text='', ipo_data=None):
         result = {
             'risks': {},
             'total_penalty': 0,

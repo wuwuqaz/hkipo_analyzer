@@ -16,11 +16,14 @@ from ipo_analyzer.peer_comps import (
     _filter_peer_candidates,
     _build_issuer_aliases,
     _split_peer_samples,
+    _calc_company_valuation_metrics,
     PeerComparableAnalyzer,
 )
 from ipo_analyzer.analyzers import ValuationAnalyzer
 from ipo_analyzer.scoring import SignalComponentAnalyzer, ScoringSystem
 from ipo_analyzer.models import IPOData, ValuationResult, PeerComparisonResult, ProspectusInfo
+from ipo_analyzer.parser import ProspectusParser
+from ipo_analyzer.core import _calculate_final_score
 
 
 def test_issuer_alias_not_in_unmatched():
@@ -328,6 +331,118 @@ def test_advanced_framework_adjustment_removed():
     print("✅ test_advanced_framework_adjustment_removed passed")
 
 
+def test_financial_table_loss_and_used_cashflow_are_negative():
+    """财务主表 Loss / Net cash used 行应按负数入库"""
+    text = """
+Selected consolidated financial information
+Year ended December 31
+2023
+2024
+RMB'000
+Revenue
+100,000
+120,000
+Loss for the year
+50,000
+60,000
+Net cash used in operating activities
+30,000
+40,000
+"""
+    parser = ProspectusParser()
+    fin_table = parser._extract_consolidated_financial_table(text)
+    info = {}
+    parser._apply_financial_table_to_info(info, fin_table, source='consolidated_statement', force=True)
+
+    assert info.get("net_profit") == -60.0, f"Loss 行应为负净利润: {info.get('net_profit')}"
+    assert info.get("net_profit_y1") == -50.0, f"上一期 Loss 行应为负: {info.get('net_profit_y1')}"
+    assert info.get("profitable") is False, "Loss 行不应标记为盈利"
+    assert info.get("operating_cash_flow") == -40.0, f"Net cash used 应为负: {info.get('operating_cash_flow')}"
+    print("✅ test_financial_table_loss_and_used_cashflow_are_negative passed")
+
+
+def test_peer_company_metrics_use_hkd_currency_basis():
+    """同行对比自身 PS/PE 应使用与估值模块一致的 HKD 口径"""
+    pi = {
+        "market_cap_hkd_million": 1080,
+        "revenue": 100,
+        "net_profit": 10,
+        "financial_currency": "RMB",
+    }
+    company_ps, company_pe, _ = _calc_company_valuation_metrics(pi)
+    assert company_ps == 10.0, f"PS 应按 RMB->HKD 后计算: {company_ps}"
+    assert company_pe == 100.0, f"PE 应按 RMB->HKD 后计算: {company_pe}"
+    print("✅ test_peer_company_metrics_use_hkd_currency_basis passed")
+
+
+def test_insufficient_peer_sample_does_not_add_positive_peer_adj():
+    """quantitative peers 不足时，peer_score 不能给总分额外正向加分"""
+    ipo = {"over_sub_ratio": 20.0, "total_fund": 2.0, "market_heat": "温和"}
+    prospectus_info = {
+        "gross_margin": 35,
+        "profitable": True,
+        "revenue": 300,
+        "revenue_y1": 250,
+        "sector": "hardtech",
+        "cornerstone_analysis": {"score": 70, "label": "A级"},
+        "valuation": {"pe_ratio": 20.0, "ps_ratio": 3.0},
+        "peer_comparison": {
+            "peer_score": 12,
+            "scarcity_score": 7,
+            "valuation_position": "样本不足，仅作定性参考",
+            "quantitative_peer_count": 1,
+            "peer_sample_warning": "quantitative peers 仅 1 家，不参与强估值判断，仅作定性参考",
+        },
+    }
+    signal_components = {
+        'real_money': {'score': 8},
+        'float_structure': {'score': 7},
+        'valuation_framework': {'score': 10},
+        'mainline_beta': {'score': 5},
+        'stock_connect_path': {'score': 4},
+        'data_quality': {'score': 5},
+    }
+    result = ScoringSystem().calculate(ipo, prospectus_info, signal_components=signal_components)
+    reasons_text = " ".join(result.get("reasons", []))
+    assert "同行对比优异" not in reasons_text, "样本不足时不应给 peer_adj 正向加分"
+    assert "不额外加分" in reasons_text, "应说明同行样本不足仅作定性参考"
+    print("✅ test_insufficient_peer_sample_does_not_add_positive_peer_adj passed")
+
+
+def test_core_fundamental_score_matches_scoring_breakdown():
+    """展示用 fundamental_score 应与参与总分公式的分数一致"""
+
+    class FakeScorer:
+        def calculate(self, ipo_data, prospectus_info, signal_components=None):
+            return {
+                "score": 50,
+                "subscription_score": 11,
+                "fundamental_score": 42,
+                "reasons": [],
+                "components": {},
+                "trade_score": 10,
+                "valuation_score": 20,
+                "theme_score": 5,
+                "data_quality_score": 100,
+            }
+
+    class FakeQualityAnalyzer:
+        def analyze(self, prospectus_info):
+            return {"score": 88, "label": "优秀", "reasons": [], "dimensions": {}}
+
+    class FakeSignalAnalyzer:
+        def analyze(self, ipo_data, prospectus_info, prospectus_text):
+            return {"components": {}, "score": 0, "signal_breakdown": {}}
+
+    ipo_data = {"company_name": "TestCo", "hk_code": "1234"}
+    prospectus_info = {"sector": "unknown", "financial_data_quality_flags": []}
+    _calculate_final_score(FakeScorer(), FakeQualityAnalyzer(), FakeSignalAnalyzer(), ipo_data, prospectus_info, "")
+
+    assert ipo_data["fundamental_score"] == 42, "展示分应使用 ScoringSystem 的 fundamental_score"
+    assert ipo_data["stock_quality_score"] == 88, "股票质地分应单独保留，避免和评分公式混淆"
+    print("✅ test_core_fundamental_score_matches_scoring_breakdown passed")
+
+
 if __name__ == "__main__":
     test_issuer_alias_not_in_unmatched()
     test_quantitative_peers_less_than_two_weak_conclusion()
@@ -337,6 +452,10 @@ if __name__ == "__main__":
     test_signal_component_analyzer_biotech()
     test_scoring_system_new_weights()
     test_advanced_framework_adjustment_removed()
+    test_financial_table_loss_and_used_cashflow_are_negative()
+    test_peer_company_metrics_use_hkd_currency_basis()
+    test_insufficient_peer_sample_does_not_add_positive_peer_adj()
+    test_core_fundamental_score_matches_scoring_breakdown()
     print("\n" + "=" * 60)
     print("✅ 所有回归测试通过")
     print("=" * 60)

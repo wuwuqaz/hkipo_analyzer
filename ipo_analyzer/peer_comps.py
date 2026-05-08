@@ -527,7 +527,7 @@ def _match_subsector_in_sector(sector_data, combined_text, threshold=None):
     return matches
 
 
-def _extract_keywords_subsector(prospectus_info, prospectus_text, peer_data=None):
+def _extract_keywords_subsector(prospectus_info, text, peer_data=None):
     sector = prospectus_info.get("sector", "unknown")
     if peer_data is None:
         peer_data = _load_peer_data()
@@ -538,7 +538,7 @@ def _extract_keywords_subsector(prospectus_info, prospectus_text, peer_data=None
     rnd = prospectus_info.get("rnd_pipeline", {}) or {}
     rd_text = rnd.get("pipeline_quality_label", "") or ""
     combined = " ".join([
-        prospectus_text or "", seg_text, rd_text,
+        text or "", seg_text, rd_text,
         prospectus_info.get("sector", ""),
         str(biz.get("growth_source", "")),
     ]).lower()
@@ -579,15 +579,40 @@ def _extract_keywords_subsector(prospectus_info, prospectus_text, peer_data=None
 # 中位数 / 稀缺性 / 评分
 # ---------------------------------------------------------------------------
 
+def _is_hk_peer(peer):
+    """判断是否为港股同行（.HK 结尾或纯数字代码）"""
+    ticker = str(peer.get("ticker", "")).strip()
+    if not ticker or ticker == "private":
+        return False
+    return ticker.endswith(".HK") or ticker.isdigit()
+
+
 def _split_peer_samples(matched_peers):
-    """将 peers 分为 quantitative（可参与中位数计算）和 qualitative（仅参考）"""
-    quantitative_peers = [
-        p for p in matched_peers
-        if p.get("type") == "listed"
-        and not (p.get("ps") is None and p.get("pe") is None and p.get("market_cap_hkd_million") is None)
-        and p.get("data_quality") != "low"
-        and not p.get("needs_refresh", False)
-    ]
+    """将 peers 分为 quantitative（可参与中位数计算）和 qualitative（仅参考）
+
+    策略：优先使用港股同行。如果港股定量样本 >= 2，则仅使用港股做定量对比；
+    否则 fallback 到全部 listed 同行（含美股/A股）。
+    """
+    def _is_quantitative(p):
+        return (
+            p.get("type") == "listed"
+            and not (p.get("ps") is None and p.get("pe") is None and p.get("market_cap_hkd_million") is None)
+            and p.get("data_quality") != "low"
+            and not p.get("needs_refresh", False)
+        )
+
+    hk_peers = [p for p in matched_peers if _is_hk_peer(p)]
+    non_hk_peers = [p for p in matched_peers if not _is_hk_peer(p)]
+
+    hk_quant = [p for p in hk_peers if _is_quantitative(p)]
+    non_hk_quant = [p for p in non_hk_peers if _is_quantitative(p)]
+
+    # 港股优先：只要有定量港股，就只使用港股；完全没有时才 fallback 到美股/A股
+    if len(hk_quant) >= 1:
+        quantitative_peers = hk_quant
+    else:
+        quantitative_peers = non_hk_quant
+
     quantitative_set = {id(p) for p in quantitative_peers}
     qualitative_peers = [p for p in matched_peers if id(p) not in quantitative_set]
     return quantitative_peers, qualitative_peers
@@ -623,6 +648,39 @@ def _calc_company_market_cap_metric(company_mc, peer_median_mc):
     if not _is_num(company_mc) or not _is_num(peer_median_mc) or peer_median_mc <= 0:
         return None
     return round(company_mc / peer_median_mc * 100, 1)
+
+
+def _financial_fx_to_hkd(currency):
+    currency = str(currency or "RMB").upper().strip()
+    if currency in ("RMB", "CNY", "CNH"):
+        return SETTINGS.fx.rmb_to_hkd
+    if currency == "USD":
+        return SETTINGS.fx.usd_to_hkd
+    return 1.0
+
+
+def _calc_company_valuation_metrics(prospectus_info):
+    valuation = prospectus_info.get("valuation", {}) or {}
+    company_ps = valuation.get("ps_ratio")
+    company_pe = valuation.get("pe_ratio") or valuation.get("adjusted_pe_ratio")
+    company_pb = valuation.get("pb_ratio")
+
+    mc = prospectus_info.get("market_cap_hkd_million")
+    fx = _financial_fx_to_hkd(prospectus_info.get("financial_currency", "RMB"))
+    revenue_hkd = None
+    profit_hkd = None
+    revenue = prospectus_info.get("revenue")
+    net_profit = prospectus_info.get("net_profit")
+    if _is_num(revenue):
+        revenue_hkd = revenue * fx
+    if _is_num(net_profit):
+        profit_hkd = net_profit * fx
+
+    if company_ps is None and _is_num(mc) and _is_num(revenue_hkd) and revenue_hkd > 0:
+        company_ps = round(mc / revenue_hkd, 2)
+    if company_pe is None and _is_num(mc) and _is_num(profit_hkd) and profit_hkd > 0:
+        company_pe = round(mc / profit_hkd, 2)
+    return company_ps, company_pe, company_pb
 
 
 def _calc_scarcity_score(prospectus_info, matched_peers, sector):
@@ -767,7 +825,7 @@ class PeerComparableAnalyzer:
             self._all_peer_names = _collect_all_peer_names(self.peer_data)
         return self._all_peer_names
 
-    def analyze(self, prospectus_info, prospectus_text, ipo_data=None):
+    def analyze(self, prospectus_info, text='', ipo_data=None):
         """执行同行对比分析"""
         result = {
             "subsector": None,
@@ -801,7 +859,7 @@ class PeerComparableAnalyzer:
 
         # 1. 提取竞争章节
         try:
-            comp_chunks = _extract_competitor_chunks(prospectus_text)
+            comp_chunks = _extract_competitor_chunks(text)
         except Exception as e:
             logger.warning("竞争章节提取失败: %s", e)
             comp_chunks = []
@@ -809,7 +867,7 @@ class PeerComparableAnalyzer:
         # 2. 赛道匹配
         try:
             matched_sector, sk, sd, all_matches, best_hits = _extract_keywords_subsector(
-                prospectus_info, prospectus_text, self.peer_data,
+                prospectus_info, text, self.peer_data,
             )
         except Exception as e:
             logger.warning("赛道匹配异常: %s", e)
@@ -835,7 +893,7 @@ class PeerComparableAnalyzer:
 
         # 3. 识别已收录同行
         try:
-            mentioned = _find_mentioned_companies(prospectus_text, comp_chunks, sd)
+            mentioned = _find_mentioned_companies(text, comp_chunks, sd)
         except Exception as e:
             logger.warning("同行识别异常: %s", e)
             mentioned = []
@@ -876,18 +934,7 @@ class PeerComparableAnalyzer:
             result["peer_sample_warning"] = None
 
         # 5. 公司 PS/PE
-        valuation = prospectus_info.get("valuation", {}) or {}
-        company_ps = valuation.get("ps_ratio")
-        company_pe = valuation.get("pe_ratio") or valuation.get("adjusted_pe_ratio")
-        company_pb = valuation.get("pb_ratio")
-        if company_ps is None and company_pe is None:
-            mc = prospectus_info.get("market_cap_hkd_million")
-            rev = prospectus_info.get("revenue")
-            np_val = prospectus_info.get("net_profit")
-            if _is_num(mc) and _is_num(rev) and rev > 0:
-                company_ps = round(mc / rev, 2)
-            if _is_num(mc) and _is_num(np_val) and np_val > 0:
-                company_pe = round(mc / np_val, 2)
+        company_ps, company_pe, company_pb = _calc_company_valuation_metrics(prospectus_info)
         result["company_ps"] = company_ps
         result["company_pe"] = company_pe
         result["company_pb"] = company_pb

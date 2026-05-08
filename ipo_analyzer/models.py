@@ -353,7 +353,8 @@ class AdvancedFrameworkResult:
             return None
         comps_raw = data.get("components", {})
         comps = {k: DimensionScore(**v) if isinstance(v, dict) else v for k, v in comps_raw.items()}
-        other = {k: v for k, v in data.items() if k != "components"}
+        valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
+        other = {k: v for k, v in data.items() if k != "components" and k in valid_keys}
         return cls(components=comps, **other)
 
 
@@ -431,6 +432,8 @@ class ProspectusInfo:
     net_proceeds_hkd_million: Optional[float] = None
     issuance_ratio_pct: Optional[float] = None
     public_offer_ratio_pct: Optional[float] = None
+    public_offer: Optional[float] = None
+    total_fund: Optional[float] = None
     listing_date: Optional[str] = None
     results_date: Optional[str] = None
     sector: str = "unknown"
@@ -551,6 +554,7 @@ class IPOData:
     score: int = 0
     subscription_score: int = 0
     fundamental_score: int = 0
+    stock_quality_score: int = 0
     score_reasons: list[str] = field(default_factory=list)
     score_breakdown: dict[str, ScoreBreakdownComponent] = field(default_factory=dict)
     risk_penalty: int = 0

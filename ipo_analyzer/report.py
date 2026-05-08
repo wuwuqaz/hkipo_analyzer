@@ -287,6 +287,7 @@ def export_pdf_report(results, output_file):
             cornerstone_total_hkd = prospectus_info.get('cornerstone_investment_hkd_million')
             cornerstone_total_usd = prospectus_info.get('cornerstone_investment_usd_million')
             cornerstone_offer_ratio_pct = prospectus_info.get('cornerstone_offer_ratio_pct') or cornerstone_analysis.get('cornerstone_pct')
+            valuation = prospectus_info.get('valuation', {}) or {}
             global_offer_shares = prospectus_info.get('global_offer_shares')
             hk_offer_shares = prospectus_info.get('hk_offer_shares')
             intl_offer_shares = prospectus_info.get('international_offer_shares')
@@ -300,13 +301,7 @@ def export_pdf_report(results, output_file):
             ipo_pre_valuation_million = None
             if market_cap_million is not None and gross_proceeds_million is not None:
                 ipo_pre_valuation_million = max(0, market_cap_million - gross_proceeds_million)
-            pe_ratio = None
-            latest_profit = prospectus_info.get('net_profit')
-            if _is_num(market_cap_million) and _is_num(latest_profit) and latest_profit > 0:
-                try:
-                    pe_ratio = market_cap_million / latest_profit
-                except Exception:
-                    pe_ratio = None
+            pe_ratio = valuation.get('adjusted_pe_ratio') or valuation.get('pe_ratio')
 
             global_offer_lots = None
             hk_offer_lots = None
@@ -374,7 +369,7 @@ def export_pdf_report(results, output_file):
                 cornerstone_value = f"HK${cornerstone_hkd/100:.2f}亿({cornerstone_offer_ratio_pct:.2f}%)"
             add_pair("IPO前估值", _fmt_hkd_billion(ipo_pre_valuation_million), "总市值", _fmt_hkd_billion(market_cap_million), "#ffffff", l_color=_C['red'], r_color=_C['red'], l_bold=True, r_bold=True)
             add_pair("募集(公开)", _fmt_hkd_billion(gross_proceeds_million), "净募集", _fmt_hkd_billion(net_proceeds_million), _C['green_light'])
-            add_pair("发行比例", f"{issuance_ratio_pct:.2f}%" if issuance_ratio_pct is not None else "--", "市盈率(粗算)", f"{pe_ratio:.2f}x" if pe_ratio is not None else "--", "#ffffff")
+            add_pair("发行比例", f"{issuance_ratio_pct:.2f}%" if issuance_ratio_pct is not None else "--", "市盈率", f"{pe_ratio:.2f}x" if pe_ratio is not None else "--", "#ffffff")
             add_pair("基石投资", cornerstone_value, "基石占比", f"{cornerstone_offer_ratio_pct:.2f}%" if cornerstone_offer_ratio_pct is not None else "--", _C['blue_bg'])
 
             tbl = Table(rows, colWidths=[100, 150, 100, 150], hAlign="LEFT")

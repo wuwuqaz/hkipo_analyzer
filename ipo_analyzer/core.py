@@ -141,7 +141,6 @@ def _fetch_margin_data(client, ipo, margin_detail=None):
         ipo_data['actual_over_sub_ratio'] = actual_over
         ipo_data['forecast_over_sub_ratio'] = forecast_over
         ipo_data['margin_detail'] = margin_detail
-        ipo_data['total_fund'] = ipo_data['public_offer']
 
         market_heat_value = ipo_data['over_sub_ratio'] or 0
         if market_heat_value >= SETTINGS.market_heat.extreme:
@@ -164,20 +163,20 @@ def _fetch_margin_data(client, ipo, margin_detail=None):
         logger.info("  ✓ 市场热度: %s", ipo_data['market_heat'])
     elif margin_data:
         ipo_data['margin_total'] = _safe_float(margin_data)
-        ipo_data['total_fund'] = ipo_data.get('public_offer')
         logger.info("  ✓ 孖展资金总计: %s", f"{ipo_data['margin_total']:.2f}亿" if ipo_data['margin_total'] is not None else "--")
 
     return ipo_data
 
 
 def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, prospectus_info, prospectus_text):
-    business_result = BusinessBreakdownAnalyzer().analyze(prospectus_text, prospectus_info)
-    geographic_result = GeographicExpansionAnalyzer().analyze(prospectus_text, prospectus_info)
-    customer_result = CustomerSupplierAnalyzer().analyze(prospectus_text, prospectus_info)
-    cashflow_result = WorkingCapitalCashFlowAnalyzer().analyze(prospectus_text, prospectus_info)
-    capacity_result = ProductionCapacityAnalyzer().analyze(prospectus_text, prospectus_info)
-    rnd_result = RnDPipelineAnalyzer().analyze(prospectus_text, prospectus_info)
-    risk_result = RiskFactorAnalyzer().analyze(prospectus_text, prospectus_info)
+    text = prospectus_text  # 统一接口别名
+    business_result = BusinessBreakdownAnalyzer().analyze(prospectus_info, text)
+    geographic_result = GeographicExpansionAnalyzer().analyze(prospectus_info, text)
+    customer_result = CustomerSupplierAnalyzer().analyze(prospectus_info, text)
+    cashflow_result = WorkingCapitalCashFlowAnalyzer().analyze(prospectus_info, text)
+    capacity_result = ProductionCapacityAnalyzer().analyze(prospectus_info, text)
+    rnd_result = RnDPipelineAnalyzer().analyze(prospectus_info, text)
+    risk_result = RiskFactorAnalyzer().analyze(prospectus_info, text)
 
     prospectus_info['business_breakdown'] = business_result
     prospectus_info['geographic'] = geographic_result
@@ -189,20 +188,21 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
 
     # 同行对比分析 (在估值之前，为估值提供同行背景)
     try:
-        peer_result = PeerComparableAnalyzer().analyze(prospectus_info, prospectus_text, ipo_data)
+        peer_result = PeerComparableAnalyzer().analyze(prospectus_info, text, ipo_data)
     except Exception as e:
         logger.warning("同行对比分析异常: %s", e)
         peer_result = {"warnings": [f"分析异常: {e}"]}
     prospectus_info['peer_comparison'] = peer_result
 
     # 估值分析 (有同行数据可做相对估值)
-    valuation_result = ValuationAnalyzer().analyze(prospectus_info, ipo_data)
+    valuation_result = ValuationAnalyzer().analyze(prospectus_info, text, ipo_data)
     prospectus_info['valuation'] = valuation_result
 
     signal_result = signal_analyzer.analyze(ipo_data, prospectus_info, prospectus_text)
     prospectus_info['advanced_framework'] = signal_result  # 兼容旧字段
 
     stock_quality = quality_analyzer.analyze(prospectus_info)
+    prospectus_info['stock_quality'] = stock_quality  # 供 ScoringSystem 复用，消除重复评分
     scoring = scorer.calculate(ipo_data, prospectus_info, signal_components=signal_result.get('components'))
 
     risk_penalty = risk_result.get('total_penalty', 0)
@@ -215,7 +215,8 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
 
     ipo_data['score'] = final_score
     ipo_data['subscription_score'] = scoring.get('subscription_score', 0)
-    ipo_data['fundamental_score'] = stock_quality.get('score', scoring.get('fundamental_score', 0))
+    ipo_data['fundamental_score'] = scoring.get('fundamental_score', stock_quality.get('score', 0))
+    ipo_data['stock_quality_score'] = stock_quality.get('score', 0)
     ipo_data['score_reasons'] = scoring['reasons']
     ipo_data['score_breakdown'] = scoring.get('components', {})
     ipo_data['risk_penalty'] = total_risk_penalty
@@ -236,11 +237,26 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
             ipo_data[field] = prospectus_info[field]
 
 
+def _run_scoring_pipeline(ipo_data, prospectus_info, prospectus_text, pdf_path=None):
+    """统一评分管线：_calculate_final_score + _attach_debug_info + IPOData 规范化"""
+    scorer, quality_analyzer, advanced_analyzer = _init_analyzers()
+    _calculate_final_score(scorer, quality_analyzer, advanced_analyzer, ipo_data, prospectus_info, prospectus_text)
+    _attach_debug_info(ipo_data, pdf_path, prospectus_info, prospectus_text)
+    try:
+        from .models import IPOData
+        normalized = IPOData.from_dict(ipo_data)
+        if normalized is not None:
+            return normalized.to_dict(drop_runtime=False)
+    except Exception as e:
+        logger.warning("IPOData 模型规范化失败: %s，返回原始 dict", e)
+    return ipo_data
+
+
 def _init_analyzers():
     return ScoringSystem(), ProspectusQualityAnalyzer(), SignalComponentAnalyzer()
 
 
-def _process_ipo(client, downloader, parser, scorer, quality_analyzer, advanced_analyzer, ipo, output_dir, force_refresh=False):
+def _process_ipo(client, downloader, parser, ipo, output_dir, force_refresh=False):
     ipo_data = _fetch_margin_data(client, ipo)
     stock_code = ipo_data['hk_code']
     company_name = ipo_data['company_name']
@@ -273,20 +289,7 @@ def _process_ipo(client, downloader, parser, scorer, quality_analyzer, advanced_
         prospectus_info = parser.parse(stock_code, company_name)
 
     prospectus_text = prospectus_info.get('_extracted_text', '') or ""
-
-    _calculate_final_score(scorer, quality_analyzer, advanced_analyzer, ipo_data, prospectus_info, prospectus_text)
-    _attach_debug_info(ipo_data, pdf_path, prospectus_info, prospectus_text)
-
-    # 通过 dataclass 做一次结构校验与规范化（兼容层，失败时回退原始 dict）
-    try:
-        from .models import IPOData
-        normalized = IPOData.from_dict(ipo_data)
-        if normalized is not None:
-            return normalized.to_dict(drop_runtime=False)
-    except Exception as e:
-        logger.warning("IPOData 模型规范化失败: %s，返回原始 dict", e)
-
-    return ipo_data
+    return _run_scoring_pipeline(ipo_data, prospectus_info, prospectus_text, pdf_path)
 
 
 def main():
@@ -305,7 +308,6 @@ def main():
     logger.info("\n✓ 找到 %d 个正在招股的IPO", len(live_ipos))
 
     downloader = ProspectusDownloader()
-    scorer, quality_analyzer, advanced_analyzer = _init_analyzers()
 
     results = []
     temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "temp")
@@ -321,7 +323,7 @@ def main():
         logger.info("处理: %s (%s)", company_name, stock_code)
         logger.info("="*60)
 
-        ipo_data = _process_ipo(client, downloader, parser, scorer, quality_analyzer, advanced_analyzer, ipo, temp_dir)
+        ipo_data = _process_ipo(client, downloader, parser, ipo, temp_dir)
         results.append(ipo_data)
 
     results.sort(key=lambda x: x.get('score', 0), reverse=True)
@@ -480,7 +482,6 @@ def analyze_live_ipos(output_dir="temp", force_refresh=False, return_status=Fals
 
         downloader = ProspectusDownloader()
         parser = ProspectusParser(cache_dir=output_dir)
-        scorer, quality_analyzer, advanced_analyzer = _init_analyzers()
         os.makedirs(output_dir, exist_ok=True)
 
         if force_refresh:
@@ -493,7 +494,7 @@ def analyze_live_ipos(output_dir="temp", force_refresh=False, return_status=Fals
 
         for ipo in live_ipos:
             try:
-                ipo_data = _process_ipo(client, downloader, parser, scorer, quality_analyzer, advanced_analyzer, ipo, output_dir, force_refresh=force_refresh)
+                ipo_data = _process_ipo(client, downloader, parser, ipo, output_dir, force_refresh=force_refresh)
                 results.append(ipo_data)
             except Exception as e:
                 logger.error(f"分析 {ipo.get('shortname', '')} 失败: {e}")
@@ -517,7 +518,6 @@ def analyze_single_ipo(stock_code, company_name=None, output_dir="temp"):
         client = AiPOMarginClient()
         downloader = ProspectusDownloader()
         parser = ProspectusParser(cache_dir=output_dir)
-        scorer, quality_analyzer, advanced_analyzer = _init_analyzers()
         os.makedirs(output_dir, exist_ok=True)
 
         ipo_data = {
@@ -543,13 +543,14 @@ def analyze_single_ipo(stock_code, company_name=None, output_dir="temp"):
 
         prospectus_info = {}
         if pdf_path and os.path.exists(pdf_path):
-            prospectus_info = parser.parse(stock_code, company_name or stock_code)
+            prospectus_info = parser.parse_pdf_file(
+                pdf_path,
+                stock_code=stock_code,
+                company_name=company_name or stock_code,
+            )
 
         prospectus_text = prospectus_info.get('_extracted_text', '') or ""
-
-        _calculate_final_score(scorer, quality_analyzer, advanced_analyzer, ipo_data, prospectus_info, prospectus_text)
-        _attach_debug_info(ipo_data, pdf_path, prospectus_info, prospectus_text)
-        return ipo_data
+        return _run_scoring_pipeline(ipo_data, prospectus_info, prospectus_text, pdf_path)
     except Exception as e:
         return {'error': str(e), 'hk_code': stock_code, 'company_name': company_name}
 
@@ -557,8 +558,6 @@ def analyze_single_ipo(stock_code, company_name=None, output_dir="temp"):
 def analyze_uploaded_pdf(pdf_path, stock_code=None, company_name=None):
     try:
         parser = ProspectusParser()
-        scorer, quality_analyzer, advanced_analyzer = _init_analyzers()
-
         prospectus_info = parser.parse_pdf_file(pdf_path, stock_code=stock_code, company_name=company_name)
 
         prospectus_text = prospectus_info.get('_extracted_text', '') or ""
@@ -577,9 +576,7 @@ def analyze_uploaded_pdf(pdf_path, stock_code=None, company_name=None):
             'public_offer': None,
         }
 
-        _calculate_final_score(scorer, quality_analyzer, advanced_analyzer, ipo_data, prospectus_info, prospectus_text)
-        _attach_debug_info(ipo_data, pdf_path, prospectus_info, prospectus_text)
-        return ipo_data
+        return _run_scoring_pipeline(ipo_data, prospectus_info, prospectus_text, pdf_path)
     except Exception as e:
         return {'error': str(e)}
 

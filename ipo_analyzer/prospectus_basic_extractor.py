@@ -105,15 +105,15 @@ def infer_sector_label(text: str) -> str:
 def extract_prospectus_basic_info(text: str, info: dict) -> None:
     """从招股书文本中提取发行基本信息，直接写入 info dict（原地修改）。"""
     offer_shares = extract_int_after_label(text, [
-        r'Number of Offer Shares under\s*the Global Offering\s*:\s*([0-9,]+)',
-        r'Number of Offer Shares under\s*the Global Offering\s*([0-9,]+)\s*H Shares',
+        r'Number of Offer Shares under\s*the Global\s*Offering\s*[:：]?\s*\n?\s*([0-9,]+)',
+        r'Number of Offer Shares under\s*the Global\s*Offering\s*([0-9,]+)\s*H Shares',
     ])
     hk_offer_shares = extract_int_after_label(text, [
-        r'Number of Hong Kong Offer Shares\s*:\s*([0-9,]+)',
+        r'Number of Hong Kong Offer Shares\s*[:：]?\s*\n?\s*([0-9,]+)',
         r'Number of Hong Kong Offer Shares\s*([0-9,]+)\s*H Shares',
     ])
     intl_offer_shares = extract_int_after_label(text, [
-        r'Number of International Offer Shares\s*:\s*([0-9,]+)',
+        r'Number of International Offer Shares\s*[:：]?\s*\n?\s*([0-9,]+)',
         r'Number of International Offer Shares\s*([0-9,]+)\s*H Shares',
     ])
     offer_price = extract_float_after_label(text, [
@@ -131,11 +131,11 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
             info['lot_size'] = board_lot
 
     post_listing_shares = extract_int_after_label(text, [
-        r'([0-9,]+)\s*Shares expected to be in issue immediately\s*upon completion of the Global Offering',
-        r'([0-9,]+)\s*Shares in\s*issue immediately following completion of the Global Offering',
-        r'([0-9,]+)\s*Shares will be in issue and outstanding immediately\s*following the completion of the Global Offering',
-        r'([0-9,]+)\s*H Shares in issue immediately following completion of the Global Offering',
-        r'([0-9,]+)\s*H Shares in issue immediately upon completion of the Global Offering',
+        r'([0-9,]+)\s*(?:H\s*)?Shares expected to be in issue immediately\s+(?:after|upon)\s+(?:the\s+)?completion of the Global Offering',
+        r'([0-9,]+)\s*(?:H\s*)?Shares in\s*issue immediately\s+(?:following|after)\s+(?:the\s+)?completion of the Global Offering',
+        r'([0-9,]+)\s*(?:Offer\s*)?Shares(?:\s*are)?\s*issued and outstanding\s+(?:following|after)\s+(?:the\s+)?completion of the Global Offering',
+        r'([0-9,]+)\s*(?:H\s*)?Shares will be in issue and outstanding immediately\s+(?:following|after)\s+(?:the\s+)?completion of the Global Offering',
+        r'([0-9,]+)\s*(?:H\s*)?Shares in issue immediately upon completion of the Global Offering',
     ])
 
     # --- 多口径市值提取 ---
@@ -236,6 +236,12 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
 
     if hk_offer_shares and offer_shares:
         info['public_offer_ratio_pct'] = hk_offer_shares / offer_shares * 100
+
+    # 从招股书估算公开集资额与总集资额（亿港元，供 pre-IPO 评分使用）
+    if _is_num(offer_price) and hk_offer_shares:
+        info['public_offer'] = round(offer_price * hk_offer_shares / 100_000_000, 2)
+    if _is_num(offer_price) and offer_shares:
+        info['total_fund'] = round(offer_price * offer_shares / 100_000_000, 2)
 
     if info.get('cornerstone_analysis', {}).get('cornerstone_investors'):
         cornerstone_rows = info['cornerstone_analysis']['cornerstone_investors']

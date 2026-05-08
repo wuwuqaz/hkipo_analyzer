@@ -242,6 +242,15 @@ class ProspectusParser:
 
         return values[:year_count] if len(values) >= year_count else []
 
+    @staticmethod
+    def _row_implies_negative(key, row_line):
+        lower = (row_line or '').lower()
+        if key in ('net_profit', 'adjusted_net_profit'):
+            return bool(re.match(r'^(?:adjusted\s+net\s+)?loss\b', lower))
+        if key == 'operating_cash_flow':
+            return bool(re.match(r'^net\s+cash\s+used\b', lower))
+        return False
+
     def _extract_consolidated_financial_table(self, text):
         """提取综合损益表主表，避免业务分部表或叙述段落覆盖核心财务值。"""
         lines = text.split('\n')
@@ -252,7 +261,7 @@ class ProspectusParser:
             ('rd_expense', [r'^Research and development expenses\b']),
             ('net_profit', [r'^(?:Profit|Loss) for the year\b', r'^Profit/\(Loss\) for the year\b', r'^(?:Profit|Loss) for the period\b']),
             ('adjusted_net_profit', [r'^Adjusted net profit\b', r'^Adjusted net loss\b']),
-            ('operating_cash_flow', [r'^Net cash (?:generated|used) from operating activities\b']),
+            ('operating_cash_flow', [r'^Net cash (?:generated|used) (?:from|in) operating activities\b']),
         ]
 
         _YEAR_HEADERS = [
@@ -354,6 +363,8 @@ class ProspectusParser:
                         if key == 'gross_profit' and 'margin' in cleaned_line.lower():
                             continue
                         values = self._extract_financial_row_values(block_lines, row_idx, len(years))
+                        if self._row_implies_negative(key, cleaned_line):
+                            values = [-abs(v) for v in values]
                         if len(values) >= len(years):
                             table[key] = {year: values[pos] for pos, year in enumerate(years)}
                         break
@@ -588,6 +599,20 @@ class ProspectusParser:
                 logger.info("PDF内容匹配公司名称")
             if identity['stock_code_match']:
                 logger.info("PDF内容匹配股票代码")
+
+        # 根据公司名称后缀修正行业分类（-B 强制 healthcare；-P 含医药信号时修正）
+        if company_name:
+            cn_lower = company_name.lower()
+            if any(s in cn_lower for s in ['-b', '－b', '－ｂ', '－Ｂ']):
+                info['sector'] = 'healthcare'
+            elif any(s in cn_lower for s in ['-p', '－p', '－ｐ', '－Ｐ']) and info.get('sector') == 'hardtech':
+                healthcare_signals = [
+                    'drug', 'pharmaceutical', 'medicine', 'clinical trial',
+                    'biotech', 'therapeutic', 'pipeline', 'drug candidate',
+                    '医药', '药物', '临床', '创新药', '疗法', '制药',
+                ]
+                if any(s in text.lower() for s in healthcare_signals):
+                    info['sector'] = 'healthcare'
 
         info['parse_success'] = True
         return info

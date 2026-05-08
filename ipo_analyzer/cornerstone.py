@@ -121,6 +121,30 @@ class CornerstoneAnalyzer:
             'sector_tags': ['all'],
         },
         {
+            'name': 'Ontario Teachers',
+            'tier': 'S',
+            'category': '顶级主权基金/养老金',
+            'aliases': ['ontario teachers', 'ontario teachers pension', '安大略教师', '安大略'],
+            'role_note': '加拿大大型养老金，长线属性强',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': 'Norges Bank',
+            'tier': 'S',
+            'category': '顶级主权基金/养老金',
+            'aliases': ['norges bank', 'norway central bank', '挪威央行', '挪威主权'],
+            'role_note': '全球最大主权财富基金之一，长期配置能力强',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': 'PIF',
+            'tier': 'S',
+            'category': '顶级主权基金/养老金',
+            'aliases': ['public investment fund', 'pif', '沙特主权', '沙特公共投资基金'],
+            'role_note': '中东大型主权财富基金，长期资金属性强',
+            'sector_tags': ['all'],
+        },
+        {
             'name': 'Tencent',
             'tier': 'S',
             'category': '强产业战略投资者',
@@ -254,6 +278,14 @@ class CornerstoneAnalyzer:
             'category': '一线PE/VC/成长基金',
             'aliases': ['gaoyi', 'gao yi', '高毅资产', '高毅'],
             'role_note': '中国头部长线私募基金，港股基石参投经验丰富(10次+)',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': 'Danshuiquan',
+            'tier': 'A',
+            'category': '一线PE/VC/成长基金',
+            'aliases': ['danshuiquan', 'dan shui quan', '淡水泉'],
+            'role_note': '中国头部长线私募基金，擅长消费/医疗/科技领域',
             'sector_tags': ['all'],
         },
         {
@@ -444,7 +476,7 @@ class CornerstoneAnalyzer:
             'name': '地方/普通产业基金',
             'tier': 'B',
             'category': '地方国资/小型产业基金',
-            'aliases': ['local government', 'city investment', 'industrial fund', '产业基金', '地方国资', '城市基金'],
+            'aliases': ['local government', 'city investment', 'industrial fund', '产业基金', '地方国资', '城市基金', 'huatai capital', '华泰资本'],
             'role_note': '有资金承诺，但独立研究背书较弱',
             'sector_tags': ['all'],
         },
@@ -1466,3 +1498,39 @@ class CornerstoneAnalyzer:
         return self._build_v2_result(
             cornerstone_rows, matched, cornerstone_pct, sector, sector_match, spv_flags
         )
+
+
+# ---------------------------------------------------------------------------
+# 模块级辅助函数 — 供外部模块（如 SignalComponentAnalyzer）使用
+# ---------------------------------------------------------------------------
+
+def get_sovereign_capital():
+    """获取主权/养老基金列表 -> [(name, aliases), ...]"""
+    return [
+        (p['name'], p['aliases'])
+        for p in CornerstoneAnalyzer.INVESTOR_PROFILES
+        if p.get('category') == '顶级主权基金/养老金'
+    ]
+
+
+def get_top_tier_capital():
+    """获取顶级资本列表 -> [(name, aliases), ...]
+    包含 S-tier（非主权）+ A-tier。
+    """
+    return [
+        (p['name'], p['aliases'])
+        for p in CornerstoneAnalyzer.INVESTOR_PROFILES
+        if p.get('tier') in ('S', 'A')
+        and p.get('category') != '顶级主权基金/养老金'
+    ]
+
+
+def get_weak_signal_capital():
+    """获取弱信号资本列表 -> [(name, aliases), ...]
+    包含 B-tier 和 弱-tier。
+    """
+    return [
+        (p['name'], p['aliases'])
+        for p in CornerstoneAnalyzer.INVESTOR_PROFILES
+        if p.get('tier') in ('B', '弱')
+    ]

@@ -197,10 +197,12 @@ class StockConnectThresholds:
     large_cap: float = 150000.0
     fast_track: float = 20000.0
     regular: float = 10000.0
+    small_cap: float = 5000.0
     score_ah: int = 10
     score_large: int = 10
     score_fast: int = 8
     score_regular: int = 6
+    score_small: int = 4
 
 
 @dataclass
