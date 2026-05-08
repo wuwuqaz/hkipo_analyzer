@@ -99,6 +99,9 @@ class ValuationAnalyzer:
             result['adjusted_profit_hkd_million'] = adjusted_profit_hkd
             result['market_cap_hkd_million'] = market_cap_m
 
+            # --- 估值阈值（提前初始化，避免后续使用未定义变量）---
+            vt = SETTINGS.valuation
+
             # --- 收入质量识别（对 biotech 重要）---
             text_lower = str(prospectus_info.get('_extracted_text', '')).lower()
             upfront_keywords = [
@@ -149,7 +152,6 @@ class ValuationAnalyzer:
                 result['valuation_framework_type'] = 'healthcare_standard'
 
             # --- 绝对估值 ---
-            vt = SETTINGS.valuation
             absolute_label = '缺失'
             if pe is not None:
                 if pe > vt.pe_expensive:

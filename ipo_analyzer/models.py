@@ -569,6 +569,15 @@ class IPOData:
     # 交易信号拆解（供 UI 展示）
     signal_breakdown: dict[str, Any] = field(default_factory=dict)
 
+    # 重新分析相关字段
+    weight_profile: dict[str, Any] = field(default_factory=dict)
+    score_weights_note: str = ""
+    data_confidence_gate_warning: Optional[str] = None
+    risk_penalty_breakdown: list[dict[str, Any]] = field(default_factory=list)
+    debug_info: Optional[dict[str, Any]] = None
+    penalty_reason: Optional[str] = None
+    _reanalysis: dict[str, Any] = field(default_factory=dict)
+
     # 解析元信息
     pdf_downloaded: bool = False
     pdf_path: Optional[str] = None

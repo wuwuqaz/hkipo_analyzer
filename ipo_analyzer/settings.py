@@ -365,12 +365,12 @@ class CornerstoneThresholds:
     grade_a: int = 70
     grade_a_strong: int = 80
     grade_b: int = 50
-    # 评分上限（有红旗时）
-    score_cap_high_red_flags: int = 49
-    score_cap_low_red_flags: int = 65
+    # 评分上限（有红旗时）- 提高封顶分数，让顶级机构组合能获得高分
+    score_cap_high_red_flags: int = 70
+    score_cap_low_red_flags: int = 80
     red_flags_high_count: int = 2
-    # SPV
-    spv_warning_count: int = 3
+    # SPV - 提高触发阈值，避免单一SPV表述触发红旗
+    spv_warning_count: int = 4
 
 
 # ---------------------------------------------------------------------------

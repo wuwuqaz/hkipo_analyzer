@@ -24,6 +24,7 @@ from .analyzers import (
 from .scoring import ProspectusQualityAnalyzer, SignalComponentAnalyzer, ScoringSystem
 from .peer_comps import PeerComparableAnalyzer
 from .report import export_pdf_report
+from .history import HistoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -260,8 +261,8 @@ def _calculate_risk_penalty(prospectus_info):
                 'reason': str(flag)
             })
 
-    largest_customer_pct = customer_result.get('largest_customer_pct')
-    top5_customer_pct = customer_result.get('top5_customer_pct')
+    largest_customer_pct = customer_result.get('largest_customer_revenue_pct') or customer_result.get('largest_customer_pct')
+    top5_customer_pct = customer_result.get('top5_customer_revenue_pct') or customer_result.get('top5_customer_pct')
     if _is_num(largest_customer_pct) and largest_customer_pct >= 50:
         penalty = min(3, rf.max_total_penalty - total_penalty)
         total_penalty += penalty
@@ -364,6 +365,8 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
     ipo_data['data_quality_score'] = scoring.get('data_quality_score', 0)
     # 权重配置信息
     ipo_data['weight_profile'] = scoring.get('weight_profile')
+    ipo_data['debug_info'] = scoring.get('debug_info')
+    ipo_data['penalty_reason'] = scoring.get('penalty_reason')
     # 兼容旧字段（deprecated）
     ipo_data['advanced_framework_score'] = signal_result.get('score', 0)
     ipo_data['advanced_score_adjustment'] = 0  # 已废弃，固定为0
@@ -819,7 +822,7 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
     
     # 身份校验警告
     pdf_identity_confidence = prospectus_info.get('pdf_identity_confidence', 0)
-    if pdf_identity_confidence < 0.5 and stock_code:
+    if _is_num(pdf_identity_confidence) and pdf_identity_confidence < 0.5 and stock_code:
         warnings.append("股票代码/公司名与PDF内容匹配度较低，请人工确认")
     
     # 构建IPO数据
@@ -840,23 +843,47 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
             ipo_data['margin_total'] = _safe_float(historical_market_data['margin_total'])
         if 'public_offer' in historical_market_data:
             ipo_data['public_offer'] = _safe_float(historical_market_data['public_offer'])
-        
+
         # 设置超购数据
         actual_over = _safe_float(historical_market_data.get('actual_over_sub_ratio'))
         forecast_over = _safe_float(historical_market_data.get('forecast_over_sub_ratio'))
-        
-        if actual_over:
+
+        if actual_over is not None:
             ipo_data['over_sub_ratio'] = actual_over
             ipo_data['over_sub_ratio_source'] = 'historical_actual'
+            ipo_data['actual_over_sub_ratio'] = actual_over
             heat_data_source = 'historical_actual'
-        elif forecast_over:
+        elif forecast_over is not None:
             ipo_data['over_sub_ratio'] = forecast_over
             ipo_data['over_sub_ratio_source'] = 'historical_forecast'
+            ipo_data['forecast_over_sub_ratio'] = forecast_over
             heat_data_source = 'historical_forecast'
-        
-        # 设置市场热度
-        if 'market_heat' in historical_market_data:
+        else:
+            # 尝试从孖展数据估算超购
+            margin_val = ipo_data.get('margin_total')
+            public_val = ipo_data.get('public_offer')
+            if _is_num(margin_val) and _is_num(public_val) and public_val > 0:
+                estimated_sub = margin_val / public_val
+                estimated_over = max(0, estimated_sub - 1)
+                ipo_data['over_sub_ratio'] = estimated_over
+                ipo_data['over_sub_ratio_source'] = 'estimated'
+                ipo_data['estimated_subscription_ratio'] = estimated_sub
+                ipo_data['over_sub_ratio_estimated'] = estimated_over
+                heat_data_source = 'estimated'
+
+        # 设置市场热度：优先使用显式值，否则根据超购倍数自动计算
+        if 'market_heat' in historical_market_data and historical_market_data['market_heat']:
             ipo_data['market_heat'] = historical_market_data['market_heat']
+        elif _is_num(ipo_data.get('over_sub_ratio')):
+            over_val = ipo_data['over_sub_ratio']
+            if over_val >= SETTINGS.market_heat.extreme:
+                ipo_data['market_heat'] = "极热"
+            elif over_val >= SETTINGS.market_heat.hot:
+                ipo_data['market_heat'] = "热门"
+            elif over_val >= SETTINGS.market_heat.warm:
+                ipo_data['market_heat'] = "温和"
+            else:
+                ipo_data['market_heat'] = "冷清"
     else:
         ipo_data['over_sub_ratio'] = None
         ipo_data['over_sub_ratio_source'] = 'missing'
@@ -885,24 +912,41 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
         'historical_market_data': historical_market_data,
         'pdf_identity_confidence': pdf_identity_confidence,
         'warning_messages': warnings,
+        'error_messages': errors,
         'info_messages': messages,
     }
-    
+
+    # 保存到 HistoryStore
+    try:
+        history_store = HistoryStore(output_dir)
+        record, version_delta = history_store.save_reanalysis(result)
+        if version_delta:
+            result['version_delta'] = version_delta
+    except Exception as e:
+        logger.warning(f"保存重新分析记录失败: {e}")
+
     status = "ok"
     message = "分析完成"
     suggestion = ""
-    
-    if warnings:
+
+    if errors:
+        status = "error"
+        message = "; ".join(errors)
+        suggestion = "请检查输入参数或PDF文件"
+    elif warnings:
         status = "warning"
         message = "; ".join(warnings)
         suggestion = "建议人工复核分析结果"
-    
+    elif messages:
+        message = "; ".join(messages)
+
     return {
         "status": status,
         "message": message if message else "分析完成",
         "suggestion": suggestion,
         "result": result,
         "warning_messages": warnings,
+        "error_messages": errors,
         "info_messages": messages,
     }
 

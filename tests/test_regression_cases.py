@@ -1122,6 +1122,204 @@ def test_reanalyze_ipo_returns_unified_structure():
         shutil.rmtree(temp_dir)
 
 
+def test_cornerstone_red_flags_penalty_normal():
+    """普通基石红旗扣分测试：每个普通红旗扣3分，最高10分"""
+    from ipo_analyzer.scoring import ScoringSystem
+
+    scorer = ScoringSystem()
+
+    ipo = {
+        'over_sub_ratio': 4322.0,
+        'over_sub_ratio_source': 'historical_actual',
+        'margin_total': 500.0,
+        'public_offer': 10.0,
+    }
+
+    prospectus_info = {
+        'cornerstone_analysis': {
+            'score': 80,
+            'label': '强基石',
+            'has_cornerstone_section': True,
+            'red_flags': ['普通风险1', '普通风险2', '普通风险3'],
+        },
+        'quality_score': 70,
+        'stock_quality': {
+            'score': 70,
+            'label': '优',
+            'reasons': [],
+            'dimensions': {},
+        },
+    }
+
+    result = scorer.calculate(ipo, prospectus_info)
+
+    assert result['penalty_reason'] is not None, "应有扣分原因"
+    assert '基石红旗扣' in result['penalty_reason'], "应包含基石红旗扣分"
+    assert 'debug_info' in result, "应有 debug_info 字段"
+    assert result['debug_info']['cornerstone_red_flags'] == ['普通风险1', '普通风险2', '普通风险3']
+
+    print("✅ test_cornerstone_red_flags_penalty_normal passed")
+
+
+def test_cornerstone_severe_flags_cap_60():
+    """严重基石红旗封顶测试：严重红旗封顶60分"""
+    from ipo_analyzer.scoring import ScoringSystem
+
+    scorer = ScoringSystem()
+
+    ipo = {
+        'over_sub_ratio': 4322.0,
+        'over_sub_ratio_source': 'historical_actual',
+        'margin_total': 500.0,
+        'public_offer': 10.0,
+    }
+
+    prospectus_info = {
+        'cornerstone_analysis': {
+            'score': 80,
+            'label': '强基石',
+            'has_cornerstone_section': True,
+            'red_flags': ['关联方认购', '锁定异常'],
+        },
+        'quality_score': 70,
+        'stock_quality': {
+            'score': 70,
+            'label': '优',
+            'reasons': [],
+            'dimensions': {},
+        },
+    }
+
+    result = scorer.calculate(ipo, prospectus_info)
+
+    assert result['penalty_reason'] is not None, "应有扣分原因"
+    assert '严重基石问题封顶60' in result['penalty_reason'], "应包含严重基石问题封顶"
+    assert result['score'] <= 60, f"严重红旗封顶60，实际 {result['score']}"
+
+    print("✅ test_cornerstone_severe_flags_cap_60 passed")
+
+
+def test_cornerstone_no_red_flags_no_penalty():
+    """无基石红旗：不扣分不封顶"""
+    from ipo_analyzer.scoring import ScoringSystem
+
+    scorer = ScoringSystem()
+
+    ipo = {
+        'over_sub_ratio': 4322.0,
+        'over_sub_ratio_source': 'historical_actual',
+        'margin_total': 500.0,
+        'public_offer': 10.0,
+    }
+
+    prospectus_info = {
+        'cornerstone_analysis': {
+            'score': 80,
+            'label': '强基石',
+            'has_cornerstone_section': True,
+            'red_flags': [],
+        },
+        'quality_score': 70,
+        'stock_quality': {
+            'score': 70,
+            'label': '优',
+            'reasons': [],
+            'dimensions': {},
+        },
+    }
+
+    result = scorer.calculate(ipo, prospectus_info)
+
+    assert result['penalty_reason'] is None, "无红旗不应有扣分原因"
+    assert result['debug_info']['cap_reason'] is None, "无红旗不应有封顶原因"
+
+    print("✅ test_cornerstone_no_red_flags_no_penalty passed")
+
+
+def test_high_heat_with_normal_red_flags_not_capped_at_40():
+    """高热度+普通红旗：不应被封顶到40分"""
+    from ipo_analyzer.scoring import ScoringSystem
+
+    scorer = ScoringSystem()
+
+    ipo = {
+        'over_sub_ratio': 4322.0,
+        'over_sub_ratio_source': 'historical_actual',
+        'margin_total': 500.0,
+        'public_offer': 10.0,
+    }
+
+    prospectus_info = {
+        'cornerstone_analysis': {
+            'score': 80,
+            'label': '强基石',
+            'has_cornerstone_section': True,
+            'red_flags': ['SPV数量偏多', '认购集中度高'],
+        },
+        'quality_score': 70,
+        'stock_quality': {
+            'score': 70,
+            'label': '优',
+            'reasons': [],
+            'dimensions': {},
+        },
+    }
+
+    result = scorer.calculate(ipo, prospectus_info)
+
+    assert result['score'] > 40, f"高热度+普通红旗不应封顶40，实际 {result['score']}"
+    assert result['debug_info']['weight_profile']['name'] == 'live_heat', "应有 live_heat 权重"
+    assert result['debug_info']['over_sub_ratio'] == 4322.0, "超购倍数应为 4322"
+    assert result['debug_info']['trade_score'] > 50, f"trade_score 应较高，实际 {result['debug_info']['trade_score']}"
+
+    print("✅ test_high_heat_with_normal_red_flags_not_capped_at_40 passed")
+
+
+def test_debug_fields_present():
+    """调试字段完整性测试"""
+    from ipo_analyzer.scoring import ScoringSystem
+
+    scorer = ScoringSystem()
+
+    ipo = {
+        'over_sub_ratio': 100.0,
+        'over_sub_ratio_source': 'historical_actual',
+        'margin_total': 100.0,
+        'public_offer': 5.0,
+    }
+
+    prospectus_info = {
+        'cornerstone_analysis': {
+            'score': 60,
+            'label': '中基石',
+            'has_cornerstone_section': True,
+            'red_flags': ['普通红旗'],
+        },
+        'quality_score': 50,
+        'stock_quality': {
+            'score': 50,
+            'label': '中',
+            'reasons': [],
+            'dimensions': {},
+        },
+    }
+
+    result = scorer.calculate(ipo, prospectus_info)
+
+    debug = result['debug_info']
+    assert 'over_sub_ratio' in debug
+    assert 'over_sub_ratio_source' in debug
+    assert 'weight_profile' in debug
+    assert 'heat_score' in debug
+    assert 'trade_score' in debug
+    assert 'cornerstone_red_flags' in debug
+    assert 'final_score_before_cap' in debug
+    assert 'final_score_after_cap' in debug
+    assert 'cap_reason' in debug
+
+    print("✅ test_debug_fields_present passed")
+
+
 if __name__ == "__main__":
     test_issuer_alias_not_in_unmatched()
     test_quantitative_peers_less_than_two_weak_conclusion()
@@ -1154,6 +1352,11 @@ if __name__ == "__main__":
     test_reanalysis_version_delta_calculation()
     test_reanalysis_no_heat_data_uses_prospectus_only()
     test_reanalyze_ipo_returns_unified_structure()
+    test_cornerstone_red_flags_penalty_normal()
+    test_cornerstone_severe_flags_cap_60()
+    test_cornerstone_no_red_flags_no_penalty()
+    test_high_heat_with_normal_red_flags_not_capped_at_40()
+    test_debug_fields_present()
     print("\n" + "=" * 60)
     print("✅ 所有回归测试通过")
     print("=" * 60)

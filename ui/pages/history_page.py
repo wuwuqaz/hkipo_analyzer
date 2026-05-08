@@ -80,6 +80,28 @@ class HistoryPage:
                 for item in visible:
                     if item.get("hk_code") == stock_code:
                         self.detail_view.render(item)
+                        # 重新分析按钮
+                        if st.button("🔁 重新分析", key=f"reanalyze_{stock_code}", use_container_width=True):
+                            with st.spinner("正在重新分析..."):
+                                try:
+                                    from ipo_analyzer.core import reanalyze_ipo
+                                    response = reanalyze_ipo(
+                                        stock_code=stock_code,
+                                        company_name=item.get("company_name"),
+                                        output_dir=self.temp_dir,
+                                    )
+                                    if response.get("status") == "error":
+                                        st.error(f"重新分析失败: {response.get('message', '')}")
+                                    else:
+                                        st.success("✅ 重新分析完成！")
+                                        result = response.get("result", {})
+                                        version_delta = result.get("version_delta")
+                                        if version_delta:
+                                            self._render_version_delta(version_delta)
+                                        if result:
+                                            self.detail_view.render(result)
+                                except Exception as e:
+                                    st.error(f"重新分析异常: {e}")
                         break
 
         st.caption(DISCLAIMER)
@@ -122,3 +144,55 @@ class HistoryPage:
         for col, (label, value) in zip(stats_cols, stat_values):
             with col:
                 st.markdown(self.html.metric_card(label, str(value)), unsafe_allow_html=True)
+
+    def _render_version_delta(self, version_delta: dict) -> None:
+        prev_score = version_delta.get("previous_score")
+        curr_score = version_delta.get("current_score")
+        score_delta = version_delta.get("score_delta")
+        changed_reason = version_delta.get("changed_reason")
+
+        if prev_score is None or curr_score is None:
+            return
+
+        delta_color = "#16a34a" if score_delta and score_delta > 0 else ("#dc2626" if score_delta and score_delta < 0 else "#64748b")
+        delta_sign = "+" if score_delta and score_delta > 0 else ""
+
+        dim_rows = ""
+        for dim, delta in version_delta.get("dimension_deltas", {}).items():
+            dim_label = {
+                "trade_score": "交易",
+                "fundamental_score": "基本面",
+                "valuation_score": "估值",
+                "theme_score": "主题",
+                "data_quality_score": "数据质量",
+            }.get(dim, dim)
+            dim_color = "#16a34a" if delta > 0 else ("#dc2626" if delta < 0 else "#64748b")
+            dim_sign = "+" if delta > 0 else ""
+            dim_rows += (
+                f'<div style="display:inline-block;margin:2px 6px;padding:3px 8px;border-radius:8px;'
+                f'background:#f1f5f9;font-size:12px;">'
+                f'{dim_label}: <b style="color:{dim_color};">{dim_sign}{delta}</b></div>'
+            )
+
+        st.markdown(f"""
+        <div class="section-card" style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);color:white;padding:16px 20px;">
+            <div style="font-size:16px;font-weight:700;margin-bottom:8px;">📊 版本对比</div>
+            <div style="display:flex;gap:16px;align-items:center;margin-bottom:8px;">
+                <div style="text-align:center;">
+                    <div style="font-size:12px;color:#94a3b8;">上次评分</div>
+                    <div style="font-size:24px;font-weight:800;">{prev_score}</div>
+                </div>
+                <div style="font-size:20px;color:#94a3b8;">→</div>
+                <div style="text-align:center;">
+                    <div style="font-size:12px;color:#94a3b8;">本次评分</div>
+                    <div style="font-size:24px;font-weight:800;">{curr_score}</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:12px;color:#94a3b8;">变化</div>
+                    <div style="font-size:24px;font-weight:800;color:{delta_color};">{delta_sign}{score_delta}</div>
+                </div>
+            </div>
+            {f'<div style="font-size:13px;color:#94a3b8;margin-bottom:6px;">{changed_reason}</div>' if changed_reason else ''}
+            <div>{dim_rows}</div>
+        </div>
+        """, unsafe_allow_html=True)

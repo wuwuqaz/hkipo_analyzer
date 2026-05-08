@@ -100,11 +100,13 @@ class ScoringSystem:
         _CORNERSTONE_SCORE_MAX = sw.cornerstone_max
 
         over_sub = ipo.get('over_sub_ratio')
-        if over_sub is not None:
+        if _is_num(over_sub):
             source_label = {
                 'actual': '实际',
                 'forecast': '预测',
                 'estimated': '估算',
+                'historical_actual': '历史实际',
+                'historical_forecast': '历史预测',
             }.get(ipo.get('over_sub_ratio_source'), '可用')
             mh = SETTINGS.market_heat
             if over_sub >= mh.extreme:
@@ -219,6 +221,8 @@ class ScoringSystem:
                 'actual': '实际',
                 'forecast': '预测',
                 'estimated': '估算',
+                'historical_actual': '历史实际',
+                'historical_forecast': '历史预测',
             }.get(ipo.get('over_sub_ratio_source'), '可用基准')
             if trend_gap >= 0.3:
                 components['market']['score'] = 5
@@ -377,17 +381,61 @@ class ScoringSystem:
 
         score = round(raw_final + peer_adj + val_penalty)
 
-        if _is_num(cornerstone_score) and cornerstone_score < 50 and has_cornerstone_section:
-            score = min(score, 55)
-        if cornerstone_label in ('弱基石', '未披露'):
-            score = min(score, 55)
-        if cornerstone_analysis.get('red_flags'):
-            score = min(score, 40)
+        cornerstone_red_flags = cornerstone_analysis.get('red_flags', [])
+        final_score_before_cap = score
+        cap_reason = None
+        penalty_reason = None
+
+        SEVERE_CORNERSTONE_FLAGS = {
+            '关联方认购', 'related party', 'connected person',
+            '锁定异常', 'lockup abnormality', 'abnormal lockup',
+            '虚假基石', 'fake cornerstone',
+            '撤回认购', 'withdrawn subscription',
+            '高度不透明', 'opaque', 'spv过多', 'excessive spv',
+            '不透明spv',
+        }
+
+        if cornerstone_red_flags:
+            severe_flags = []
+            normal_flags = []
+            for flag in cornerstone_red_flags:
+                flag_lower = str(flag).lower()
+                is_severe = any(
+                    severe_keyword.lower() in flag_lower
+                    for severe_keyword in SEVERE_CORNERSTONE_FLAGS
+                )
+                if is_severe:
+                    severe_flags.append(flag)
+                else:
+                    normal_flags.append(flag)
+
+            penalty_from_normal = min(10, len(normal_flags) * 3)
+            if penalty_from_normal > 0:
+                score = max(0, score - penalty_from_normal)
+                penalty_reason = f"基石红旗扣{penalty_from_normal}分: {[f for f in normal_flags]}"
+
+            if severe_flags:
+                score = min(score, 60)
+                cap_reason = f"严重基石问题封顶60: {[f for f in severe_flags]}"
+                if penalty_reason:
+                    penalty_reason += f"; {cap_reason}"
+                else:
+                    penalty_reason = cap_reason
 
         if data_quality_score < 40:
             score = min(score, 60)
+            if cap_reason:
+                cap_reason += "; 数据质量低风险封顶60"
+            else:
+                cap_reason = "数据质量低风险封顶60"
         elif data_quality_score < 60:
             score = min(score, 85)
+            if cap_reason:
+                cap_reason += "; 数据质量中风险封顶85"
+            else:
+                cap_reason = "数据质量中风险封顶85"
+
+        final_score_after_cap = score
 
         return {
             'score': min(100, max(0, score)),
@@ -406,4 +454,16 @@ class ScoringSystem:
                 f"valuation={valuation_w:.0%} theme={theme_w:.0%} dq={dq_w:.0%} "
                 f"({weight_profile['reason']})"
             ),
+            'penalty_reason': penalty_reason,
+            'debug_info': {
+                'over_sub_ratio': over_sub,
+                'over_sub_ratio_source': ipo.get('over_sub_ratio_source'),
+                'weight_profile': weight_profile,
+                'heat_score': components['heat']['score'],
+                'trade_score': trade_score,
+                'cornerstone_red_flags': cornerstone_red_flags,
+                'final_score_before_cap': final_score_before_cap,
+                'final_score_after_cap': final_score_after_cap,
+                'cap_reason': cap_reason,
+            },
         }

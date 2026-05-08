@@ -11,6 +11,7 @@ import streamlit as st
 from ui.pages.dashboard_page import DashboardPage
 from ui.pages.upload_page import UploadPage
 from ui.pages.history_page import HistoryPage
+from ui.pages.reanalyze_page import ReanalyzePage
 from ui.utils.file_utils import cleanup_temp_files
 from ui.renderers.html_renderer import HtmlRenderer
 from ui.constants import DISCLAIMER
@@ -44,6 +45,7 @@ def _peer_admin_factory():
 PAGE_REGISTRY = [
     ("🏠 首页 Dashboard", lambda: DashboardPage(TEMP_DIR)),
     ("📤 手动上传分析", lambda: UploadPage(TEMP_DIR)),
+    ("🔁 历史IPO重新分析", lambda: ReanalyzePage(TEMP_DIR)),
     ("📚 历史分析", lambda: HistoryPage(TEMP_DIR)),
     ("🧩 同行库管理", _peer_admin_factory),
 ]

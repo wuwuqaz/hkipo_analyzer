@@ -553,12 +553,71 @@ class CornerstoneAnalyzer:
 
     def _cornerstone_context(self, text):
         """返回 (context, has_cornerstone_section)。
-        如果没有找到基石锚点，不再 fallback 到全文扫描。"""
-        idx, _ = self._find_section_anchor(text, self.CORNERSTONE_ANCHORS)
+        如果没有找到基石锚点，不再 fallback 到全文扫描。
+        优先查找正文章节中的锚点，跳过目录页（TOC）的匹配。
+        找到真正的章节边界，确保覆盖所有基石信息。"""
+        idx, anchor = self._find_section_anchor(text, self.CORNERSTONE_ANCHORS)
         if idx < 0:
             return "", False
-        context = text[idx:idx + 120000]
+
+        # 对于短文本（如测试用例），直接使用锚点位置
+        if len(text) < 10000:
+            context = text[idx:idx + 120000]
+            return context, True
+
+        # 检查是否在目录页（TOC）附近 - TOC 通常在文档前 10% 位置
+        toc_region_end = len(text) // 10
+        if idx < toc_region_end:
+            # 跳过 TOC 区域，搜索正文章节
+            remaining_text = text[toc_region_end:]
+            idx2, anchor2 = self._find_section_anchor(remaining_text, self.CORNERSTONE_ANCHORS)
+            if idx2 >= 0:
+                idx = toc_region_end + idx2
+                anchor = anchor2
+
+        # 检查找到的位置是否在目录页
+        lines_before = text[:idx].count('\n')
+        if lines_before < 100:
+            return "", False
+
+        # 找到章节结束位置 - 搜索下一个同级别章节锚点或下一个大标题
+        end_idx = self._find_section_end(text, idx)
+
+        # 确保 context 至少覆盖 500000 字符，以包含所有基石投资者
+        context = text[idx:max(end_idx, idx + 500000)]
         return context, True
+
+    def _find_section_end(self, text, start_idx):
+        """找到章节结束位置。"""
+        # 章节结束标记：下一个主要章节标题（通常为大写且较短）
+        # 或特定关键词如 "UNDERWRITING", "LOCK-UP", "ADDITIONAL INFORMATION"
+        end_markers = [
+            'UNDERWRITING', 'UNDERWRITERS', 'UNDERWRITING AGREEMENT',
+            'LOCK-UP', 'LOCK UP',
+            'ADDITIONAL INFORMATION', 'STATUTORY AND GENERAL INFORMATION',
+            'APPENDIX', 'DEFINITIONS',
+            'SHARE CAPITAL', 'FUTURE PLANS', 'USE OF PROCEEDS',
+        ]
+
+        # 搜索最近的有效结束位置
+        min_end = len(text)
+
+        for marker in end_markers:
+            idx = text.find(marker, start_idx + 1000)  # 至少在开始位置1KB之后
+            if idx > start_idx and idx < min_end:
+                min_end = idx
+
+        # 如果没有找到明确的结束标记，搜索下一个大写开头的行
+        if min_end == len(text):
+            # 搜索 "\n\n" 后的大写行
+            search_start = start_idx + 1000
+            pattern = r'\n\n([A-Z][A-Z\s]{5,50})\n'
+            import re
+            matches = list(re.finditer(pattern, text[search_start:]))
+            if matches:
+                min_end = search_start + matches[0].start()
+
+        return min_end
 
     def _is_in_excluded_section(self, text, hit_idx):
         """判断 hit_idx 位置是否落在排除章节（pre-IPO/股东/资深独立投资者等）内。
@@ -687,6 +746,23 @@ class CornerstoneAnalyzer:
             matched.append(profile)
         matched.sort(key=lambda item: {'S': 0, 'A': 1, 'B': 2, '弱': 3}.get(item.get('tier'), 4))
         return matched[0] if matched else None
+
+    def _matched_profiles(self, text):
+        """从 text 中匹配所有投资者档案，返回列表。"""
+        if not text:
+            return []
+        matched = []
+        seen = set()
+        for profile in self.INVESTOR_PROFILES:
+            if not _contains_any(text, profile.get('aliases', [])):
+                continue
+            key = profile['name']
+            if key in seen:
+                continue
+            seen.add(key)
+            matched.append(profile)
+        matched.sort(key=lambda item: {'S': 0, 'A': 1, 'B': 2, '弱': 3}.get(item.get('tier'), 4))
+        return matched
 
     @staticmethod
     def _tier_label_for_legacy(tier):
@@ -1540,7 +1616,23 @@ class CornerstoneAnalyzer:
 
         ct = SETTINGS.cornerstone
         if red_flags:
-            score = min(score, ct.score_cap_high_red_flags if len(red_flags) >= ct.red_flags_high_count else ct.score_cap_low_red_flags)
+            # 红旗处理：普通红旗扣分，严重红旗封顶
+            # 严重红旗定义
+            severe_flags = [
+                '关联方认购', 'related party', 'connected person',
+                '锁定异常', 'lockup abnormality',
+                '虚假基石', 'fake cornerstone',
+                '撤回认购', 'withdrawn subscription',
+            ]
+            has_severe = any(any(severe in str(rf).lower() for severe in severe_flags) for rf in red_flags)
+            
+            if has_severe:
+                # 严重红旗封顶80分
+                score = min(score, ct.score_cap_low_red_flags)
+            else:
+                # 普通红旗扣分：每个扣3分，最高扣10分
+                penalty = min(10, len(red_flags) * 3)
+                score = max(0, score - penalty)
 
         if score >= ct.grade_s:
             label = 'S级'

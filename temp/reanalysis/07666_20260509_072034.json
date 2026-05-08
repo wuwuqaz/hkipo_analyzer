@@ -1,0 +1,633 @@
+{
+  "stock_code": "07666",
+  "company_name": "剂泰科技",
+  "analysis_mode": "reanalysis",
+  "reanalyzed_at": "2026-05-09T07:20:34.685790",
+  "analyzer_version": 1,
+  "source_version": "unknown",
+  "weight_profile": {
+    "name": "live_heat",
+    "weights": {
+      "trade": 0.35,
+      "fundamental": 0.3,
+      "valuation": 0.2,
+      "theme": 0.1,
+      "data_quality": 0.05
+    },
+    "reason": "检测到有效超购/孖展数据"
+  },
+  "score": 23,
+  "score_breakdown": {
+    "trade_score": 54,
+    "fundamental_score": 0,
+    "valuation_score": 0,
+    "theme_score": 0,
+    "data_quality_score": 80
+  },
+  "risk_penalty": 0,
+  "risk_penalty_breakdown": [],
+  "historical_market_data": {
+    "actual_over_sub_ratio": 4322.0
+  },
+  "heat_data_source": "historical_actual",
+  "source_type": "local_pdf",
+  "pdf_path": "/tmp/hkipo_prospectus/07666_prospectus.pdf",
+  "pdf_identity_confidence": 0,
+  "warning_messages": [
+    "股票代码/公司名与PDF内容匹配度较低，请人工确认"
+  ],
+  "error_messages": [],
+  "version_delta": {
+    "previous_score": 23,
+    "current_score": 23,
+    "score_delta": 0,
+    "dimension_deltas": {
+      "trade_score": 0,
+      "data_quality_score": 0
+    },
+    "changed_reason": null
+  },
+  "_full_result": {
+    "company_name": "剂泰科技",
+    "hk_code": "07666",
+    "apply_start_date": "",
+    "apply_end_date": "",
+    "margin_total": null,
+    "public_offer": null,
+    "total_fund": null,
+    "actual_over_sub_ratio": 4322.0,
+    "forecast_over_sub_ratio": null,
+    "estimated_subscription_ratio": null,
+    "over_sub_ratio_estimated": null,
+    "over_sub_ratio": 4322.0,
+    "over_sub_ratio_source": "historical_actual",
+    "market_heat": "极热",
+    "margin_detail": null,
+    "score": 23,
+    "subscription_score": 60,
+    "fundamental_score": 0,
+    "stock_quality_score": 0,
+    "score_reasons": [
+      "超购极热(4322倍)",
+      "市场极度火热"
+    ],
+    "score_breakdown": {
+      "heat": {
+        "score": 40,
+        "label": "极热",
+        "detail": "历史实际超购 4322.00 倍"
+      },
+      "quality": {
+        "score": 0,
+        "label": "缺失",
+        "detail": "未获取到招股书关键财务数据"
+      },
+      "cornerstone": {
+        "score": 0,
+        "label": "缺失",
+        "detail": "未获取到基石分析"
+      },
+      "scale": {
+        "score": 0,
+        "label": "缺失",
+        "detail": "未获取到公开集资额"
+      },
+      "market": {
+        "score": 5,
+        "label": "极热",
+        "detail": "当前热度 极热"
+      }
+    },
+    "risk_penalty": 0,
+    "trade_score": 54,
+    "valuation_score": 0,
+    "theme_score": 0,
+    "data_quality_score": 80,
+    "advanced_framework_score": 18,
+    "advanced_score_adjustment": 0,
+    "signal_breakdown": {
+      "real_money": {
+        "strength": "强",
+        "detail": "超购4322.00x"
+      },
+      "float_structure": {
+        "strength": "缺失",
+        "detail": "发行--；公开--；基石--",
+        "float_signal": "缺失"
+      },
+      "cornerstone_quality": {
+        "strength": "缺失",
+        "detail": "未识别到强基石组合"
+      },
+      "valuation_reading": {
+        "strength": "缺失",
+        "detail": "PE/PS可得口径初筛",
+        "label": "缺失"
+      },
+      "theme_bonus": {
+        "strength": "缺失",
+        "detail": "unknown；关键词0个；需外部行情确认"
+      },
+      "liquidity_bonus": {
+        "strength": "缺失",
+        "detail": "市值缺失"
+      },
+      "data_confidence": {
+        "strength": "高",
+        "detail": "缺少可比收入数据",
+        "red_flags": [
+          "缺少可比收入数据"
+        ]
+      }
+    },
+    "weight_profile": {
+      "name": "live_heat",
+      "weights": {
+        "trade": 0.35,
+        "fundamental": 0.3,
+        "valuation": 0.2,
+        "theme": 0.1,
+        "data_quality": 0.05
+      },
+      "reason": "检测到有效超购/孖展数据"
+    },
+    "score_weights_note": "",
+    "data_confidence_gate_warning": null,
+    "risk_penalty_breakdown": [],
+    "debug_info": {
+      "over_sub_ratio": 4322.0,
+      "over_sub_ratio_source": "historical_actual",
+      "weight_profile": {
+        "name": "live_heat",
+        "weights": {
+          "trade": 0.35,
+          "fundamental": 0.3,
+          "valuation": 0.2,
+          "theme": 0.1,
+          "data_quality": 0.05
+        },
+        "reason": "检测到有效超购/孖展数据"
+      },
+      "heat_score": 40,
+      "trade_score": 54,
+      "cornerstone_red_flags": [],
+      "final_score_before_cap": 23,
+      "final_score_after_cap": 23,
+      "cap_reason": null
+    },
+    "penalty_reason": null,
+    "_reanalysis": {
+      "analysis_mode": "reanalysis",
+      "reanalyzed_at": "2026-05-09T07:20:34.685619",
+      "source_type": "local_pdf",
+      "heat_data_source": "historical_actual",
+      "historical_market_data": {
+        "actual_over_sub_ratio": 4322.0
+      },
+      "pdf_identity_confidence": 0,
+      "warning_messages": [
+        "股票代码/公司名与PDF内容匹配度较低，请人工确认"
+      ],
+      "error_messages": [],
+      "info_messages": []
+    },
+    "pdf_downloaded": false,
+    "pdf_path": "/tmp/hkipo_prospectus/07666_prospectus.pdf",
+    "pdf_file_size_mb": null,
+    "prospectus_text_length": 0,
+    "parse_success": false,
+    "parse_error": "PDF文件不存在: /tmp/hkipo_prospectus/07666_prospectus.pdf",
+    "financial_extract_confidence": null,
+    "financial_data_quality_flags": [],
+    "pdf_name_match": null,
+    "pdf_stock_code_match": null,
+    "pdf_validation_warning": null,
+    "pdf_identity_confidence": null,
+    "extracted_company_name": null,
+    "extracted_english_name": null,
+    "extracted_stock_code": null,
+    "company_name_aliases": [],
+    "prospectus_info": {
+      "parse_success": false,
+      "parse_error": "PDF文件不存在: /tmp/hkipo_prospectus/07666_prospectus.pdf",
+      "pdf_name_match": null,
+      "pdf_stock_code_match": null,
+      "pdf_identity_confidence": "low",
+      "pdf_text_length": 0,
+      "pdf_validation_warning": null,
+      "extracted_company_name": null,
+      "extracted_english_name": null,
+      "extracted_stock_code": null,
+      "company_name_aliases": [],
+      "_extracted_text": "",
+      "offer_price": null,
+      "min_price": null,
+      "max_price": null,
+      "lot_size": null,
+      "entry_fee_hkd": null,
+      "global_offer_shares": null,
+      "hk_offer_shares": null,
+      "international_offer_shares": null,
+      "shares_in_issue_post_listing": null,
+      "market_cap_hkd_million": null,
+      "market_cap_hkd_million_low": null,
+      "market_cap_hkd_million_high": null,
+      "market_cap_hkd_million_mid": null,
+      "market_cap_source": null,
+      "net_proceeds_hkd_million": null,
+      "issuance_ratio_pct": null,
+      "public_offer_ratio_pct": null,
+      "public_offer": null,
+      "total_fund": null,
+      "listing_date": null,
+      "results_date": null,
+      "sector": "unknown",
+      "revenue": null,
+      "revenue_y1": null,
+      "revenue_year": null,
+      "revenue_y1_year": null,
+      "net_profit": null,
+      "net_profit_y1": null,
+      "net_profit_year": null,
+      "net_profit_y1_year": null,
+      "profitable": null,
+      "gross_margin": null,
+      "gross_margin_year": null,
+      "gross_margin_y1": null,
+      "gross_margin_y1_year": null,
+      "rd_expense": null,
+      "operating_cash_flow": null,
+      "cost_of_sales": null,
+      "adjusted_profit_latest_RMB": null,
+      "pro_forma_NTA_per_share_HKD": null,
+      "financial_currency": "RMB",
+      "financial_extract_confidence": null,
+      "financial_data_quality_flags": [],
+      "financial_table": null,
+      "financial_table_source": null,
+      "cornerstone_analysis": null,
+      "cornerstone_investors": [],
+      "cornerstone_pct": null,
+      "cornerstone_total_offer_shares": null,
+      "cornerstone_investment_hkd_million": null,
+      "cornerstone_investment_usd_million": null,
+      "cornerstone_offer_ratio_pct": null,
+      "valuation": {
+        "pe_ratio": null,
+        "adjusted_pe_ratio": null,
+        "pb_ratio": null,
+        "ps_ratio": null,
+        "valuation_label": "数据不足，需人工核对",
+        "absolute_valuation_label": "缺失",
+        "relative_valuation_label": null,
+        "valuation_reasons": [],
+        "confidence": "missing",
+        "valuation_type": "absolute_only",
+        "valuation_framework_type": null,
+        "valuation_profitability_type": null,
+        "revenue_hkd_million": null,
+        "market_cap_hkd_million": null,
+        "market_cap_to_rd_ratio": null,
+        "biotech_valuation_label": null,
+        "biotech_valuation_reasons": [],
+        "biotech_stage_label": null,
+        "latest_clinical_stage": null,
+        "phase_iii_count": 0,
+        "nda_or_approved_count": 0,
+        "cash_runway_years": null,
+        "pipeline_concentration_warning": null,
+        "revenue_too_small_for_ps": false,
+        "net_profit_hkd_million": null,
+        "adjusted_profit_hkd_million": null,
+        "financial_currency": null
+      },
+      "business_breakdown": {
+        "segments": [],
+        "main_segment": null,
+        "fastest_growing_segment": null,
+        "new_business_segment": null,
+        "growth_source": "missing",
+        "vbp_risk_score": 0,
+        "vbp_summary": "非医疗行业，不适用集采/DRG/DIP风险",
+        "asp_data": {},
+        "business_breakdown_confidence": "missing",
+        "business_breakdown_warning": null,
+        "confidence": "missing"
+      },
+      "geographic": {
+        "china_revenue_latest": null,
+        "overseas_revenue_latest": null,
+        "overseas_revenue_pct": null,
+        "overseas_growth_pct": null,
+        "overseas_growth_label": "缺失",
+        "overseas_risks": [],
+        "geographic_table": {},
+        "geographic_confidence": "missing",
+        "confidence": "missing"
+      },
+      "customer_supplier": {
+        "top5_customer_revenue_pct": null,
+        "largest_customer_revenue_pct": null,
+        "top5_supplier_purchase_pct": null,
+        "largest_supplier_purchase_pct": null,
+        "concentration_risk_label": "低",
+        "concentration_score_penalty": 0,
+        "confidence": "missing"
+      },
+      "cashflow": {
+        "operating_cash_flow": null,
+        "ocf_to_net_profit": null,
+        "inventory_turnover_days_latest": null,
+        "receivables_growth_vs_revenue": null,
+        "cash_quality_label": "缺失",
+        "working_capital_risks": [],
+        "confidence": "missing"
+      },
+      "capacity": {
+        "utilization_rate": null,
+        "expansion_plan": null,
+        "outsourced_production": null,
+        "capacity_score": 0,
+        "capacity_summary": "缺失",
+        "confidence": "missing"
+      },
+      "rnd_pipeline": {
+        "rd_expense_latest": null,
+        "rd_expense_ratio": null,
+        "product_count_approved": null,
+        "product_count_pipeline": null,
+        "core_product_names": [],
+        "latest_clinical_stage": "Pre-clinical",
+        "phase_iii_count": 0,
+        "nda_or_approved_count": 0,
+        "technology_moat_score": 0,
+        "pipeline_quality_label": "弱",
+        "commercialization_risk": "高",
+        "confidence": "missing",
+        "clinical_stage_score": 0,
+        "rd_ratio_warning": null,
+        "rd_ratio_biotech": false,
+        "class_ii_count": 0,
+        "class_iii_count": 0
+      },
+      "risk_factors": {
+        "risks": {
+          "regulatory_risk": {
+            "risk_level": "低",
+            "evidence_count": 0,
+            "evidence_sample": [],
+            "score_penalty": 0
+          },
+          "vbp_pricing_risk": {
+            "risk_level": "低",
+            "evidence_count": 0,
+            "evidence_sample": [],
+            "score_penalty": 0
+          },
+          "rd_failure_risk": {
+            "risk_level": "低",
+            "evidence_count": 0,
+            "evidence_sample": [],
+            "score_penalty": 0
+          },
+          "distributor_risk": {
+            "risk_level": "低",
+            "evidence_count": 0,
+            "evidence_sample": [],
+            "score_penalty": 0
+          },
+          "competition_risk": {
+            "risk_level": "低",
+            "evidence_count": 0,
+            "evidence_sample": [],
+            "score_penalty": 0
+          },
+          "customer_concentration_risk": {
+            "risk_level": "低",
+            "evidence_count": 0,
+            "evidence_sample": [],
+            "score_penalty": 0
+          },
+          "supplier_risk": {
+            "risk_level": "低",
+            "evidence_count": 0,
+            "evidence_sample": [],
+            "score_penalty": 0
+          },
+          "inventory_risk": {
+            "risk_level": "低",
+            "evidence_count": 0,
+            "evidence_sample": [],
+            "score_penalty": 0
+          },
+          "overseas_risk": {
+            "risk_level": "低",
+            "evidence_count": 0,
+            "evidence_sample": [],
+            "score_penalty": 0
+          },
+          "fvtpl_risk": {
+            "risk_level": "低",
+            "evidence_count": 0,
+            "evidence_sample": [],
+            "score_penalty": 0
+          }
+        },
+        "total_penalty": 0,
+        "confidence": "keyword_only"
+      },
+      "peer_comparison": {
+        "subsector": null,
+        "matched_sector": null,
+        "peer_keywords": [],
+        "all_subsector_matches": [],
+        "match_confidence": "none",
+        "extracted_competitors": [],
+        "prospectus_peer_candidates": [],
+        "unmatched_peer_candidates": [],
+        "matched_peers": [],
+        "company_ps": null,
+        "company_pe": null,
+        "company_pb": null,
+        "peer_median_ps": null,
+        "peer_median_pe": null,
+        "peer_median_pb": null,
+        "peer_ps_count": 0,
+        "peer_pe_count": 0,
+        "relative_ps_premium_pct": null,
+        "relative_pe_premium_pct": null,
+        "valuation_position": "缺失",
+        "scarcity_score": 0,
+        "peer_score": 0,
+        "summary": "",
+        "warnings": [
+          "未匹配到细分赛道"
+        ],
+        "semantic_id": "peer_comparison",
+        "relative_market_cap_pct": null,
+        "company_market_cap_vs_peer_pct": null,
+        "quantitative_peers": [],
+        "qualitative_peers": [],
+        "quantitative_peer_count": 0,
+        "qualitative_peer_count": 0,
+        "peer_sample_warning": null
+      },
+      "advanced_framework": {
+        "score": 18,
+        "label": "进阶谨慎",
+        "components": {
+          "real_money": {
+            "score": 14,
+            "max_score": 20,
+            "label": "资金强",
+            "detail": "超购4322.00x",
+            "confidence": "rule_based",
+            "reasons": [
+              "缺少真实金额，退回按超购倍数估算"
+            ],
+            "red_flags": []
+          },
+          "float_structure": {
+            "score": 0,
+            "max_score": 15,
+            "label": "缺失",
+            "detail": "发行--；公开--；基石--",
+            "confidence": "rule_based",
+            "reasons": [],
+            "red_flags": []
+          },
+          "cornerstone_structure": {
+            "score": 0,
+            "max_score": 15,
+            "label": "缺失",
+            "detail": "未识别到强基石组合",
+            "confidence": "rule_based",
+            "reasons": [],
+            "red_flags": [
+              "未完整提取基石结构"
+            ]
+          },
+          "valuation_framework": {
+            "score": 0,
+            "max_score": 20,
+            "label": "缺失",
+            "detail": "PE/PS可得口径初筛",
+            "confidence": "rule_based",
+            "reasons": [
+              "缺少同行估值，按招股书可得口径做初筛"
+            ],
+            "red_flags": []
+          },
+          "mainline_beta": {
+            "score": 0,
+            "max_score": 15,
+            "label": "非主线",
+            "detail": "unknown；关键词0个；需外部行情确认",
+            "confidence": "keyword_only",
+            "reasons": [
+              "未接入板块涨幅/成交/南向资金，主线判断为低置信度"
+            ],
+            "red_flags": []
+          },
+          "stock_connect_path": {
+            "score": 0,
+            "max_score": 10,
+            "label": "暂不足",
+            "detail": "市值缺失",
+            "confidence": "rule_based_without_index_data",
+            "reasons": [
+              "市值或规则信息不足"
+            ],
+            "red_flags": []
+          },
+          "data_quality": {
+            "score": 4,
+            "max_score": 5,
+            "label": "可信",
+            "detail": "缺少可比收入数据",
+            "confidence": "rule_based",
+            "reasons": [],
+            "red_flags": [
+              "缺少可比收入数据"
+            ]
+          }
+        },
+        "red_flags": [
+          "未完整提取基石结构",
+          "缺少可比收入数据"
+        ],
+        "watch_items": [
+          "缺少真实金额，退回按超购倍数估算",
+          "缺少同行估值，按招股书可得口径做初筛",
+          "未接入板块涨幅/成交/南向资金，主线判断为低置信度",
+          "市值或规则信息不足"
+        ],
+        "hold_strategy": "数据风险优先，先核对财务口径，再决定申购和持有。",
+        "confidence": "mixed_rule_keyword_with_flags"
+      },
+      "stock_quality": {
+        "label": "偏弱",
+        "score": 0,
+        "reasons": [
+          "招股书可提取的有效财务指标较少"
+        ],
+        "dimensions": {
+          "profitability": {
+            "label": "未知",
+            "detail": "未提取到足够的盈利数据"
+          },
+          "valuation": {
+            "label": "数据不足，需人工核对",
+            "detail": ""
+          },
+          "risk": {
+            "label": "可用财务对比数据有限",
+            "detail": "可用财务对比数据有限"
+          },
+          "concentration": {
+            "label": "低",
+            "detail": "Top5客户None%，Top5供应商None%"
+          },
+          "rnd": {
+            "label": "弱",
+            "detail": "研发费率None%；管线None个；技术壁垒0/10"
+          }
+        }
+      }
+    },
+    "stock_quality": {
+      "label": "偏弱",
+      "score": 0,
+      "reasons": [
+        "招股书可提取的有效财务指标较少"
+      ],
+      "dimensions": {
+        "profitability": {
+          "label": "未知",
+          "detail": "未提取到足够的盈利数据"
+        },
+        "valuation": {
+          "label": "数据不足，需人工核对",
+          "detail": ""
+        },
+        "risk": {
+          "label": "可用财务对比数据有限",
+          "detail": "可用财务对比数据有限"
+        },
+        "concentration": {
+          "label": "低",
+          "detail": "Top5客户None%，Top5供应商None%"
+        },
+        "rnd": {
+          "label": "弱",
+          "detail": "研发费率None%；管线None个；技术壁垒0/10"
+        }
+      }
+    },
+    "_cached_at": null,
+    "_cache_version": null,
+    "_archived_at": null,
+    "_archive_source": null,
+    "_history_version": null
+  }
+}
