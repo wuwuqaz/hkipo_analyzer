@@ -44,7 +44,43 @@ class ScoringSystem:
                 return "微弱"
             return "缺失"
         return "N/A"
-    
+
+    @staticmethod
+    def _detect_weight_profile(ipo):
+        """检测权重配置文件：判断是 live_heat 还是 prospectus_only"""
+        over_sub_ratio = ipo.get('over_sub_ratio')
+        over_sub_ratio_source = ipo.get('over_sub_ratio_source')
+        forecast_over_sub_ratio = ipo.get('forecast_over_sub_ratio')
+        market_heat = ipo.get('market_heat', '')
+
+        has_heat = _is_num(over_sub_ratio) and over_sub_ratio_source in ("actual", "forecast", "estimated", "historical_actual", "historical_forecast")
+        has_market = _is_num(forecast_over_sub_ratio) or market_heat in ("温和", "热门", "极热")
+
+        if has_heat or has_market:
+            return {
+                'name': 'live_heat',
+                'weights': {
+                    'trade': 0.35,
+                    'fundamental': 0.30,
+                    'valuation': 0.20,
+                    'theme': 0.10,
+                    'data_quality': 0.05,
+                },
+                'reason': '检测到有效超购/孖展数据',
+            }
+        else:
+            return {
+                'name': 'prospectus_only',
+                'weights': {
+                    'trade': 0.20,
+                    'fundamental': 0.35,
+                    'valuation': 0.20,
+                    'theme': 0.15,
+                    'data_quality': 0.10,
+                },
+                'reason': '未检测到有效热度数据，使用招股书阶段权重',
+            }
+
     def calculate(self, ipo, prospectus_info, signal_components=None):
         reasons = []
 
@@ -120,7 +156,9 @@ class ScoringSystem:
         cornerstone_analysis = prospectus_info.get('cornerstone_analysis') or {}
         cornerstone_score = cornerstone_analysis.get('score')
         cornerstone_label = cornerstone_analysis.get('label')
-        if _is_num(cornerstone_score):
+        has_cornerstone_section = cornerstone_analysis.get('has_cornerstone_section', False)
+        
+        if _is_num(cornerstone_score) and has_cornerstone_section:
             component_score = min(20, round(cornerstone_score / 5))
             components['cornerstone']['score'] = component_score
             components['cornerstone']['label'] = cornerstone_analysis.get('label', 'N/A')
@@ -139,8 +177,11 @@ class ScoringSystem:
                 names = "、".join((row.get('short_name') or row.get('name') or '') for row in top_rows)
                 reasons.append(f"基石V2重点: {names}")
             elif cornerstone_analysis.get('matched_investors'):
-                names = "、".join(item.get('name', '') for item in cornerstone_analysis['matched_investors'][:3])
-                reasons.append(f"基石V2重点: {names}")
+                matched_cornerstone = [m for m in cornerstone_analysis['matched_investors'] 
+                                      if m.get('source') == 'cornerstone_section']
+                if matched_cornerstone:
+                    names = "、".join(item.get('name', '') for item in matched_cornerstone[:3])
+                    reasons.append(f"基石V2重点: {names}")
             for strength in cornerstone_analysis.get('strengths', [])[:2]:
                 reasons.append(f"基石亮点: {strength}")
             for concern in cornerstone_analysis.get('concerns', [])[:2]:
@@ -151,7 +192,6 @@ class ScoringSystem:
         total_fund = ipo.get('total_fund')
         public_offer = ipo.get('public_offer')
         public_offer_ratio = prospectus_info.get('public_offer_ratio_pct')
-        # 优先用公开占比估算总集资额（比 margin API 返回的 total_fund 更准确）
         if _is_num(public_offer) and _is_num(public_offer_ratio) and public_offer_ratio > 0:
             total_fund = public_offer / (public_offer_ratio / 100)
         elif not total_fund:
@@ -170,7 +210,7 @@ class ScoringSystem:
                 components['scale']['score'] = 3
             components['scale']['label'] = self._component_label(components['scale']['score'], "scale")
             components['scale']['detail'] = f"公开集资额 {total_fund:.2f} 亿"
-        
+
         forecast_over = ipo.get('forecast_over_sub_ratio')
         market_heat = ipo.get('market_heat', '')
         if _is_num(forecast_over) and _is_num(over_sub) and over_sub > 0:
@@ -233,13 +273,14 @@ class ScoringSystem:
         valuation_score = min(100, round(val_raw / 20 * 100))
 
         theme_raw = 0
+        theme_max = 35
         if sc:
             theme_raw += sc.get('mainline_beta', {}).get('score', 0)
             theme_raw += sc.get('stock_connect_path', {}).get('score', 0)
         peer_comparison = prospectus_info.get('peer_comparison', {}) or {}
         scarcity = peer_comparison.get('scarcity_score', 0)
         theme_raw += min(10, scarcity)
-        theme_score = min(50, round(theme_raw / 35 * 50)) if theme_raw else 0
+        theme_score = min(100, round(theme_raw / theme_max * 100)) if theme_raw else 0
 
         dq = sc.get('data_quality', {}) if sc else {}
         data_quality_score = min(100, round(dq.get('score', 3) / 5 * 100))
@@ -250,16 +291,12 @@ class ScoringSystem:
         elif data_quality_score < 60:
             data_confidence_gate_warning = "数据质量中等，部分指标建议复核"
 
-        # 动态权重：pre-IPO 阶段（无市场热度数据）降低 trade/valuation 权重，提高 fundamental/theme
-        has_heat = _is_num(ipo.get('over_sub_ratio')) and ipo.get('over_sub_ratio_source') != 'missing'
-        has_market = _is_num(ipo.get('forecast_over_sub_ratio')) or ipo.get('market_heat') in ("温和", "热门", "极热")
-        is_pre_ipo = not (has_heat or has_market)
-        if is_pre_ipo:
-            # pre-IPO 阶段无实时市场数据，trade 信息最弱，降低其权重；
-            # valuation（基石/管线/稀缺性）和 fundamental（财务质地）可通过招股书充分分析，权重更高
-            trade_w, fundamental_w, valuation_w, theme_w, dq_w = 0.15, 0.40, 0.25, 0.15, 0.05
-        else:
-            trade_w, fundamental_w, valuation_w, theme_w, dq_w = 0.35, 0.30, 0.20, 0.10, 0.05
+        weight_profile = self._detect_weight_profile(ipo)
+        trade_w = weight_profile['weights']['trade']
+        fundamental_w = weight_profile['weights']['fundamental']
+        valuation_w = weight_profile['weights']['valuation']
+        theme_w = weight_profile['weights']['theme']
+        dq_w = weight_profile['weights']['data_quality']
 
         raw_final = (
             trade_score * trade_w
@@ -314,14 +351,13 @@ class ScoringSystem:
                 reasons.append("同行对比偏弱: 相对同行估值偏高(-5分)")
 
         val_penalty = 0
-        # 18C/biotech license upfront 驱动型收入：不对 PS 溢价做硬性扣分
         revenue_quality = valuation.get('revenue_quality', 'standard')
         is_license_driven = revenue_quality == 'license_upfront_driven'
 
         if isinstance(valuation, dict):
             if val_label in ('很贵',):
                 if is_license_driven:
-                    val_penalty = -1  # 仅轻微提示，不硬性扣5分
+                    val_penalty = -1
                     reasons.append("收入以授权/里程碑为主，绝对估值标签仅作提示")
                 elif rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
                     val_penalty = -2
@@ -329,7 +365,7 @@ class ScoringSystem:
                     val_penalty = -5
             elif val_label in ('偏贵', '明显偏贵'):
                 if is_license_driven:
-                    val_penalty = 0  # 不扣分
+                    val_penalty = 0
                     reasons.append("收入以授权/里程碑为主，相对估值标签不直接扣分")
                 elif rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
                     val_penalty = -1
@@ -341,7 +377,7 @@ class ScoringSystem:
 
         score = round(raw_final + peer_adj + val_penalty)
 
-        if _is_num(cornerstone_score) and cornerstone_score < 50:
+        if _is_num(cornerstone_score) and cornerstone_score < 50 and has_cornerstone_section:
             score = min(score, 55)
         if cornerstone_label in ('弱基石', '未披露'):
             score = min(score, 55)
@@ -364,13 +400,10 @@ class ScoringSystem:
             'reasons': reasons,
             'components': components,
             'data_confidence_gate_warning': data_confidence_gate_warning,
+            'weight_profile': weight_profile,
             'score_weights_note': (
                 f"权重: trade={trade_w:.0%} fundamental={fundamental_w:.0%} "
                 f"valuation={valuation_w:.0%} theme={theme_w:.0%} dq={dq_w:.0%} "
-                f"(theme封顶50/100，权重10%，最多贡献约5分)"
-            ) if not is_pre_ipo else (
-                f"pre-IPO权重: trade={trade_w:.0%} fundamental={fundamental_w:.0%} "
-                f"valuation={valuation_w:.0%} theme={theme_w:.0%} dq={dq_w:.0%} "
-                f"(theme封顶50/100，权重15%，最多贡献约7.5分)"
+                f"({weight_profile['reason']})"
             ),
         }

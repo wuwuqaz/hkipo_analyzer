@@ -273,7 +273,7 @@ def test_scoring_system_new_weights():
         "revenue": 500,
         "revenue_y1": 400,
         "sector": "hardtech",
-        "cornerstone_analysis": {"score": 70, "label": "A级"},
+        "cornerstone_analysis": {"score": 70, "label": "A级", "has_cornerstone_section": True},
         "valuation": {"pe_ratio": 25.0, "ps_ratio": 3.0},
         "peer_comparison": {"peer_score": 10, "scarcity_score": 6, "valuation_position": "合理"},
     }
@@ -291,14 +291,20 @@ def test_scoring_system_new_weights():
     assert 'valuation_score' in result, "必须有 valuation_score"
     assert 'theme_score' in result, "必须有 theme_score"
     assert 'data_quality_score' in result, "必须有 data_quality_score"
+    assert 'weight_profile' in result, "必须有 weight_profile"
     assert result['score'] >= 0 and result['score'] <= 100, "总分应在 0-100 之间"
 
-    # theme_score 上限约 50（权重 0.10 → 最多贡献 5 分）
-    assert result['theme_score'] <= 50, f"theme_score 应封顶 50: {result['theme_score']}"
+    # theme_score 标准化为 0-100（主题维度满分 35 → 映射到 0-100）
+    assert result['theme_score'] <= 100, f"theme_score 应封顶 100: {result['theme_score']}"
+    assert result['theme_score'] >= 0, f"theme_score 应 >= 0: {result['theme_score']}"
 
     # data_quality_score 作为 confidence_gate：高分不限制，低分限制
     if result['data_quality_score'] < 40:
         assert result['score'] <= 60, "数据质量差时应限制总分上限"
+
+    # 验证权重配置正确
+    wp = result.get('weight_profile', {})
+    assert wp.get('name') == 'live_heat', f"有热度数据时应为 live_heat: {wp.get('name')}"
 
     print(f"✅ test_scoring_system_new_weights passed (score={result['score']})")
 
@@ -738,6 +744,384 @@ def test_pre_ipo_investors_excluded_from_cornerstone():
     print("✅ test_pre_ipo_investors_excluded_from_cornerstone passed")
 
 
+def test_no_heat_data_weight_profile():
+    """无热度数据时应使用 prospectus_only 权重配置"""
+    ipo = {
+        'over_sub_ratio': None,
+        'over_sub_ratio_source': 'missing',
+        'forecast_over_sub_ratio': None,
+        'market_heat': None,
+        'total_fund': 5.0,
+    }
+    prospectus_info = {
+        'gross_margin': 40,
+        'profitable': True,
+        'revenue': 500,
+        'revenue_y1': 400,
+        'sector': 'hardtech',
+        'cornerstone_analysis': {'score': 70, 'label': 'A级', 'has_cornerstone_section': True},
+        'valuation': {'pe_ratio': 25.0, 'ps_ratio': 3.0},
+        'peer_comparison': {'peer_score': 10, 'scarcity_score': 6, 'valuation_position': '合理'},
+    }
+    result = ScoringSystem().calculate(ipo, prospectus_info, signal_components={})
+
+    wp = result.get('weight_profile', {})
+    assert wp.get('name') == 'prospectus_only', f"期望 prospectus_only，实际: {wp.get('name')}"
+    assert wp.get('weights', {}).get('trade') == 0.20, f"trade 权重应为 0.20，实际: {wp.get('weights', {}).get('trade')}"
+    assert wp.get('weights', {}).get('fundamental') == 0.35, f"fundamental 权重应为 0.35，实际: {wp.get('weights', {}).get('fundamental')}"
+    assert wp.get('weights', {}).get('theme') == 0.15, f"theme 权重应为 0.15，实际: {wp.get('weights', {}).get('theme')}"
+    assert wp.get('weights', {}).get('data_quality') == 0.10, f"data_quality 权重应为 0.10，实际: {wp.get('weights', {}).get('data_quality')}"
+    assert "未检测到有效热度数据" in wp.get('reason', ''), f"reason 应说明未检测到热度数据: {wp.get('reason')}"
+    print("✅ test_no_heat_data_weight_profile passed")
+
+
+def test_live_heat_weight_profile():
+    """有热度数据时应使用 live_heat 权重配置"""
+    ipo = {
+        'over_sub_ratio': 100.0,
+        'over_sub_ratio_source': 'actual',
+        'total_fund': 5.0,
+        'market_heat': '热门',
+    }
+    prospectus_info = {
+        'gross_margin': 40,
+        'profitable': True,
+        'revenue': 500,
+        'revenue_y1': 400,
+        'sector': 'hardtech',
+        'cornerstone_analysis': {'score': 70, 'label': 'A级', 'has_cornerstone_section': True},
+        'valuation': {'pe_ratio': 25.0, 'ps_ratio': 3.0},
+        'peer_comparison': {'peer_score': 10, 'scarcity_score': 6, 'valuation_position': '合理'},
+    }
+    result = ScoringSystem().calculate(ipo, prospectus_info, signal_components={})
+
+    wp = result.get('weight_profile', {})
+    assert wp.get('name') == 'live_heat', f"期望 live_heat，实际: {wp.get('name')}"
+    assert wp.get('weights', {}).get('trade') == 0.35, f"trade 权重应为 0.35，实际: {wp.get('weights', {}).get('trade')}"
+    assert wp.get('weights', {}).get('fundamental') == 0.30, f"fundamental 权重应为 0.30，实际: {wp.get('weights', {}).get('fundamental')}"
+    assert wp.get('weights', {}).get('theme') == 0.10, f"theme 权重应为 0.10，实际: {wp.get('weights', {}).get('theme')}"
+    assert wp.get('weights', {}).get('data_quality') == 0.05, f"data_quality 权重应为 0.05，实际: {wp.get('weights', {}).get('data_quality')}"
+    assert "检测到有效超购" in wp.get('reason', ''), f"reason 应说明检测到超购数据: {wp.get('reason')}"
+    print("✅ test_live_heat_weight_profile passed")
+
+
+def test_theme_score_normalized_to_100():
+    """theme_score 应标准化为 0-100 分，而非之前的 0-50"""
+    ipo = {'over_sub_ratio': 100.0, 'over_sub_ratio_source': 'actual'}
+    prospectus_info = {
+        'gross_margin': 40,
+        'profitable': True,
+        'revenue': 500,
+        'revenue_y1': 400,
+        'sector': 'hardtech',
+        'cornerstone_analysis': {'score': 70, 'label': 'A级', 'has_cornerstone_section': True},
+        'valuation': {'pe_ratio': 25.0, 'ps_ratio': 3.0},
+        'peer_comparison': {'peer_score': 10, 'scarcity_score': 10, 'valuation_position': '合理'},
+    }
+    signal_components = {
+        'mainline_beta': {'score': 15},
+        'stock_connect_path': {'score': 10},
+        'data_quality': {'score': 5},
+    }
+    result = ScoringSystem().calculate(ipo, prospectus_info, signal_components=signal_components)
+
+    theme_raw = 15 + 10 + 10  # mainline_beta + stock_connect_path + scarcity
+    theme_max = 35
+    expected_theme_score = min(100, round(theme_raw / theme_max * 100))
+    
+    assert result.get('theme_score') == expected_theme_score, \
+        f"theme_score 应为 {expected_theme_score}，实际: {result.get('theme_score')}"
+    assert result.get('theme_score') <= 100, f"theme_score 不应超过 100，实际: {result.get('theme_score')}"
+    print(f"✅ test_theme_score_normalized_to_100 passed (theme_score={result.get('theme_score')})")
+
+
+def test_theme_score_full_raw_equals_100():
+    """theme_raw=35 时，theme_score 应为 100"""
+    ipo = {'over_sub_ratio': 100.0, 'over_sub_ratio_source': 'actual'}
+    prospectus_info = {
+        'gross_margin': 40,
+        'profitable': True,
+        'revenue': 500,
+        'revenue_y1': 400,
+        'sector': 'hardtech',
+        'cornerstone_analysis': {'score': 70, 'label': 'A级', 'has_cornerstone_section': True},
+        'valuation': {'pe_ratio': 25.0, 'ps_ratio': 3.0},
+        'peer_comparison': {'peer_score': 10, 'scarcity_score': 10, 'valuation_position': '合理'},
+    }
+    signal_components = {
+        'mainline_beta': {'score': 15},
+        'stock_connect_path': {'score': 10},
+        'data_quality': {'score': 5},
+    }
+    result = ScoringSystem().calculate(ipo, prospectus_info, signal_components=signal_components)
+
+    # theme_raw = 15 + 10 + 10 = 35, theme_max = 35, so theme_score = 100
+    assert result.get('theme_score') == 100, \
+        f"theme_raw=35 时 theme_score 应为 100，实际: {result.get('theme_score')}"
+    print("✅ test_theme_score_full_raw_equals_100 passed")
+
+
+def test_risk_penalty_only_for_major_red_flags():
+    """risk_penalty 只应针对重大红旗，普通风险不应重复扣分"""
+    from ipo_analyzer.core import _calculate_risk_penalty
+
+    prospectus_info = {
+        'risk_factors': {
+            'flags': [
+                '持续经营重大不确定性',
+                '重大诉讼风险',
+            ]
+        },
+        'customer_supplier': {
+            'largest_customer_pct': 40,  # 普通偏高，不应触发 penalty
+            'top5_customer_pct': 75,      # 普通偏高，不应触发 penalty
+        },
+        'valuation': {
+            'cash_runway_years': 1.5,  # > 1 年，不应触发 penalty
+        },
+        'cornerstone_analysis': {
+            'red_flags': ['基石占比低于30%']  # 普通红旗，不应触发 penalty
+        },
+    }
+
+    result = _calculate_risk_penalty(prospectus_info)
+    penalty = result.get('total_penalty', 0)
+    breakdown = result.get('breakdown', [])
+
+    assert penalty > 0, "重大红旗应触发 penalty"
+    assert len(breakdown) >= 2, "应至少有两个 penalty 项"
+    
+    penalty_types = [b['type'] for b in breakdown]
+    assert 'going_concern' in penalty_types, "持续经营不确定性应触发 penalty"
+    assert 'lawsuit' in penalty_types, "重大诉讼应触发 penalty"
+    assert 'customer_concentration' not in penalty_types, "普通客户集中度不应触发 penalty"
+    assert 'cornerstone_red_flag' not in penalty_types, "普通基石红旗不应触发 penalty"
+    print(f"✅ test_risk_penalty_only_for_major_red_flags passed (penalty={penalty})")
+
+
+def test_risk_penalty_customer_extreme_concentration():
+    """客户极端集中应触发 risk_penalty"""
+    from ipo_analyzer.core import _calculate_risk_penalty
+
+    prospectus_info = {
+        'customer_supplier': {
+            'largest_customer_pct': 55,  # 超过 50%，应触发 penalty
+        },
+    }
+
+    result = _calculate_risk_penalty(prospectus_info)
+    penalty = result.get('total_penalty', 0)
+    breakdown = result.get('breakdown', [])
+
+    assert penalty > 0, "客户极端集中应触发 penalty"
+    penalty_types = [b['type'] for b in breakdown]
+    assert 'customer_concentration' in penalty_types, "应识别客户集中度 penalty"
+    print(f"✅ test_risk_penalty_customer_extreme_concentration passed (penalty={penalty})")
+
+
+def test_risk_penalty_cash_runway_short():
+    """现金 runway < 1 年应触发 risk_penalty"""
+    from ipo_analyzer.core import _calculate_risk_penalty
+
+    prospectus_info = {
+        'valuation': {
+            'cash_runway_years': 0.5,  # < 1 年，应触发 penalty
+        },
+    }
+
+    result = _calculate_risk_penalty(prospectus_info)
+    penalty = result.get('total_penalty', 0)
+    breakdown = result.get('breakdown', [])
+
+    assert penalty > 0, "现金 runway 短应触发 penalty"
+    penalty_types = [b['type'] for b in breakdown]
+    assert 'cash_runway' in penalty_types, "应识别现金 runway penalty"
+    print(f"✅ test_risk_penalty_cash_runway_short passed (penalty={penalty})")
+
+
+def test_historical_actual_over_sub_ratio_source():
+    """historical_actual 应被识别为有效热度数据，使用 live_heat 权重"""
+    ipo = {
+        'over_sub_ratio': 150.0,
+        'over_sub_ratio_source': 'historical_actual',
+    }
+    prospectus_info = {
+        'gross_margin': 40,
+        'profitable': True,
+        'revenue': 500,
+        'sector': 'hardtech',
+        'cornerstone_analysis': {'score': 70, 'label': 'A级', 'has_cornerstone_section': True},
+        'valuation': {'pe_ratio': 25.0, 'ps_ratio': 3.0},
+        'peer_comparison': {'peer_score': 10, 'scarcity_score': 6, 'valuation_position': '合理'},
+    }
+    result = ScoringSystem().calculate(ipo, prospectus_info, signal_components={})
+
+    wp = result.get('weight_profile', {})
+    assert wp.get('name') == 'live_heat', f"期望 live_heat，实际: {wp.get('name')}"
+    assert wp.get('weights', {}).get('trade') == 0.35, f"trade 权重应为 0.35"
+    print("✅ test_historical_actual_over_sub_ratio_source passed")
+
+
+def test_historical_forecast_over_sub_ratio_source():
+    """historical_forecast 应被识别为有效热度数据，使用 live_heat 权重"""
+    ipo = {
+        'over_sub_ratio': 100.0,
+        'over_sub_ratio_source': 'historical_forecast',
+    }
+    prospectus_info = {
+        'gross_margin': 40,
+        'profitable': True,
+        'revenue': 500,
+        'sector': 'hardtech',
+        'cornerstone_analysis': {'score': 70, 'label': 'A级', 'has_cornerstone_section': True},
+        'valuation': {'pe_ratio': 25.0, 'ps_ratio': 3.0},
+        'peer_comparison': {'peer_score': 10, 'scarcity_score': 6, 'valuation_position': '合理'},
+    }
+    result = ScoringSystem().calculate(ipo, prospectus_info, signal_components={})
+
+    wp = result.get('weight_profile', {})
+    assert wp.get('name') == 'live_heat', f"期望 live_heat，实际: {wp.get('name')}"
+    assert wp.get('weights', {}).get('trade') == 0.35, f"trade 权重应为 0.35"
+    print("✅ test_historical_forecast_over_sub_ratio_source passed")
+
+
+def test_reanalysis_version_delta_calculation():
+    """版本对比 delta 计算应正确"""
+    from ipo_analyzer.history import HistoryStore
+    import tempfile
+    import shutil
+
+    # 创建临时目录
+    temp_dir = tempfile.mkdtemp()
+    try:
+        store = HistoryStore(temp_dir)
+        
+        # 模拟第一次分析结果
+        first_result = {
+            'hk_code': '09995',
+            'company_name': 'TestCo',
+            'score': 65,
+            'trade_score': 70,
+            'fundamental_score': 60,
+            'valuation_score': 65,
+            'theme_score': 70,
+            'data_quality_score': 80,
+            'weight_profile': {'name': 'live_heat'},
+            '_reanalysis': {
+                'analysis_mode': 'reanalysis',
+                'heat_data_source': 'historical_actual',
+                'source_type': 'local_pdf',
+            },
+        }
+        
+        # 保存第一次分析
+        record1, delta1 = store.save_reanalysis(first_result)
+        assert delta1 is None, "第一次分析不应有 delta"
+        assert record1.get('score') == 65
+        assert record1.get('stock_code') == '09995'
+        
+        # 模拟第二次分析结果（评分变化）
+        second_result = {
+            'hk_code': '09995',
+            'company_name': 'TestCo',
+            'score': 72,
+            'trade_score': 75,
+            'fundamental_score': 65,
+            'valuation_score': 70,
+            'theme_score': 72,
+            'data_quality_score': 80,
+            'weight_profile': {'name': 'live_heat'},
+            '_reanalysis': {
+                'analysis_mode': 'reanalysis',
+                'heat_data_source': 'historical_actual',
+                'source_type': 'local_pdf',
+            },
+        }
+        
+        # 保存第二次分析
+        record2, delta2 = store.save_reanalysis(second_result)
+        assert delta2 is not None, "第二次分析应有 delta"
+        assert delta2.get('previous_score') == 65
+        assert delta2.get('current_score') == 72
+        assert delta2.get('score_delta') == 7
+        assert delta2.get('dimension_deltas', {}).get('trade_score') == 5
+        assert delta2.get('dimension_deltas', {}).get('fundamental_score') == 5
+        
+        # 检查时间戳版本文件存在
+        history = store.load_reanalysis_history('09995')
+        assert len(history) >= 1, "应至少有一条历史记录"
+        
+        # 检查 latest 文件
+        latest = store.load_reanalysis_latest('09995')
+        assert latest.get('score') == 72, "latest 应指向最新结果"
+        
+        print("✅ test_reanalysis_version_delta_calculation passed")
+        
+    finally:
+        shutil.rmtree(temp_dir)
+
+
+def test_reanalysis_no_heat_data_uses_prospectus_only():
+    """无历史热度数据时应使用 prospectus_only 权重"""
+    from ipo_analyzer.history import HistoryStore
+    import tempfile
+    import shutil
+
+    temp_dir = tempfile.mkdtemp()
+    try:
+        store = HistoryStore(temp_dir)
+        
+        result = {
+            'hk_code': '09995',
+            'company_name': 'TestCo',
+            'score': 58,
+            'weight_profile': {'name': 'prospectus_only', 'weights': {'trade': 0.20, 'theme': 0.15}},
+            '_reanalysis': {
+                'analysis_mode': 'reanalysis',
+                'heat_data_source': 'missing',
+                'source_type': 'local_pdf',
+            },
+        }
+        
+        store.save_reanalysis(result)
+        latest = store.load_reanalysis_latest('09995')
+        
+        assert latest.get('heat_data_source') == 'missing'
+        assert latest.get('weight_profile', {}).get('name') == 'prospectus_only'
+        assert latest.get('weight_profile', {}).get('weights', {}).get('trade') == 0.20
+        assert latest.get('weight_profile', {}).get('weights', {}).get('theme') == 0.15
+        
+        print("✅ test_reanalysis_no_heat_data_uses_prospectus_only passed")
+        
+    finally:
+        shutil.rmtree(temp_dir)
+
+
+def test_reanalyze_ipo_returns_unified_structure():
+    """reanalyze_ipo 返回统一结构"""
+    from ipo_analyzer.core import reanalyze_ipo
+    import tempfile
+    import shutil
+
+    temp_dir = tempfile.mkdtemp()
+    try:
+        # 测试错误情况：未提供股票代码和PDF
+        result = reanalyze_ipo(stock_code=None, pdf_path=None, output_dir=temp_dir)
+        
+        assert 'status' in result, "返回应包含 status"
+        assert 'message' in result, "返回应包含 message"
+        assert 'suggestion' in result, "返回应包含 suggestion"
+        assert 'result' in result, "返回应包含 result"
+        
+        assert result['status'] == 'error', "无输入时应为 error"
+        assert "未提供股票代码或PDF文件" in result['message']
+        
+        print("✅ test_reanalyze_ipo_returns_unified_structure passed")
+        
+    finally:
+        shutil.rmtree(temp_dir)
+
+
 if __name__ == "__main__":
     test_issuer_alias_not_in_unmatched()
     test_quantitative_peers_less_than_two_weak_conclusion()
@@ -757,6 +1141,19 @@ if __name__ == "__main__":
     test_jitai_cornerstone_detected_correctly()
     test_yifei_pre_ipo_investors_not_counted_as_cornerstone()
     test_pre_ipo_investors_excluded_from_cornerstone()
+    test_no_heat_data_weight_profile()
+    test_live_heat_weight_profile()
+    test_theme_score_normalized_to_100()
+    test_theme_score_full_raw_equals_100()
+    test_risk_penalty_only_for_major_red_flags()
+    test_risk_penalty_customer_extreme_concentration()
+    test_risk_penalty_cash_runway_short()
+    # 重新分析功能测试
+    test_historical_actual_over_sub_ratio_source()
+    test_historical_forecast_over_sub_ratio_source()
+    test_reanalysis_version_delta_calculation()
+    test_reanalysis_no_heat_data_uses_prospectus_only()
+    test_reanalyze_ipo_returns_unified_structure()
     print("\n" + "=" * 60)
     print("✅ 所有回归测试通过")
     print("=" * 60)

@@ -511,6 +511,7 @@ class CornerstoneAnalyzer:
         'cornerstone investors',
         'cornerstone placing',
         'cornerstone investor',
+        'cornerstone investment agreement',
         '基石投资者',
         '基石投資者',
         '基石配售',

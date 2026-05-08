@@ -62,18 +62,44 @@ hkipo_analyzer/
 
 ## 评分体系（0.4.0-alpha 已重构）
 
-最终评分 = trade_score × 0.35 + fundamental_score × 0.30 + valuation_score × 0.20 + theme_score × 0.10 + data_quality_score × 0.05 − risk_penalty
+最终评分 = trade_score × trade_weight + fundamental_score × fundamental_weight + valuation_score × valuation_weight + theme_score × theme_weight + data_quality_score × data_quality_weight − risk_penalty
 
-| 维度 | 权重 | 说明 |
-|------|------|------|
-| **trade_score** | 35% | 孖展、超购、集资规模、筹码结构（含 real_money + float_structure） |
-| **fundamental_score** | 30% | 收入、毛利率、盈利、现金流、客户集中度、研发/管线 |
-| **valuation_score** | 20% | PE/PS/PB、同行估值、未盈利专项估值（市值/R&D、现金runway） |
-| **theme_score** | 10% | 主线候选、赛道稀缺性、港股通路径（最多贡献约 5 分） |
-| **data_quality_score** | 5% | 解析置信度；同时作为 confidence_gate，数据差时限制总分上限 |
-| **risk_penalty** | − | 招股书风险因子 + VBP + 客户集中度 |
+### 动态权重切换
+
+权重根据数据阶段自动切换：
+
+**1. 有孖展/超购/预测热度数据（live_heat）**：
+| 维度 | 权重 |
+|------|------|
+| **trade_score** | 35% |
+| **fundamental_score** | 30% |
+| **valuation_score** | 20% |
+| **theme_score** | 10% |
+| **data_quality_score** | 5% |
+
+**2. 无热度数据/仅招股书阶段（prospectus_only）**：
+| 维度 | 权重 |
+|------|------|
+| **trade_score** | 20% |
+| **fundamental_score** | 35% |
+| **valuation_score** | 20% |
+| **theme_score** | 15% |
+| **data_quality_score** | 10% |
+
+### 维度说明
+
+| 维度 | 说明 |
+|------|------|
+| **trade_score** | 孖展、超购、集资规模、筹码结构（含 real_money + float_structure） |
+| **fundamental_score** | 收入、毛利率、盈利、现金流、客户集中度、研发/管线 |
+| **valuation_score** | PE/PS/PB、同行估值、未盈利专项估值（市值/R&D、现金runway） |
+| **theme_score** | 主线候选、赛道稀缺性、港股通路径（标准化为 0-100 分） |
+| **data_quality_score** | 解析置信度；同时作为 confidence_gate，数据差时限制总分上限 |
+| **risk_penalty** | 仅用于重大红旗风险（现金runway < 12个月、重大诉讼、持续经营不确定性、审计保留意见、核心产品监管/临床失败、客户极端集中、财务数据异常、基石红旗） |
 
 > **注意**：旧版「进阶框架 100分」独立卡片已废弃（`advanced_framework_score` 仍保留兼容输出，但不再作为独立主指标）。7 个维度拆分为「交易信号拆解」展示，每项显示 强/中/弱/缺失。
+
+> **风险惩罚说明**：`risk_penalty` 只针对重大红旗风险，避免与 `fundamental_score` 重复扣分。普通风险（如一般客户集中度、普通集采提及、未盈利状态）已在基本面评分中体现，不再重复扣减。
 
 ## 估值逻辑（0.4 当前）
 
