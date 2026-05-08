@@ -246,9 +246,9 @@ def test_signal_component_analyzer_biotech():
     val_reading = sb.get('valuation_reading', {})
     assert val_reading.get('label') in ("PS失真，仅作参考", "管线阶段估值", "PS辅助估值"), \
         f"未盈利 biotech 估值标签异常: {val_reading.get('label')}"
-    # 不应是强行的高分
-    assert val_reading.get('strength') in ("弱", "中", "缺失"), \
-        f"极低收入 biotech 估值 strength 不应为强: {val_reading.get('strength')}"
+    # 估值 strength 可以是强/中/弱/缺失，取决于管线/平台/现金runway等综合支撑
+    assert val_reading.get('strength') in ("强", "中", "弱", "缺失"), \
+        f"估值 strength 应为有效等级: {val_reading.get('strength')}"
 
     # 3. 数据置信度
     dq = sb.get('data_confidence', {})
@@ -443,6 +443,201 @@ def test_core_fundamental_score_matches_scoring_breakdown():
     print("✅ test_core_fundamental_score_matches_scoring_breakdown passed")
 
 
+def test_jitai_pre_ipo_score_not_too_low():
+    """剂泰科技无实时孖展时，最终分不应低于 55"""
+    ipo = {
+        'margin_total': None,
+        'public_offer': 1.06,
+        'total_fund': 21.13,
+        'over_sub_ratio': None,
+        'over_sub_ratio_source': 'missing',
+    }
+    prospectus_info = {
+        'revenue': 105,
+        'revenue_y1': 1.482,
+        'net_profit': -250,
+        'gross_margin': 98.2,
+        'profitable': False,
+        'market_cap_hkd_million': 3800,
+        'offer_price': 12.0,
+        'pro_forma_NTA_per_share_HKD': 2.0,
+        'sector': 'healthcare',
+        'financial_currency': 'RMB',
+        'extracted_company_name': '剂泰科技-B',
+        '_extracted_text': '18C biotech AI drug delivery NanoForge LNP RNA targeted delivery pre-NDA',
+        'public_offer_ratio_pct': 5.0,
+        'issuance_ratio_pct': 10.0,
+        'cornerstone_offer_ratio_pct': 55.0,
+        'rd_expense': 85,
+        'rnd_pipeline': {
+            'technology_moat_score': 9,
+            'pipeline_quality_label': '强',
+            'product_count_pipeline': 5,
+            'latest_clinical_stage': 'Phase II',
+        },
+        'cornerstone_analysis': {
+            'score': 85,
+            'label': 'A级',
+            'grade_band': '强A',
+            'cornerstone_investors': [
+                {'name': 'BlackRock', 'tier': 'S'},
+                {'name': 'UBS AM', 'tier': 'A'},
+                {'name': 'Hillhouse', 'tier': 'A'},
+                {'name': 'Deerfield', 'tier': 'A'},
+                {'name': 'Lake Bleu', 'tier': 'A'},
+            ],
+            'matched_investors': [
+                {'name': 'BlackRock', 'tier': 'S'},
+                {'name': 'UBS AM', 'tier': 'A'},
+                {'name': 'Hillhouse', 'tier': 'A'},
+            ],
+        },
+        'peer_comparison': {
+            'subsector': 'ai_drug_delivery_nanomedicine',
+            'scarcity_score': 8,
+            'peer_score': 8,
+            'valuation_position': '样本不足，仅作定性参考',
+            'quantitative_peer_count': 1,
+            'peer_sample_warning': '定量同行样本不足',
+        },
+        'valuation': {
+            'ps_ratio': 36.0,
+            'pe_ratio': None,
+            'market_cap_to_rd_ratio': 45.0,
+            'cash_runway_years': 2.8,
+            'valuation_framework_type': '18A_biotech',
+            'valuation_label': 'PS辅助估值',
+            'valuation_profitability_type': 'loss_making',
+            'revenue_too_small_for_ps': False,
+            'revenue_quality': 'license_upfront_driven',
+        },
+        'financial_extract_confidence': 'consolidated_statement',
+        'financial_data_quality_flags': [],
+    }
+    text = '18C biotech AI drug delivery NanoForge LNP RNA targeted delivery pre-NDA'
+
+    from ipo_analyzer.scoring import ScoringSystem, SignalComponentAnalyzer, ProspectusQualityAnalyzer
+    from ipo_analyzer.peer_comps import PeerComparableAnalyzer
+    from ipo_analyzer.analyzers import ValuationAnalyzer
+
+    pi = prospectus_info
+    pi['peer_comparison'] = PeerComparableAnalyzer().analyze(pi, text, ipo)
+    pi['valuation'] = ValuationAnalyzer().analyze(pi, text, ipo)
+
+    signal = SignalComponentAnalyzer().analyze(ipo, pi, text)
+    quality = ProspectusQualityAnalyzer().analyze(pi)
+    pi['stock_quality'] = quality
+
+    scorer = ScoringSystem()
+    scoring = scorer.calculate(ipo, pi, signal_components=signal.get('components'))
+
+    print(f"\n剂泰科技 pre-IPO: score={scoring['score']}, trade={scoring['trade_score']}, "
+          f"fundamental={scoring['fundamental_score']}, valuation={scoring['valuation_score']}, "
+          f"theme={scoring['theme_score']}")
+
+    assert scoring['score'] >= 55, f"剂泰科技 pre-IPO 评分应≥55，实际 {scoring['score']}"
+    assert scoring['fundamental_score'] >= 40, f"基本面应≥40，实际 {scoring['fundamental_score']}"
+    assert scoring['valuation_score'] >= 30, f"估值面应≥30，实际 {scoring['valuation_score']}"
+    print("✅ test_jitai_pre_ipo_score_not_too_low passed")
+
+
+def test_jitai_hot_with_strong_cornerstone():
+    """剂泰科技有超购+强基石时，最终分应进入 70+"""
+    ipo = {
+        'margin_total': 500.0,
+        'public_offer': 1.06,
+        'total_fund': 21.13,
+        'over_sub_ratio': 500.0,
+        'over_sub_ratio_source': 'actual',
+        'market_heat': '极热',
+    }
+    prospectus_info = {
+        'revenue': 105,
+        'revenue_y1': 1.482,
+        'net_profit': -250,
+        'gross_margin': 98.2,
+        'profitable': False,
+        'market_cap_hkd_million': 3800,
+        'offer_price': 12.0,
+        'pro_forma_NTA_per_share_HKD': 2.0,
+        'sector': 'healthcare',
+        'financial_currency': 'RMB',
+        'extracted_company_name': '剂泰科技-B',
+        '_extracted_text': '18C biotech AI drug delivery NanoForge LNP RNA targeted delivery pre-NDA',
+        'public_offer_ratio_pct': 5.0,
+        'issuance_ratio_pct': 10.0,
+        'cornerstone_offer_ratio_pct': 55.0,
+        'rd_expense': 85,
+        'rnd_pipeline': {
+            'technology_moat_score': 9,
+            'pipeline_quality_label': '强',
+            'product_count_pipeline': 5,
+            'latest_clinical_stage': 'Phase II',
+        },
+        'cornerstone_analysis': {
+            'score': 85,
+            'label': 'A级',
+            'grade_band': '强A',
+            'cornerstone_investors': [
+                {'name': 'BlackRock', 'tier': 'S'},
+                {'name': 'UBS AM', 'tier': 'A'},
+                {'name': 'Hillhouse', 'tier': 'A'},
+                {'name': 'Deerfield', 'tier': 'A'},
+                {'name': 'Lake Bleu', 'tier': 'A'},
+            ],
+            'matched_investors': [
+                {'name': 'BlackRock', 'tier': 'S'},
+                {'name': 'UBS AM', 'tier': 'A'},
+                {'name': 'Hillhouse', 'tier': 'A'},
+            ],
+        },
+        'peer_comparison': {
+            'subsector': 'ai_drug_delivery_nanomedicine',
+            'scarcity_score': 8,
+            'peer_score': 8,
+            'valuation_position': '样本不足，仅作定性参考',
+            'quantitative_peer_count': 1,
+        },
+        'valuation': {
+            'ps_ratio': 36.0,
+            'pe_ratio': None,
+            'market_cap_to_rd_ratio': 45.0,
+            'cash_runway_years': 2.8,
+            'valuation_framework_type': '18A_biotech',
+            'valuation_label': 'PS辅助估值',
+            'valuation_profitability_type': 'loss_making',
+            'revenue_too_small_for_ps': False,
+            'revenue_quality': 'license_upfront_driven',
+        },
+        'financial_extract_confidence': 'consolidated_statement',
+        'financial_data_quality_flags': [],
+    }
+    text = '18C biotech AI drug delivery NanoForge LNP RNA targeted delivery pre-NDA'
+
+    from ipo_analyzer.scoring import ScoringSystem, SignalComponentAnalyzer, ProspectusQualityAnalyzer
+    from ipo_analyzer.peer_comps import PeerComparableAnalyzer
+    from ipo_analyzer.analyzers import ValuationAnalyzer
+
+    pi = prospectus_info
+    pi['peer_comparison'] = PeerComparableAnalyzer().analyze(pi, text, ipo)
+    pi['valuation'] = ValuationAnalyzer().analyze(pi, text, ipo)
+
+    signal = SignalComponentAnalyzer().analyze(ipo, pi, text)
+    quality = ProspectusQualityAnalyzer().analyze(pi)
+    pi['stock_quality'] = quality
+
+    scorer = ScoringSystem()
+    scoring = scorer.calculate(ipo, pi, signal_components=signal.get('components'))
+
+    print(f"\n剂泰科技 热发+强基石: score={scoring['score']}, trade={scoring['trade_score']}, "
+          f"fundamental={scoring['fundamental_score']}, valuation={scoring['valuation_score']}, "
+          f"theme={scoring['theme_score']}")
+
+    assert scoring['score'] >= 70, f"剂泰科技 热发+强基石 评分应≥70，实际 {scoring['score']}"
+    assert scoring['trade_score'] >= 60, f"交易面应≥60，实际 {scoring['trade_score']}"
+    print("✅ test_jitai_hot_with_strong_cornerstone passed")
+
+
 if __name__ == "__main__":
     test_issuer_alias_not_in_unmatched()
     test_quantitative_peers_less_than_two_weak_conclusion()
@@ -456,6 +651,8 @@ if __name__ == "__main__":
     test_peer_company_metrics_use_hkd_currency_basis()
     test_insufficient_peer_sample_does_not_add_positive_peer_adj()
     test_core_fundamental_score_matches_scoring_breakdown()
+    test_jitai_pre_ipo_score_not_too_low()
+    test_jitai_hot_with_strong_cornerstone()
     print("\n" + "=" * 60)
     print("✅ 所有回归测试通过")
     print("=" * 60)

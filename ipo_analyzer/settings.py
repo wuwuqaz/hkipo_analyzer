@@ -31,7 +31,7 @@ class ValuationThresholds:
     ps_expensive: float = 15.0
     ps_high: float = 8.0
     ps_fair: float = 3.0
-    biotech_revenue_small: float = 100.0
+    biotech_revenue_small: float = 200.0
     biotech_revenue_moderate: float = 500.0
     cash_runway_warning: float = 1.5
     biotech_pipeline_count_warning: int = 2

@@ -251,12 +251,15 @@ class ScoringSystem:
             data_confidence_gate_warning = "数据质量中等，部分指标建议复核"
 
         # 动态权重：pre-IPO 阶段（无市场热度数据）降低 trade/valuation 权重，提高 fundamental/theme
-        has_heat = _is_num(ipo.get('over_sub_ratio'))
-        has_market = _is_num(ipo.get('forecast_over_sub_ratio')) or ipo.get('market_heat')
-        if has_heat or has_market:
-            trade_w, fundamental_w, valuation_w, theme_w, dq_w = 0.35, 0.30, 0.20, 0.10, 0.05
+        has_heat = _is_num(ipo.get('over_sub_ratio')) and ipo.get('over_sub_ratio_source') != 'missing'
+        has_market = _is_num(ipo.get('forecast_over_sub_ratio')) or ipo.get('market_heat') in ("温和", "热门", "极热")
+        is_pre_ipo = not (has_heat or has_market)
+        if is_pre_ipo:
+            # pre-IPO 阶段无实时市场数据，trade 信息最弱，降低其权重；
+            # valuation（基石/管线/稀缺性）和 fundamental（财务质地）可通过招股书充分分析，权重更高
+            trade_w, fundamental_w, valuation_w, theme_w, dq_w = 0.15, 0.40, 0.25, 0.15, 0.05
         else:
-            trade_w, fundamental_w, valuation_w, theme_w, dq_w = 0.20, 0.45, 0.15, 0.15, 0.05
+            trade_w, fundamental_w, valuation_w, theme_w, dq_w = 0.35, 0.30, 0.20, 0.10, 0.05
 
         raw_final = (
             trade_score * trade_w
@@ -311,14 +314,24 @@ class ScoringSystem:
                 reasons.append("同行对比偏弱: 相对同行估值偏高(-5分)")
 
         val_penalty = 0
+        # 18C/biotech license upfront 驱动型收入：不对 PS 溢价做硬性扣分
+        revenue_quality = valuation.get('revenue_quality', 'standard')
+        is_license_driven = revenue_quality == 'license_upfront_driven'
+
         if isinstance(valuation, dict):
             if val_label in ('很贵',):
-                if rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
+                if is_license_driven:
+                    val_penalty = -1  # 仅轻微提示，不硬性扣5分
+                    reasons.append("收入以授权/里程碑为主，绝对估值标签仅作提示")
+                elif rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
                     val_penalty = -2
                 else:
                     val_penalty = -5
             elif val_label in ('偏贵', '明显偏贵'):
-                if rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
+                if is_license_driven:
+                    val_penalty = 0  # 不扣分
+                    reasons.append("收入以授权/里程碑为主，相对估值标签不直接扣分")
+                elif rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
                     val_penalty = -1
                 else:
                     val_penalty = -3
@@ -351,4 +364,13 @@ class ScoringSystem:
             'reasons': reasons,
             'components': components,
             'data_confidence_gate_warning': data_confidence_gate_warning,
+            'score_weights_note': (
+                f"权重: trade={trade_w:.0%} fundamental={fundamental_w:.0%} "
+                f"valuation={valuation_w:.0%} theme={theme_w:.0%} dq={dq_w:.0%} "
+                f"(theme封顶50/100，权重10%，最多贡献约5分)"
+            ) if not is_pre_ipo else (
+                f"pre-IPO权重: trade={trade_w:.0%} fundamental={fundamental_w:.0%} "
+                f"valuation={valuation_w:.0%} theme={theme_w:.0%} dq={dq_w:.0%} "
+                f"(theme封顶50/100，权重15%，最多贡献约7.5分)"
+            ),
         }

@@ -68,7 +68,7 @@ class CornerstoneAnalyzer:
             'name': 'BlackRock',
             'tier': 'S',
             'category': '全球顶级长线资管',
-            'aliases': ['blackrock', '贝莱德'],
+            'aliases': ['blackrock', '贝莱德', '貝萊德'],
             'role_note': '全球顶级资管，市场背书和定价锚较强',
             'sector_tags': ['all'],
         },
@@ -252,7 +252,7 @@ class CornerstoneAnalyzer:
             'name': 'LAV / Lilly Asia Ventures',
             'tier': 'A',
             'category': '医疗专业基金',
-            'aliases': ['lilly asia ventures', 'lav', 'lilly asia', '礼来亚洲'],
+            'aliases': ['lilly asia ventures', 'lav', 'lilly asia', '礼来亚洲', '禮來亞洲'],
             'role_note': '全球顶级医疗健康VC，生物医药管线判断力强',
             'sector_tags': ['healthcare'],
         },
@@ -340,7 +340,7 @@ class CornerstoneAnalyzer:
             'name': 'UBS Asset Management',
             'tier': 'A',
             'category': '大型投行/资管平台',
-            'aliases': ['ubs asset management', 'ubs am', '瑞银资管', '瑞银'],
+            'aliases': ['ubs asset management', 'ubs am', '瑞银资管', '瑞银', '瑞銀'],
             'role_note': '国际大型资管平台，机构认可度较好',
             'sector_tags': ['all'],
         },
@@ -396,7 +396,7 @@ class CornerstoneAnalyzer:
             'name': 'China AMC',
             'tier': 'A',
             'category': '知名中资长线/保险/公募',
-            'aliases': ['china amc', '华夏基金', '华夏'],
+            'aliases': ['china amc', '华夏基金', '华夏', '華夏'],
             'role_note': '头部中资公募，国内资金认可度较好',
             'sector_tags': ['all'],
         },
@@ -436,7 +436,7 @@ class CornerstoneAnalyzer:
             'name': 'Mirae Asset',
             'tier': 'A',
             'category': '大型投行/资管平台',
-            'aliases': ['mirae', '未来资产'],
+            'aliases': ['mirae', '未来资产', '未來資產'],
             'role_note': '亚洲大型金融/资管平台，具备区域资金背书',
             'sector_tags': ['all'],
         },
@@ -513,11 +513,17 @@ class CornerstoneAnalyzer:
             lower_text.find('cornerstone placing'),
             lower_text.find('cornerstone investor'),
             text.find('基石投资者'),
+            text.find('基石投資者'),
+            text.find('基石配售'),
+            text.find('基石投資協議'),
+            text.find('基石投資者的資料'),
         ]
         anchors = [idx for idx in anchors if idx >= 0]
         if not anchors:
-            return ""
-        start = max(anchors)
+            # fallback: 扫描全文中的投资者名称匹配
+            return text
+        # 取最早的锚点开始扫描（避免错过前面的基石表格）
+        start = min(anchors)
         context = text[start:start + 120000]
         return context
 

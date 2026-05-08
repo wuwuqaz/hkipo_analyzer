@@ -69,6 +69,8 @@ _PROSPECTUS_COPY_FIELDS = [
     'revenue_y1_year', 'net_profit', 'net_profit_y1', 'net_profit_year',
     'net_profit_y1_year', 'profitable', 'gross_margin', 'gross_margin_year',
     'sector', 'financial_extract_confidence',
+    # 发行数据（供 scoring 使用）
+    'public_offer', 'total_fund', 'cornerstone_pct',
 ]
 
 
@@ -142,15 +144,27 @@ def _fetch_margin_data(client, ipo, margin_detail=None):
         ipo_data['forecast_over_sub_ratio'] = forecast_over
         ipo_data['margin_detail'] = margin_detail
 
-        market_heat_value = ipo_data['over_sub_ratio'] or 0
-        if market_heat_value >= SETTINGS.market_heat.extreme:
-            ipo_data['market_heat'] = "极热"
-        elif market_heat_value >= SETTINGS.market_heat.hot:
-            ipo_data['market_heat'] = "热门"
-        elif market_heat_value >= SETTINGS.market_heat.warm:
-            ipo_data['market_heat'] = "温和"
+        # 只有在有真实/预测超购数据时才设置 market_heat
+        if actual_over is not None:
+            market_heat_value = actual_over
+        elif forecast_over is not None:
+            market_heat_value = forecast_over
+        elif estimated_over is not None:
+            market_heat_value = estimated_over
         else:
-            ipo_data['market_heat'] = "冷清"
+            market_heat_value = None
+
+        if market_heat_value is not None:
+            if market_heat_value >= SETTINGS.market_heat.extreme:
+                ipo_data['market_heat'] = "极热"
+            elif market_heat_value >= SETTINGS.market_heat.hot:
+                ipo_data['market_heat'] = "热门"
+            elif market_heat_value >= SETTINGS.market_heat.warm:
+                ipo_data['market_heat'] = "温和"
+            else:
+                ipo_data['market_heat'] = "冷清"
+        else:
+            ipo_data['market_heat'] = None
 
         logger.info("  ✓ 孖展资金总计: %s", f"{ipo_data['margin_total']:.2f}亿" if ipo_data['margin_total'] is not None else "--")
         logger.info("  ✓ 集资额（公开）: %s", f"{ipo_data['public_offer']:.2f}亿" if ipo_data['public_offer'] is not None else "--")
@@ -200,6 +214,13 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
 
     signal_result = signal_analyzer.analyze(ipo_data, prospectus_info, prospectus_text)
     prospectus_info['advanced_framework'] = signal_result  # 兼容旧字段
+
+    # 合并招股书解析出的发行数据到 ipo_data（优先使用招股书中的精确数据）
+    for fld in ('public_offer', 'total_fund', 'public_offer_ratio_pct', 'cornerstone_offer_ratio_pct', 'cornerstone_pct'):
+        pi_val = prospectus_info.get(fld)
+        if pi_val is not None and pi_val != 0:
+            if ipo_data.get(fld) in (None, 0, ''):
+                ipo_data[fld] = pi_val
 
     stock_quality = quality_analyzer.analyze(prospectus_info)
     prospectus_info['stock_quality'] = stock_quality  # 供 ScoringSystem 复用，消除重复评分

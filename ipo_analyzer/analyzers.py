@@ -99,6 +99,23 @@ class ValuationAnalyzer:
             result['adjusted_profit_hkd_million'] = adjusted_profit_hkd
             result['market_cap_hkd_million'] = market_cap_m
 
+            # --- 收入质量识别（对 biotech 重要）---
+            text_lower = str(prospectus_info.get('_extracted_text', '')).lower()
+            upfront_keywords = [
+                'upfront payment', 'milestone payment', 'license payment',
+                '授权首付款', '里程碑付款', '一次性付款', '许可费收入',
+                'collaboration revenue', 'partnership revenue',
+            ]
+            upfront_mentions = sum(1 for kw in upfront_keywords if kw in text_lower)
+            result['revenue_quality'] = 'standard'
+            if upfront_mentions >= 2:
+                result['revenue_quality'] = 'contains_upfront'
+                # 若收入极小且文本明确提到 upfront/license 占主导
+                if _is_num(revenue) and revenue < vt.biotech_revenue_small:
+                    if any(x in text_lower for x in ['primarily from', 'mainly from', '主要来源', '大部分来自']):
+                        if any(x in text_lower for x in ['upfront', 'license', 'milestone', '授权', '许可']):
+                            result['revenue_quality'] = 'license_upfront_driven'
+
             if _is_num(market_cap_m) and _is_num(net_profit_hkd) and net_profit_hkd > 0:
                 result['pe_ratio'] = round(market_cap_m / net_profit_hkd, 2)
             if _is_num(market_cap_m) and _is_num(adjusted_profit_hkd) and adjusted_profit_hkd > 0:
@@ -320,6 +337,16 @@ class ValuationAnalyzer:
                 result['confidence'] = 'market_cap_only'
         except Exception as e:
             logger.warning("%s: %s", type(self).__name__, e)
+
+        # 合并旧 valuation 中因文本缺失而无法重新计算的字段
+        old_valuation = prospectus_info.get('valuation') or {}
+        if isinstance(old_valuation, dict):
+            for key in ('cash_runway_years', 'revenue_quality', 'latest_clinical_stage',
+                        'pipeline_concentration_warning', 'biotech_valuation_label',
+                        'biotech_stage_label'):
+                if result.get(key) in (None, '', 'standard') and old_valuation.get(key) not in (None, '', 'standard'):
+                    result[key] = old_valuation[key]
+
         return result
 
 

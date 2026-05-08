@@ -444,12 +444,21 @@ class SignalComponentAnalyzer:
                          'PS辅助(明显偏贵)' in str(peer_valuation_pos))
         is_very_overpriced = _is_num(premium) and float(premium) > pt.premium_overpriced
 
+        # 18C/biotech license upfront 驱动型收入：不对 PS 溢价做硬性扣分
+        revenue_quality = (prospectus_info.get('valuation') or {}).get('revenue_quality', 'standard')
+        is_license_driven = revenue_quality == 'license_upfront_driven'
+
         relative_score = 0
         if is_overpriced or is_very_overpriced:
-            relative_score = 0
-            red_flags.append('相对同行PS溢价过高' if is_very_overpriced else '同行相对估值: 明显偏贵')
-            if is_overpriced:
-                reasons.append(f'相对估值: {peer_valuation_pos}')
+            if is_license_driven and is_low_rev_biotech:
+                # license upfront 收入不应与同行经常性收入直接比 PS
+                relative_score = min(2, round(peer_score_val / 15 * pt.peer_map_max)) if _is_num(peer_score_val) and peer_score_val > 0 else 1
+                reasons.append('收入以授权/里程碑为主，PS溢价不直接可比，仅作提示')
+            else:
+                relative_score = 0
+                red_flags.append('相对同行PS溢价过高' if is_very_overpriced else '同行相对估值: 明显偏贵')
+                if is_overpriced:
+                    reasons.append(f'相对估值: {peer_valuation_pos}')
         elif _is_num(peer_score_val) and peer_score_val > 0 and quant_count >= 2:
             relative_score = min(pt.peer_map_max, round(peer_score_val / 15 * pt.peer_map_max))
             reasons.append(f"同行对比得分{peer_score_val}/15")
@@ -492,6 +501,31 @@ class SignalComponentAnalyzer:
         if _is_num(market_cap) and market_cap >= SETTINGS.valuation_score.large_market_cap:
             bonus_score = min(4, bonus_score + 1)
             reasons.append("上市市值较大，具备机构覆盖基础")
+
+        # 18C/biotech 额外加分：优质管线 + 强基石 + 良好现金runway
+        if is_low_rev_biotech:
+            rnd = prospectus_info.get('rnd_pipeline', {})
+            pipeline_label = rnd.get('pipeline_quality_label', '')
+            moat_score = rnd.get('technology_moat_score', 0)
+            product_count = rnd.get('product_count_pipeline', 0)
+            if pipeline_label == '强' and moat_score >= 7 and _is_num(product_count) and product_count >= 3:
+                bonus_score += 2
+                reasons.append("优质管线且产品数量≥3，平台价值高")
+            # 强基石组合给估值容忍度
+            ca = prospectus_info.get('cornerstone_analysis') or {}
+            if ca.get('score', 0) >= 70 and ca.get('grade_band') in ('强A', 'A+', 'S级'):
+                bonus_score += 2
+                reasons.append("强基石组合提供估值背书")
+            # 良好现金runway
+            runway = valuation.get('cash_runway_years')
+            if _is_num(runway) and runway >= 2.5:
+                bonus_score += 1
+                reasons.append("现金runway充足(≥2.5年)，支撑研发周期")
+            # license upfront 收入结构
+            if is_license_driven:
+                bonus_score += 1
+                reasons.append("收入含授权/里程碑付款，具备平台变现能力")
+
         score += bonus_score
 
         if _is_num(net_profit) and _is_num(revenue) and revenue > 0 and abs(net_profit / revenue) < 0.001:
@@ -541,6 +575,18 @@ class SignalComponentAnalyzer:
             score = mt.consumer_hit if hits else mt.consumer_no_hit
         elif sector == 'hardtech' and not hits:
             score = mt.hardtech_no_hit
+
+        # AI drug delivery / nanomedicine / 18C 等稀缺组合额外加分
+        ai_delivery_keywords = [
+            'ai drug delivery', 'nanoforge', 'lnp', 'lipid nanoparticle',
+            'rna formulation', 'targeted delivery', '18c', 'pre-nda',
+            'nanomedicine', 'nanoparticle drug delivery', 'ai-driven drug',
+        ]
+        ai_hits = sum(1 for kw in ai_delivery_keywords if kw in lower_text)
+        if ai_hits >= 3 and sector == 'healthcare':
+            score = min(15, score + min(6, ai_hits))
+            hits.extend([f'AI_delivery_{i}' for i in range(ai_hits)])
+
         detail = f"{sector}；关键词{len(hits)}个；需外部行情确认"
         label = '主线候选' if score >= mt.high_threshold else ('观察赛道' if score >= mt.mid_threshold else '非主线')
         return self._component(score, 15, label, detail, confidence='keyword_only', reasons=['未接入板块涨幅/成交/南向资金，主线判断为低置信度'])
