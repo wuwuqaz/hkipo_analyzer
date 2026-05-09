@@ -611,6 +611,65 @@ def export_pdf_report(results, output_file):
             ipo_elements.append(signal_breakdown_table)
             ipo_elements.append(Spacer(1, 10))
 
+        # --- waterfall 得分拆解 ---
+        wp = ipo.get('weight_profile', {}) or {}
+        weights = wp.get('weights', {})
+        if weights:
+            waterfall_rows = [
+                [Paragraph("<b>维度</b>", styles["Label"]),
+                 Paragraph("<b>原始分</b>", styles["Label"]),
+                 Paragraph("<b>权重</b>", styles["Label"]),
+                 Paragraph("<b>贡献</b>", styles["Label"])],
+            ]
+            wf_items = [
+                ("交易面", ipo.get('trade_score', 0), weights.get('trade', 0)),
+                ("基本面", ipo.get('fundamental_score', 0), weights.get('fundamental', 0)),
+                ("估值面", ipo.get('valuation_score', 0), weights.get('valuation', 0)),
+                ("主题面", ipo.get('theme_score', 0), weights.get('theme', 0)),
+                ("数据质量", ipo.get('data_quality_score', 0), weights.get('data_quality', 0)),
+            ]
+            raw_total = 0
+            for title, score, weight in wf_items:
+                contrib = round(score * weight)
+                raw_total += contrib
+                waterfall_rows.append([
+                    Paragraph(title, styles["Value"]),
+                    Paragraph(str(score), styles["Value"]),
+                    Paragraph(f"{weight:.0%}", styles["Value"]),
+                    Paragraph(str(contrib), styles["Value"]),
+                ])
+            penalty = ipo.get('risk_penalty', 0)
+            if penalty > 0:
+                waterfall_rows.append([
+                    Paragraph("<font color='{_C['red']}'><b>风险惩罚</b></font>", styles["Value"]),
+                    Paragraph("", styles["Value"]),
+                    Paragraph("", styles["Value"]),
+                    Paragraph(f"<font color='{_C['red']}'><b>-{penalty}</b></font>", styles["Value"]),
+                ])
+            final_score = ipo.get('score', 0)
+            waterfall_rows.append([
+                Paragraph("<b>最终评分</b>", styles["Label"]),
+                Paragraph("", styles["Label"]),
+                Paragraph("", styles["Label"]),
+                Paragraph(f"<font color='{_score_color(final_score)}'><b>{final_score}</b></font>", styles["Label"]),
+            ])
+            wf_tbl = Table(waterfall_rows, colWidths=[120, 60, 60, 60], hAlign="LEFT")
+            wf_tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_C['brand'])),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, -1), font_name),
+                ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor(_C['slate_200'])),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("LINEABOVE", (0, -1), (-1, -1), 1.5, colors.HexColor(_C['navy'])),
+            ]))
+            ipo_elements.append(wf_tbl)
+            ipo_elements.append(Spacer(1, 10))
+
         breakdown = ipo.get('score_breakdown', {})
         if breakdown:
             def _compact_detail(detail):

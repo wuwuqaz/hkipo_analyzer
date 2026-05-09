@@ -32,6 +32,7 @@ class DetailView:
         self._render_header(ipo)
         self._render_prospectus_warning(has_prospectus, key_financials_empty)
         self._render_metrics(ipo)
+        self._render_score_waterfall(ipo)
         self._render_signal_breakdown(ipo)
         self._render_score_reasons(ipo)
         self._render_diagnosis(ipo)
@@ -87,6 +88,68 @@ class DetailView:
             ("风险扣分", f"-{ipo.get('risk_penalty', 0)}", "", "score-poor" if ipo.get('risk_penalty', 0) > 5 else ""),
         ]
         self.html.metric_card_st(cols, metrics)
+
+
+    def _render_score_waterfall(self, ipo: dict) -> None:
+        """展示五维评分的 waterfall 拆解：各维度分数 × 权重 = 贡献值。"""
+        wp = ipo.get('weight_profile', {}) or {}
+        weights = wp.get('weights', {})
+        if not weights:
+            return
+
+        dimensions = [
+            ("交易面", ipo.get('trade_score', 0), weights.get('trade', 0)),
+            ("基本面", ipo.get('fundamental_score', 0), weights.get('fundamental', 0)),
+            ("估值面", ipo.get('valuation_score', 0), weights.get('valuation', 0)),
+            ("主题面", ipo.get('theme_score', 0), weights.get('theme', 0)),
+            ("数据质量", ipo.get('data_quality_score', 0), weights.get('data_quality', 0)),
+        ]
+
+        rows_html = ""
+        raw_total = 0
+        for title, score, weight in dimensions:
+            contribution = round(score * weight)
+            raw_total += contribution
+            rows_html += (
+                f'<div style="display:flex;justify-content:space-between;align-items:center;'
+                f'padding:6px 0;border-bottom:1px solid #f1f5f9;">'
+                f'<div style="font-size:13px;color:#334155;">{title} <span style="color:#94a3b8;">({weight:.0%})</span></div>'
+                f'<div style="font-size:13px;font-weight:600;color:#334155;">{score} × {weight:.0%} = {contribution}</div>'
+                f'</div>'
+            )
+
+        # 调整项
+        penalty = ipo.get('risk_penalty', 0)
+        penalty_html = ""
+        if penalty > 0:
+            penalty_html = (
+                f'<div style="display:flex;justify-content:space-between;align-items:center;'
+                f'padding:6px 0;border-bottom:1px solid #f1f5f9;">'
+                f'<div style="font-size:13px;color:#dc2626;">风险惩罚</div>'
+                f'<div style="font-size:13px;font-weight:600;color:#dc2626;">−{penalty}</div>'
+                f'</div>'
+            )
+
+        final = ipo.get('score', 0)
+        cap_reason = ipo.get('debug_info', {}).get('cap_reason', '')
+        cap_html = f'<div style="font-size:11px;color:#94a3b8;margin-top:4px;">{cap_reason}</div>' if cap_reason else ""
+
+        st.markdown(f"""
+        <div class="section-card">
+            <div class="section-title">⚖️ 得分拆解 (Waterfall)</div>
+            {rows_html}
+            {penalty_html}
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;margin-top:4px;">
+                <div style="font-size:14px;font-weight:700;color:#1e293b;">加权原始分</div>
+                <div style="font-size:14px;font-weight:700;color:#1e293b;">{raw_total}</div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:2px solid #1e293b;">
+                <div style="font-size:16px;font-weight:800;color:#1e293b;">最终评分</div>
+                <div style="font-size:16px;font-weight:800;color:{score_color_hex(final)};">{final}/100</div>
+            </div>
+            {cap_html}
+        </div>
+        """, unsafe_allow_html=True)
 
     def _render_score_reasons(self, ipo: dict) -> None:
         reasons = ipo.get("score_reasons", [])
