@@ -438,7 +438,8 @@ class SignalComponentAnalyzer:
         peer_valuation_pos = peer_comparison.get('valuation_position', '缺失')
         scarcity = peer_comparison.get('scarcity_score', 0)
         premium = peer_comparison.get('relative_ps_premium_pct')
-        quant_count = peer_comparison.get('quantitative_peer_count', 0)
+        raw_quant_count = peer_comparison.get('quantitative_peer_count', 0)
+        quant_count = int(raw_quant_count) if _is_num(raw_quant_count) else 0
 
         is_overpriced = ('明显偏贵' in str(peer_valuation_pos) or
                          'PS辅助(明显偏贵)' in str(peer_valuation_pos))

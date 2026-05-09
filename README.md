@@ -8,13 +8,13 @@
 
 ```bash
 cd hkipo_analyzer
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 
 # 启动 Web UI
 streamlit run app.py
 
 # 或使用 CLI 模式
-python -c "from ipo_analyzer.core import main; main()"
+python3 -c "from ipo_analyzer.core import main; main()"
 ```
 
 ## 项目结构

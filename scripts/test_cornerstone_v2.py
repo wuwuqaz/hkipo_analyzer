@@ -65,7 +65,8 @@ def test_cornerstone_edge_rules():
 
     empty = analyzer.analyze("This prospectus has no relevant investor chapter.")
     assert empty.get("label") == "未披露"
-    assert empty.get("red_flags"), "Expected red flag for missing cornerstone chapter"
+    assert empty.get("has_cornerstone_section") is False
+    assert empty.get("red_flags") == [], "Missing cornerstone chapter should not be treated as a red flag"
 
     spv = analyzer.analyze(
         "Cornerstone Investors\n"

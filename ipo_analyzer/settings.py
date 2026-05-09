@@ -371,6 +371,15 @@ class CornerstoneThresholds:
     red_flags_high_count: int = 2
     # SPV - 提高触发阈值，避免单一SPV表述触发红旗
     spv_warning_count: int = 4
+    # 严重基石红旗关键词（用于区分普通红旗与严重红旗）
+    severe_cornerstone_flags: frozenset = field(default_factory=lambda: frozenset({
+        '关联方认购', 'related party', 'connected person',
+        '锁定异常', 'lockup abnormality', 'abnormal lockup',
+        '虚假基石', 'fake cornerstone',
+        '撤回认购', 'withdrawn subscription',
+        '高度不透明', 'opaque', 'spv过多', 'excessive spv',
+        '不透明spv',
+    }))
 
 
 # ---------------------------------------------------------------------------

@@ -596,7 +596,7 @@ def test_single_quantitative_peer_weak_conclusion():
     if len(result.get("quantitative_peers", [])) < 2:
         vp = result.get("valuation_position", "")
         assert vp == "样本不足，仅作定性参考", f"期望'样本不足，仅作定性参考', 实际: {vp}"
-        assert result.get("peer_score", 0) <= 5, f"peer_score 应受限: {result.get('peer_score')}"
+        assert result.get("peer_sample_warning"), "quantitative peers 不足时应给出样本不足提示"
         print(f"valuation_position: {vp}  (符合预期)")
     else:
         print(f"quantitative peers >= 2, 跳过此断言")

@@ -264,6 +264,53 @@ def test_signal_component_analyzer_biotech():
     print("✅ test_signal_component_analyzer_biotech passed")
 
 
+def test_signal_component_analyzer_none_quant_count():
+    """quantitative_peer_count 为 None 时不应触发类型错误"""
+    ipo = {"company_name": "TestBio", "hk_code": "9999"}
+    prospectus_info = {
+        "sector": "healthcare",
+        "extracted_company_name": "TestBio-B",
+        "_extracted_text": "18A biotech clinical stage platform",
+        "revenue": 30,
+        "revenue_y1": 10,
+        "net_profit": -100,
+        "gross_margin": 60,
+        "market_cap_hkd_million": 5000,
+        "profitable": False,
+        "peer_comparison": {
+            "subsector": "ai_drug_delivery_nanomedicine",
+            "scarcity_score": 7,
+            "peer_score": 8,
+            "valuation_position": "样本不足，仅作定性参考",
+            "quantitative_peer_count": None,
+        },
+        "valuation": {
+            "ps_ratio": 80.0,
+            "pe_ratio": None,
+            "cash_runway_years": 2.0,
+            "market_cap_to_rd_ratio": 35.0,
+        },
+        "rnd_pipeline": {
+            "pipeline_quality_label": "强",
+            "technology_moat_score": 8,
+            "latest_clinical_stage": "Phase II",
+        },
+        "cornerstone_analysis": {
+            "score": 0,
+            "label": "未披露",
+            "grade_band": "缺失",
+        },
+        "financial_data_quality_flags": [],
+    }
+
+    signal = SignalComponentAnalyzer().analyze(ipo, prospectus_info, prospectus_info["_extracted_text"])
+    valuation = signal.get("components", {}).get("valuation_framework", {})
+
+    assert valuation.get("score") is not None, "应正常返回 valuation_framework 分数"
+    assert valuation.get("label") in ("PS失真，仅作参考", "管线阶段估值", "PS辅助估值")
+    print("✅ test_signal_component_analyzer_none_quant_count passed")
+
+
 def test_scoring_system_new_weights():
     """验证新五维评分权重结构"""
     ipo = {"over_sub_ratio": 100.0, "total_fund": 5.0, "market_heat": "热门"}

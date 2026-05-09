@@ -4,6 +4,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from ipo_analyzer.parser import ProspectusParser
+from ipo_analyzer.text_extractor import extract_pdf_text
 from ipo_analyzer.analyzers import RnDPipelineAnalyzer, GeographicExpansionAnalyzer, BusinessBreakdownAnalyzer
 
 base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
@@ -73,7 +74,7 @@ print()
 print("=" * 60)
 print("3. 研发费率")
 print("=" * 60)
-rnd = RnDPipelineAnalyzer().analyze("", info)
+rnd = RnDPipelineAnalyzer().analyze(info, info.get('_extracted_text', ''))
 print(f"rd_expense_latest: {rnd.get('rd_expense_latest')}")
 print(f"rd_expense_ratio: {rnd.get('rd_expense_ratio')}")
 print(f"rd_ratio_warning: {rnd.get('rd_ratio_warning')}")
@@ -87,10 +88,10 @@ print("4. 海外收入")
 print("=" * 60)
 pdf_path = os.path.join(temp_dir, "01236_prospectus.pdf")
 if os.path.exists(pdf_path):
-    text = ProspectusParser._extract_pdf_text(pdf_path)
+    text = extract_pdf_text(pdf_path)
 else:
-    text = ""
-geo = GeographicExpansionAnalyzer().analyze(text, info)
+    text = info.get('_extracted_text', '')
+geo = GeographicExpansionAnalyzer().analyze(info, text)
 print(f"china_revenue_latest: {geo.get('china_revenue_latest')}")
 print(f"overseas_revenue_latest: {geo.get('overseas_revenue_latest')}")
 print(f"overseas_revenue_pct: {geo.get('overseas_revenue_pct')}")
@@ -104,7 +105,7 @@ print()
 print("=" * 60)
 print("5. 业务增长来源")
 print("=" * 60)
-biz = BusinessBreakdownAnalyzer().analyze(text, info)
+biz = BusinessBreakdownAnalyzer().analyze(info, text)
 print(f"growth_source: {biz.get('growth_source')}")
 print(f"main_segment: {biz.get('main_segment')}")
 print(f"fastest_growing_segment: {biz.get('fastest_growing_segment')}")

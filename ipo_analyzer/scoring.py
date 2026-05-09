@@ -386,14 +386,7 @@ class ScoringSystem:
         cap_reason = None
         penalty_reason = None
 
-        SEVERE_CORNERSTONE_FLAGS = {
-            '关联方认购', 'related party', 'connected person',
-            '锁定异常', 'lockup abnormality', 'abnormal lockup',
-            '虚假基石', 'fake cornerstone',
-            '撤回认购', 'withdrawn subscription',
-            '高度不透明', 'opaque', 'spv过多', 'excessive spv',
-            '不透明spv',
-        }
+        severe_cornerstone_flags = SETTINGS.cornerstone.severe_cornerstone_flags
 
         if cornerstone_red_flags:
             severe_flags = []
@@ -402,7 +395,7 @@ class ScoringSystem:
                 flag_lower = str(flag).lower()
                 is_severe = any(
                     severe_keyword.lower() in flag_lower
-                    for severe_keyword in SEVERE_CORNERSTONE_FLAGS
+                    for severe_keyword in severe_cornerstone_flags
                 )
                 if is_severe:
                     severe_flags.append(flag)
