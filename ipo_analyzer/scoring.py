@@ -81,6 +81,82 @@ class ScoringSystem:
                 'reason': '未检测到有效热度数据，使用招股书阶段权重',
             }
 
+    def _calc_valuation_adjustments(self, ipo, prospectus_info, reasons):
+        """计算估值相关的 peer_adj 和 val_penalty，集中管理估值调整逻辑。"""
+        valuation = prospectus_info.get('valuation', {}) or {}
+        peer_comparison = prospectus_info.get('peer_comparison', {}) or {}
+        scarcity = peer_comparison.get('scarcity_score', 0)
+        peer_score_val = peer_comparison.get('peer_score', 0)
+        peer_valuation_pos = peer_comparison.get('valuation_position', '')
+        relative_ps_premium = peer_comparison.get('relative_ps_premium_pct')
+        quant_count = peer_comparison.get('quantitative_peer_count')
+        val_label = valuation.get('valuation_label', '')
+        rel_val_label = valuation.get('relative_valuation_label', '')
+
+        insufficient_peer_sample = bool(peer_comparison.get('peer_sample_warning')) or '样本不足' in str(peer_valuation_pos)
+        if _is_num(quant_count) and quant_count < 2:
+            insufficient_peer_sample = True
+
+        peer_adj = 0
+        is_clearly_overvalued = (
+            ('明显偏贵' in str(peer_valuation_pos)) or
+            ('PS辅助(明显偏贵)' in str(peer_valuation_pos)) or
+            (_is_num(relative_ps_premium) and float(relative_ps_premium) > 100)
+        )
+        is_somewhat_overvalued = (
+            _is_num(relative_ps_premium) and float(relative_ps_premium) > 50
+        )
+        if is_clearly_overvalued:
+            peer_adj = -5
+            reasons.append("同行估值明显偏贵：公司PS显著高于同行中位数")
+        elif is_somewhat_overvalued:
+            peer_adj = -2
+            reasons.append(f"同行估值偏贵：公司PS高于同行中位数{relative_ps_premium:.0f}%")
+        elif _is_num(peer_score_val) and peer_score_val > 0:
+            if insufficient_peer_sample:
+                if peer_score_val >= 6:
+                    reasons.append("同行定量样本不足，仅作定性参考，不额外加分")
+            elif peer_score_val >= 12:
+                peer_adj = 6
+                reasons.append("同行对比优异: 赛道稀缺+增长强+估值合理(+6分)")
+            elif peer_score_val >= 9:
+                premium_ok = (not _is_num(relative_ps_premium)) or float(relative_ps_premium) <= 30
+                if premium_ok:
+                    peer_adj = 3
+                    reasons.append("同行对比较好: 相对同行估值有空间(+3分)")
+            elif peer_score_val >= 6:
+                peer_adj = 1
+            elif peer_score_val <= 3:
+                peer_adj = -5
+                reasons.append("同行对比偏弱: 相对同行估值偏高(-5分)")
+
+        val_penalty = 0
+        revenue_quality = valuation.get('revenue_quality', 'standard')
+        is_license_driven = revenue_quality == 'license_upfront_driven'
+
+        if isinstance(valuation, dict):
+            if val_label in ('很贵',):
+                if is_license_driven:
+                    val_penalty = -1
+                    reasons.append("收入以授权/里程碑为主，绝对估值标签仅作提示")
+                elif rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
+                    val_penalty = -2
+                else:
+                    val_penalty = -5
+            elif val_label in ('偏贵', '明显偏贵'):
+                if is_license_driven:
+                    val_penalty = 0
+                    reasons.append("收入以授权/里程碑为主，相对估值标签不直接扣分")
+                elif rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
+                    val_penalty = -1
+                else:
+                    val_penalty = -3
+            if scarcity >= 7 and val_label in ('很贵', '偏贵', '明显偏贵'):
+                val_penalty += 2
+                reasons.append(f"稀缺赛道高估值容忍(+2)")
+
+        return peer_adj, val_penalty
+
     def calculate(self, ipo, prospectus_info, signal_components=None):
         reasons = []
 
@@ -310,74 +386,7 @@ class ScoringSystem:
             + data_quality_score * dq_w
         )
 
-        valuation = prospectus_info.get('valuation', {}) or {}
-        peer_score_val = peer_comparison.get('peer_score', 0)
-        peer_valuation_pos = peer_comparison.get('valuation_position', '')
-        relative_ps_premium = peer_comparison.get('relative_ps_premium_pct')
-        quant_count = peer_comparison.get('quantitative_peer_count')
-        insufficient_peer_sample = bool(peer_comparison.get('peer_sample_warning')) or '样本不足' in str(peer_valuation_pos)
-        if _is_num(quant_count) and quant_count < 2:
-            insufficient_peer_sample = True
-        val_label = valuation.get('valuation_label', '')
-        rel_val_label = valuation.get('relative_valuation_label', '')
-
-        peer_adj = 0
-        is_clearly_overvalued = (
-            ('明显偏贵' in str(peer_valuation_pos)) or
-            ('PS辅助(明显偏贵)' in str(peer_valuation_pos)) or
-            (_is_num(relative_ps_premium) and float(relative_ps_premium) > 100)
-        )
-        is_somewhat_overvalued = (
-            _is_num(relative_ps_premium) and float(relative_ps_premium) > 50
-        )
-        if is_clearly_overvalued:
-            peer_adj = -5
-            reasons.append("同行估值明显偏贵：公司PS显著高于同行中位数")
-        elif is_somewhat_overvalued:
-            peer_adj = -2
-            reasons.append(f"同行估值偏贵：公司PS高于同行中位数{relative_ps_premium:.0f}%")
-        elif _is_num(peer_score_val) and peer_score_val > 0:
-            if insufficient_peer_sample:
-                if peer_score_val >= 6:
-                    reasons.append("同行定量样本不足，仅作定性参考，不额外加分")
-            elif peer_score_val >= 12:
-                peer_adj = 6
-                reasons.append("同行对比优异: 赛道稀缺+增长强+估值合理(+6分)")
-            elif peer_score_val >= 9:
-                premium_ok = (not _is_num(relative_ps_premium)) or float(relative_ps_premium) <= 30
-                if premium_ok:
-                    peer_adj = 3
-                    reasons.append("同行对比较好: 相对同行估值有空间(+3分)")
-            elif peer_score_val >= 6:
-                peer_adj = 1
-            elif peer_score_val <= 3:
-                peer_adj = -5
-                reasons.append("同行对比偏弱: 相对同行估值偏高(-5分)")
-
-        val_penalty = 0
-        revenue_quality = valuation.get('revenue_quality', 'standard')
-        is_license_driven = revenue_quality == 'license_upfront_driven'
-
-        if isinstance(valuation, dict):
-            if val_label in ('很贵',):
-                if is_license_driven:
-                    val_penalty = -1
-                    reasons.append("收入以授权/里程碑为主，绝对估值标签仅作提示")
-                elif rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
-                    val_penalty = -2
-                else:
-                    val_penalty = -5
-            elif val_label in ('偏贵', '明显偏贵'):
-                if is_license_driven:
-                    val_penalty = 0
-                    reasons.append("收入以授权/里程碑为主，相对估值标签不直接扣分")
-                elif rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
-                    val_penalty = -1
-                else:
-                    val_penalty = -3
-            if scarcity >= 7 and val_label in ('很贵', '偏贵', '明显偏贵'):
-                val_penalty += 2
-                reasons.append(f"稀缺赛道高估值容忍(+2)")
+        peer_adj, val_penalty = self._calc_valuation_adjustments(ipo, prospectus_info, reasons)
 
         score = round(raw_final + peer_adj + val_penalty)
 

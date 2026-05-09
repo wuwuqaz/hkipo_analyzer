@@ -195,7 +195,8 @@ def _calculate_risk_penalty(prospectus_info):
     - 核心产品监管失败/临床失败
     - 客户或供应商极端集中（largest_customer_pct >= 50 或 top5_customer_pct >= 80）
     - 财务数据异常且无法解释
-    - 基石红旗（不透明SPV、关联方认购、锁定异常）
+
+    注意：基石红旗已在 ScoringSystem.calculate 中处理，本函数不再重复扣分。
     """
     penalty_breakdown = []
     total_penalty = 0
@@ -203,7 +204,6 @@ def _calculate_risk_penalty(prospectus_info):
     risk_result = prospectus_info.get('risk_factors', {})
     customer_result = prospectus_info.get('customer_supplier', {})
     valuation = prospectus_info.get('valuation', {})
-    cornerstone = prospectus_info.get('cornerstone_analysis', {})
 
     rf = SETTINGS.risk_factor
 
@@ -280,18 +280,6 @@ def _calculate_risk_penalty(prospectus_info):
             'reason': f"前五大客户占比{top5_customer_pct:.0f}%，客户集中度极高"
         })
 
-    cornerstone_red_flags = cornerstone.get('red_flags', [])
-    for flag in cornerstone_red_flags:
-        flag_str = str(flag).lower()
-        if 'spv' in flag_str or '不透明' in flag or '关联方' in flag or '锁定异常' in flag:
-            penalty = min(3, rf.max_total_penalty - total_penalty)
-            total_penalty += penalty
-            penalty_breakdown.append({
-                'type': 'cornerstone_red_flag',
-                'penalty': penalty,
-                'reason': str(flag)
-            })
-
     total_penalty = min(total_penalty, rf.max_total_penalty)
     
     return {
@@ -302,21 +290,19 @@ def _calculate_risk_penalty(prospectus_info):
 
 def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, prospectus_info, prospectus_text):
     text = prospectus_text  # 统一接口别名
-    business_result = BusinessBreakdownAnalyzer().analyze(prospectus_info, text)
-    geographic_result = GeographicExpansionAnalyzer().analyze(prospectus_info, text)
-    customer_result = CustomerSupplierAnalyzer().analyze(prospectus_info, text)
-    cashflow_result = WorkingCapitalCashFlowAnalyzer().analyze(prospectus_info, text)
-    capacity_result = ProductionCapacityAnalyzer().analyze(prospectus_info, text)
-    rnd_result = RnDPipelineAnalyzer().analyze(prospectus_info, text)
-    risk_result = RiskFactorAnalyzer().analyze(prospectus_info, text)
 
-    prospectus_info['business_breakdown'] = business_result
-    prospectus_info['geographic'] = geographic_result
-    prospectus_info['customer_supplier'] = customer_result
-    prospectus_info['cashflow'] = cashflow_result
-    prospectus_info['capacity'] = capacity_result
-    prospectus_info['rnd_pipeline'] = rnd_result
-    prospectus_info['risk_factors'] = risk_result
+    # 基础分析器（可循环调用）
+    analyzers = [
+        ('business_breakdown', BusinessBreakdownAnalyzer),
+        ('geographic', GeographicExpansionAnalyzer),
+        ('customer_supplier', CustomerSupplierAnalyzer),
+        ('cashflow', WorkingCapitalCashFlowAnalyzer),
+        ('capacity', ProductionCapacityAnalyzer),
+        ('rnd_pipeline', RnDPipelineAnalyzer),
+        ('risk_factors', RiskFactorAnalyzer),
+    ]
+    for key, analyzer_cls in analyzers:
+        prospectus_info[key] = analyzer_cls().analyze(prospectus_info, text)
 
     # 同行对比分析 (在估值之前，为估值提供同行背景)
     try:
@@ -440,35 +426,15 @@ def main():
     logger.info("  时间: " + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     logger.info("="*80)
 
-    client = AiPOMarginClient()
-    live_ipos = client.fetch_live_ipos()
+    results = analyze_live_ipos()
 
-    if not live_ipos:
+    if not results:
         logger.info("\n✗ 没有正在招股的IPO")
         return
 
-    logger.info("\n✓ 找到 %d 个正在招股的IPO", len(live_ipos))
-
-    downloader = ProspectusDownloader()
-
-    results = []
     temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "temp")
     temp_dir = os.path.abspath(temp_dir)
-    os.makedirs(temp_dir, exist_ok=True)
-    parser = ProspectusParser(cache_dir=temp_dir)
-
-    for ipo in live_ipos:
-        company_name = ipo.get('shortname', '') or ipo.get('shortName', '') or ipo.get('name', '')
-        stock_code = ipo.get('symbol', '') or ipo.get('stockCode', '')
-
-        logger.info("\n" + "="*60)
-        logger.info("处理: %s (%s)", company_name, stock_code)
-        logger.info("="*60)
-
-        ipo_data = _process_ipo(client, downloader, parser, ipo, temp_dir)
-        results.append(ipo_data)
-
-    results.sort(key=lambda x: x.get('score', 0), reverse=True)
+    results = analyze_live_ipos(output_dir=temp_dir)
 
     logger.info("\n\n" + "="*80)
     logger.info("  申购优先级排名")
@@ -644,11 +610,16 @@ def analyze_live_ipos(output_dir="temp", force_refresh=False, return_status=Fals
                     pass
 
         for ipo in live_ipos:
+            company_name = ipo.get('shortname', '') or ipo.get('shortName', '') or ipo.get('name', '')
+            stock_code = ipo.get('symbol', '') or ipo.get('stockCode', '')
+            logger.info("\n" + "="*60)
+            logger.info("处理: %s (%s)", company_name, stock_code)
+            logger.info("="*60)
             try:
                 ipo_data = _process_ipo(client, downloader, parser, ipo, output_dir, force_refresh=force_refresh)
                 results.append(ipo_data)
             except Exception as e:
-                logger.error(f"分析 {ipo.get('shortname', '')} 失败: {e}")
+                logger.error(f"分析 {company_name} 失败: {e}")
                 continue
 
         results.sort(key=lambda x: x.get('score', 0), reverse=True)

@@ -66,9 +66,6 @@ class ScoringWeights:
     scale_max: int = 10
     market_max: int = 5
     cornerstone_max: int = 20
-    subscription_weight: float = 0.35
-    fundamental_weight: float = 0.45
-    base_score: int = 20
 
 
 @dataclass
@@ -146,9 +143,6 @@ class RiskFactorThresholds:
     penalty_high: int = 3
     penalty_mid: int = 1
     max_total_penalty: int = 20
-    advanced_adjustment_range: int = 10
-    advanced_adjustment_center: int = 50
-    advanced_adjustment_scale: int = 50
 
 
 @dataclass
