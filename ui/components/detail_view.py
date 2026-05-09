@@ -32,6 +32,7 @@ class DetailView:
         self._render_header(ipo)
         self._render_prospectus_warning(has_prospectus, key_financials_empty)
         self._render_metrics(ipo)
+        self._render_post_listing(ipo)
         self._render_score_waterfall(ipo)
         self._render_signal_breakdown(ipo)
         self._render_score_reasons(ipo)
@@ -89,6 +90,92 @@ class DetailView:
         ]
         self.html.metric_card_st(cols, metrics)
 
+    def _render_post_listing(self, ipo: dict) -> None:
+        post = ipo.get("post_listing") or {}
+        if not post:
+            return
+
+        status = post.get("status", "")
+        status_label = {
+            "ok": "已完成",
+            "pending_allotment": "待公告",
+            "partial": "部分完成",
+            "error": "异常",
+        }.get(status, status or "--")
+
+        allotment_kpis = [
+            ("跟踪状态", status_label),
+            ("最终发售价", self.fmt.format_number(post.get("final_offer_price"), " HKD")),
+            ("上市日期", post.get("listing_date") or "--"),
+            ("一手中签率", self.fmt.format_percentage(post.get("one_lot_success_rate_pct"))),
+            ("整体中签率", self.fmt.format_percentage(post.get("overall_success_rate_pct"))),
+            ("有效申请", self._format_int(post.get("valid_applications"))),
+            ("成功申请", self._format_int(post.get("successful_applications"))),
+            ("公配倍数", self.fmt.format_number(post.get("public_subscription_level"), "x")),
+            ("国配倍数", self.fmt.format_number(post.get("international_subscription_level"), "x")),
+            ("承配人数", self._format_int(post.get("placees_count"))),
+        ]
+
+        price_kpis = [
+            ("暗盘", self._format_price_perf(post.get("grey_market"))),
+            ("首日", self._format_price_perf(post.get("first_day"))),
+            ("至今", self._format_price_perf(post.get("latest"))),
+        ]
+
+        pdf = post.get("allotment_pdf") or {}
+        source_url = pdf.get("source_url") or post.get("source_url")
+        pdf_link = ""
+        if source_url:
+            pdf_link = (
+                f'<div style="font-size:12px;color:#64748b;margin-top:8px;">'
+                f'配发公告：<a href="{self.html.escape(source_url)}" target="_blank">HKEX PDF</a>'
+                f'</div>'
+            )
+        message = post.get("message") or post.get("error")
+        message_html = ""
+        if message:
+            message_html = (
+                f'<div style="font-size:12px;color:#b45309;margin-top:8px;">'
+                f'{self.html.escape(message)}</div>'
+            )
+
+        st.markdown(f"""
+        <div class="section-card">
+            <div class="section-title">📌 上市后跟踪</div>
+            {self.html.kpi_row(allotment_kpis)}
+            <div style="border-top:1px solid #f1f5f9;margin:10px 0;"></div>
+            {self.html.kpi_row(price_kpis)}
+            {pdf_link}
+            {message_html}
+        </div>
+        """, unsafe_allow_html=True)
+
+    def _format_int(self, value) -> str:
+        if value is None:
+            return "--"
+        try:
+            return f"{int(value):,}"
+        except Exception:
+            return str(value)
+
+    def _format_price_perf(self, payload) -> SafeHtml:
+        payload = payload or {}
+        if payload.get("status") == "missing":
+            return SafeHtml('<span style="color:#94a3b8;">缺失</span>')
+        price = payload.get("price")
+        change = payload.get("change_pct")
+        date = payload.get("date")
+        if price is None and change is None:
+            return SafeHtml('<span style="color:#94a3b8;">--</span>')
+        change_html = ""
+        if _is_num(change):
+            color = "#dc2626" if change > 0 else ("#16a34a" if change < 0 else "#64748b")
+            sign = "+" if change > 0 else ""
+            change_html = f' <span style="color:{color};font-size:12px;">({sign}{change:.1f}%)</span>'
+        date_html = f'<div style="font-size:11px;color:#94a3b8;">{self.html.escape(date)}</div>' if date else ""
+        price_html = self.html.escape(self.fmt.format_number(price, " HKD")) if price is not None else "--"
+        return SafeHtml(f'{price_html}{change_html}{date_html}')
+
 
     def _render_score_waterfall(self, ipo: dict) -> None:
         """展示五维评分的 waterfall 拆解：各维度分数 × 权重 = 贡献值。"""
@@ -111,45 +198,55 @@ class DetailView:
             contribution = round(score * weight)
             raw_total += contribution
             rows_html += (
-                f'<div style="display:flex;justify-content:space-between;align-items:center;'
-                f'padding:6px 0;border-bottom:1px solid #f1f5f9;">'
-                f'<div style="font-size:13px;color:#334155;">{title} <span style="color:#94a3b8;">({weight:.0%})</span></div>'
-                f'<div style="font-size:13px;font-weight:600;color:#334155;">{score} × {weight:.0%} = {contribution}</div>'
-                f'</div>'
+                '<div style="display:flex;justify-content:space-between;'
+                'align-items:center;padding:6px 0;border-bottom:1px solid #f1f5f9;">'
+                '<div style="font-size:13px;color:#334155;">' + str(title) +
+                ' <span style="color:#94a3b8;">(' + str(round(weight * 100)) + '%)</span></div>'
+                '<div style="font-size:13px;font-weight:600;color:#334155;">'
+                + str(score) + ' &times; ' + str(round(weight * 100)) + '% = ' + str(contribution) + '</div>'
+                '</div>'
             )
 
-        # 调整项
         penalty = ipo.get('risk_penalty', 0)
         penalty_html = ""
         if penalty > 0:
             penalty_html = (
-                f'<div style="display:flex;justify-content:space-between;align-items:center;'
-                f'padding:6px 0;border-bottom:1px solid #f1f5f9;">'
-                f'<div style="font-size:13px;color:#dc2626;">风险惩罚</div>'
-                f'<div style="font-size:13px;font-weight:600;color:#dc2626;">−{penalty}</div>'
-                f'</div>'
+                '<div style="display:flex;justify-content:space-between;'
+                'align-items:center;padding:6px 0;border-bottom:1px solid #f1f5f9;">'
+                '<div style="font-size:13px;color:#dc2626;">风险惩罚</div>'
+                '<div style="font-size:13px;font-weight:600;color:#dc2626;">&minus;' + str(penalty) + '</div>'
+                '</div>'
             )
 
         final = ipo.get('score', 0)
         cap_reason = ipo.get('debug_info', {}).get('cap_reason', '')
-        cap_html = f'<div style="font-size:11px;color:#94a3b8;margin-top:4px;">{cap_reason}</div>' if cap_reason else ""
+        cap_html = ('<div style="font-size:11px;color:#94a3b8;margin-top:4px;">'
+                    + self.html.escape(str(cap_reason)) + '</div>') if cap_reason else ""
 
-        st.markdown(f"""
-        <div class="section-card">
-            <div class="section-title">⚖️ 得分拆解 (Waterfall)</div>
-            {rows_html}
-            {penalty_html}
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;margin-top:4px;">
-                <div style="font-size:14px;font-weight:700;color:#1e293b;">加权原始分</div>
-                <div style="font-size:14px;font-weight:700;color:#1e293b;">{raw_total}</div>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:2px solid #1e293b;">
-                <div style="font-size:16px;font-weight:800;color:#1e293b;">最终评分</div>
-                <div style="font-size:16px;font-weight:800;color:{score_color_hex(final)};">{final}/100</div>
-            </div>
-            {cap_html}
-        </div>
-        """, unsafe_allow_html=True)
+        html = (
+            '<div class="section-card">'
+            '<div class="section-title">⚖️ 得分拆解 (Waterfall)</div>'
+            + rows_html
+            + penalty_html
+            + '<div style="display:flex;justify-content:space-between;'
+               'align-items:center;padding:8px 0;margin-top:4px;">'
+               '<div style="font-size:14px;font-weight:700;color:#1e293b;">加权原始分</div>'
+               '<div style="font-size:14px;font-weight:700;color:#1e293b;">' + str(raw_total) + '</div>'
+               '</div>'
+            + '<div style="display:flex;justify-content:space-between;'
+               'align-items:center;padding:8px 0;border-top:2px solid #1e293b;">'
+               '<div style="font-size:16px;font-weight:800;color:#1e293b;">最终评分</div>'
+               '<div style="font-size:16px;font-weight:800;color:'
+               + score_color_hex(final) + ';">' + str(final) + '/100</div>'
+               '</div>'
+            + cap_html
+            + '</div>'
+        )
+
+        try:
+            st.html(html)
+        except AttributeError:
+            st.markdown(html, unsafe_allow_html=True)
 
     def _render_score_reasons(self, ipo: dict) -> None:
         reasons = ipo.get("score_reasons", [])

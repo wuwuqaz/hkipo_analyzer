@@ -3,6 +3,7 @@ __pycache__/
 .DS_Store
 __MACOSX/
 temp/*.pdf
+temp/allotment/
 temp/results_cache.json
 temp/ipo_history.json
 data/backups/

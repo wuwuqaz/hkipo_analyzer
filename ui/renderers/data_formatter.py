@@ -26,6 +26,15 @@ class DataFormatter:
         return str(val)
 
     @staticmethod
+    def format_change_pct(val: Any) -> str:
+        if val is None:
+            return "--"
+        if _is_num(val):
+            sign = "+" if val > 0 else ""
+            return f"{sign}{val:.1f}%"
+        return str(val)
+
+    @staticmethod
     def parse_date(value: Any) -> Optional[date]:
         if not value:
             return None
@@ -65,6 +74,13 @@ class DataFormatter:
         for ipo in ipos:
             pi = ipo.get("prospectus_info", {}) or {}
             val = pi.get("valuation", {}) or {}
+            post = ipo.get("post_listing", {}) or {}
+            status_map = {
+                "ok": "已完成",
+                "pending_allotment": "待公告",
+                "partial": "部分",
+                "error": "异常",
+            }
             score = ipo.get("score", 0)
             row = {
                 "股票代码": ipo.get("hk_code", "--"),
@@ -81,6 +97,10 @@ class DataFormatter:
                 ),
                 "净利润(M)": DataFormatter.format_number(pi.get("net_profit")),
                 "截止日": ipo.get("apply_end_date", "--"),
+                "跟踪": status_map.get(post.get("status"), "未跟踪"),
+                "一手中签率": DataFormatter.format_percentage(post.get("one_lot_success_rate_pct")),
+                "首日涨跌": DataFormatter.format_change_pct((post.get("first_day") or {}).get("change_pct")),
+                "至今涨跌": DataFormatter.format_change_pct((post.get("latest") or {}).get("change_pct")),
             }
             if include_archive_time:
                 row["归档时间"] = DataFormatter.archive_time_display(ipo)

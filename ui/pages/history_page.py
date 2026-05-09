@@ -27,7 +27,7 @@ class HistoryPage:
     def render(self) -> None:
         self.html.hero_section(
             "📚 历史 IPO 分析",
-            "沉淀已分析过的新股 · 回看招股结束标的 · 用同一口径辅助对比"
+            "历史归档 · 回溯重分析 · 配发结果与上市后表现跟踪"
         )
 
         self._migrate_cache()
@@ -38,13 +38,14 @@ class HistoryPage:
             return
 
         self._render_stats(all_history)
+        all_history = self._render_tracking_actions(all_history)
 
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown('<div class="section-title">🔎 筛选历史记录</div>', unsafe_allow_html=True)
-        query, show_live, sort_by = IpoFilters.render_history_filters()
+        query, show_live, sort_by, tracking_status = IpoFilters.render_history_filters()
         st.markdown('</div>', unsafe_allow_html=True)
 
-        visible = IpoFilters.apply_history_filters(all_history, query, show_live, self.fmt.is_live_or_future)
+        visible = IpoFilters.apply_history_filters(all_history, query, show_live, self.fmt.is_live_or_future, tracking_status)
         visible = self.fmt.sort_ipos(visible, sort_by)
 
         rows = self.fmt.ipo_summary_rows(visible, include_archive_time=True)
@@ -79,29 +80,8 @@ class HistoryPage:
                 stock_code = selected.split(" - ", 1)[0].strip()
                 for item in visible:
                     if item.get("hk_code") == stock_code:
+                        item = self._render_selected_tools(item)
                         self.detail_view.render(item)
-                        # 重新分析按钮
-                        if st.button("🔁 重新分析", key=f"reanalyze_{stock_code}", use_container_width=True):
-                            with st.spinner("正在重新分析..."):
-                                try:
-                                    from ipo_analyzer.core import reanalyze_ipo
-                                    response = reanalyze_ipo(
-                                        stock_code=stock_code,
-                                        company_name=item.get("company_name"),
-                                        output_dir=self.temp_dir,
-                                    )
-                                    if response.get("status") == "error":
-                                        st.error(f"重新分析失败: {response.get('message', '')}")
-                                    else:
-                                        st.success("✅ 重新分析完成！")
-                                        result = response.get("result", {})
-                                        version_delta = result.get("version_delta")
-                                        if version_delta:
-                                            self._render_version_delta(version_delta)
-                                        if result:
-                                            self.detail_view.render(result)
-                                except Exception as e:
-                                    st.error(f"重新分析异常: {e}")
                         break
 
         st.caption(DISCLAIMER)
@@ -126,6 +106,7 @@ class HistoryPage:
     def _render_stats(self, all_history: list) -> None:
         live_count = sum(1 for item in all_history if self.fmt.is_live_or_future(item))
         ended_count = sum(1 for item in all_history if self.fmt.is_ended(item))
+        tracked_count = sum(1 for item in all_history if (item.get("post_listing") or {}).get("status") == "ok")
         latest_archive = max((item.get("_archived_at") or "" for item in all_history), default="")
         latest_archive_display = "--"
         if latest_archive:
@@ -134,16 +115,157 @@ class HistoryPage:
             except Exception:
                 latest_archive_display = latest_archive[:16]
 
-        stats_cols = st.columns(4)
+        stats_cols = st.columns(5)
         stat_values = [
             ("历史股票数", len(all_history)),
             ("已结束", ended_count),
             ("招股中", live_count),
+            ("已跟踪", tracked_count),
             ("最后归档", latest_archive_display),
         ]
         for col, (label, value) in zip(stats_cols, stat_values):
             with col:
                 st.markdown(self.html.metric_card(label, str(value)), unsafe_allow_html=True)
+
+    def _render_tracking_actions(self, all_history: list) -> list:
+        ended_pending = [
+            item for item in all_history
+            if self.fmt.is_ended(item) and (item.get("post_listing") or {}).get("status") != "ok"
+        ]
+
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">📡 上市后跟踪</div>', unsafe_allow_html=True)
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.caption(f"待跟踪/待补全已结束 IPO：{len(ended_pending)} 只。配发公告未发布时会标记为待公告。")
+        with col2:
+            force_refresh = st.checkbox("强制刷新跟踪", value=False, key="history_track_force_refresh")
+
+        if st.button("📡 跟踪全部已结束待更新", use_container_width=True, disabled=not ended_pending and not force_refresh):
+            with st.spinner("正在抓取配发公告与上市后表现..."):
+                try:
+                    from ipo_analyzer.post_listing import track_ended_ipos
+                    summary = track_ended_ipos(
+                        output_dir=self.temp_dir,
+                        only_missing=not force_refresh,
+                        force_refresh=force_refresh,
+                    )
+                    st.session_state["post_listing_summary"] = summary
+                    st.success(f"跟踪完成：处理 {summary.get('processed', 0)}，更新 {summary.get('updated', 0)}，失败 {summary.get('failed', 0)}")
+                    all_history = self.history_store.load(include_live=True)
+                except Exception as e:
+                    st.error(f"跟踪失败: {e}")
+
+        summary = st.session_state.get("post_listing_summary")
+        if summary and summary.get("details"):
+            with st.expander("查看最近一次跟踪明细", expanded=False):
+                st.dataframe(pd.DataFrame(summary["details"]), use_container_width=True, hide_index=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        return all_history
+
+    def _render_selected_tools(self, item: dict) -> dict:
+        stock_code = item.get("hk_code", "")
+        company_name = item.get("company_name")
+        current_item = item
+
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🛠️ 历史操作</div>', unsafe_allow_html=True)
+        action_col1, action_col2 = st.columns(2)
+        with action_col1:
+            can_track = self.fmt.is_ended(item)
+            if st.button("📡 跟踪选中 IPO", key=f"track_{stock_code}", use_container_width=True, disabled=not can_track):
+                with st.spinner("正在跟踪配发公告与上市后表现..."):
+                    try:
+                        from ipo_analyzer.post_listing import track_post_listing
+                        post_listing = track_post_listing(
+                            stock_code,
+                            company_name=company_name,
+                            base_record=item,
+                            output_dir=self.temp_dir,
+                            force_refresh=True,
+                        )
+                        current_item = self.history_store.update_post_listing(stock_code, post_listing) or item
+                        if post_listing.get("status") == "error":
+                            st.error(f"跟踪异常: {post_listing.get('error', '')}")
+                        elif post_listing.get("status") == "pending_allotment":
+                            st.info("配发结果公告暂未找到，已记录为待公告。")
+                        else:
+                            st.success("✅ 上市后跟踪完成！")
+                    except Exception as e:
+                        st.error(f"跟踪异常: {e}")
+            if not can_track:
+                st.caption("仍在招股或缺少截止日，暂不进行上市后跟踪。")
+        with action_col2:
+            st.caption("重新分析会更新统一历史库，并保留已有上市后跟踪数据。")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        with st.expander("🔁 重新分析参数", expanded=False):
+            r_col1, r_col2 = st.columns(2)
+            with r_col1:
+                uploaded_file = st.file_uploader("上传招股书PDF（可选）", type=["pdf"], key=f"reanalyze_pdf_{stock_code}")
+                force_refresh = st.checkbox("强制刷新招股书", value=False, key=f"reanalyze_force_{stock_code}")
+            with r_col2:
+                margin_total = st.number_input("孖展资金总计（亿）", value=None, format="%.2f", key=f"margin_{stock_code}")
+                public_offer = st.number_input("公开集资额（亿）", value=None, format="%.2f", key=f"public_offer_{stock_code}")
+                actual_over_sub_ratio = st.number_input("实际超购倍数", value=None, format="%.1f", key=f"actual_over_{stock_code}")
+                forecast_over_sub_ratio = st.number_input("预测超购倍数", value=None, format="%.1f", key=f"forecast_over_{stock_code}")
+                market_heat = st.selectbox("市场热度", ["", "极热", "热门", "温和", "冷清"], index=0, key=f"market_heat_{stock_code}")
+
+            if st.button("🔁 开始重新分析", key=f"reanalyze_{stock_code}", use_container_width=True):
+                historical_market_data = self._build_historical_market_data(
+                    margin_total, public_offer, actual_over_sub_ratio, forecast_over_sub_ratio, market_heat
+                )
+                with st.spinner("正在重新分析..."):
+                    try:
+                        from ipo_analyzer.core import reanalyze_ipo
+                        response = reanalyze_ipo(
+                            stock_code=stock_code,
+                            company_name=company_name,
+                            uploaded_file=uploaded_file,
+                            historical_market_data=historical_market_data,
+                            force_refresh=force_refresh,
+                            output_dir=self.temp_dir,
+                        )
+                        if response.get("status") == "error":
+                            st.error(f"重新分析失败: {response.get('message', '')}")
+                        else:
+                            st.success("✅ 重新分析完成！")
+                            result = response.get("result", {})
+                            version_delta = result.get("version_delta")
+                            if version_delta:
+                                self._render_version_delta(version_delta)
+                            if result:
+                                current_item = self._merge_display_result(current_item, result)
+                    except Exception as e:
+                        st.error(f"重新分析异常: {e}")
+
+        return current_item
+
+    def _build_historical_market_data(self, margin_total, public_offer, actual_over, forecast_over, market_heat):
+        if not any(v is not None for v in [margin_total, public_offer, actual_over, forecast_over]) and not market_heat:
+            return None
+        data = {}
+        if margin_total is not None:
+            data["margin_total"] = margin_total
+        if public_offer is not None:
+            data["public_offer"] = public_offer
+        if actual_over is not None:
+            data["actual_over_sub_ratio"] = actual_over
+        if forecast_over is not None:
+            data["forecast_over_sub_ratio"] = forecast_over
+        if market_heat:
+            data["market_heat"] = market_heat
+        return data
+
+    def _merge_display_result(self, current_item: dict, result: dict) -> dict:
+        merged = dict(current_item or {})
+        for key, value in (result or {}).items():
+            if value is None or value == "":
+                continue
+            merged[key] = value
+        if current_item.get("post_listing") and not merged.get("post_listing"):
+            merged["post_listing"] = current_item["post_listing"]
+        return merged
 
     def _render_version_delta(self, version_delta: dict) -> None:
         prev_score = version_delta.get("previous_score")

@@ -171,6 +171,7 @@ class HistoryStore:
         
         # 5. 覆盖latest
         latest_path = self._save_reanalysis_latest(stock_code, record)
+        self.merge_analysis_result(result, source='reanalysis')
         
         logger.info(f"重新分析记录已保存: {stock_code}")
         return record, version_delta
@@ -198,9 +199,11 @@ class HistoryStore:
 
     @staticmethod
     def _stock_code(item):
-        code = str((item or {}).get('hk_code') or '').strip()
+        code = str((item or {}).get('hk_code') or (item or {}).get('stock_code') or '').strip()
         if not code or code in ('--', '未知', 'None'):
             return None
+        if code.isdigit():
+            return code.zfill(5)
         return code
 
     @classmethod
@@ -253,6 +256,17 @@ class HistoryStore:
                     pass
             raise
 
+    def _sort_records(self, records):
+        return sorted(
+            records,
+            key=lambda item: (
+                self._parse_date(item.get('apply_end_date')) or date.min,
+                str(item.get('_archived_at') or item.get('_post_listing_updated_at') or ''),
+                str(item.get('hk_code') or item.get('stock_code') or ''),
+            ),
+            reverse=True,
+        )
+
     def load(self, include_live=True):
         records = self._read_all()
         if include_live:
@@ -277,6 +291,10 @@ class HistoryStore:
 
             record = strip_runtime_fields(copy.deepcopy(item))
             code = self._stock_code(record)
+            if str(record.get('hk_code') or '').isdigit():
+                record['hk_code'] = str(record.get('hk_code')).zfill(5)
+            if existing.get(code, {}).get('post_listing') and not record.get('post_listing'):
+                record['post_listing'] = copy.deepcopy(existing[code]['post_listing'])
             record['_archived_at'] = archived_at
             record['_archive_source'] = source
             record['_history_version'] = self.HISTORY_VERSION
@@ -284,16 +302,7 @@ class HistoryStore:
             count += 1
 
         if count:
-            records = sorted(
-                existing.values(),
-                key=lambda item: (
-                    self._parse_date(item.get('apply_end_date')) or date.min,
-                    str(item.get('_archived_at') or ''),
-                    str(item.get('hk_code') or ''),
-                ),
-                reverse=True,
-            )
-            self._write_all(records)
+            self._write_all(self._sort_records(existing.values()))
             logger.info("历史库已归档: %d 条记录", count)
 
         return count
@@ -325,3 +334,60 @@ class HistoryStore:
             return 0
 
         return self.archive_many(new_records, source='live')
+
+    def merge_analysis_result(self, result, source='reanalysis'):
+        """Merge the latest analysis result into the unified history library.
+
+        Reanalysis outputs often omit live-listing fields such as apply_end_date,
+        so non-empty incoming values update the record while existing context
+        and post_listing data are preserved.
+        """
+        code = self._stock_code(result)
+        if not code:
+            return False
+
+        existing = {
+            self._stock_code(item): item
+            for item in self._read_all()
+            if self._stock_code(item)
+        }
+        merged = copy.deepcopy(existing.get(code, {}))
+        record = strip_runtime_fields(copy.deepcopy(result))
+        if str(record.get('hk_code') or '').isdigit():
+            record['hk_code'] = str(record.get('hk_code')).zfill(5)
+
+        for key, value in record.items():
+            if key == 'post_listing' and not value:
+                continue
+            if value is None or value == "":
+                continue
+            merged[key] = value
+
+        merged.setdefault('hk_code', code)
+        merged['_archived_at'] = datetime.now().isoformat()
+        merged['_archive_source'] = source
+        merged['_history_version'] = self.HISTORY_VERSION
+        existing[code] = merged
+        self._write_all(self._sort_records(existing.values()))
+        return True
+
+    def update_post_listing(self, stock_code, post_listing):
+        """Atomically merge post-listing data into one history record."""
+        code = self._stock_code({'hk_code': stock_code})
+        if not code:
+            return None
+
+        existing = {
+            self._stock_code(item): item
+            for item in self._read_all()
+            if self._stock_code(item)
+        }
+        record = copy.deepcopy(existing.get(code, {'hk_code': code}))
+        current_post_listing = copy.deepcopy(record.get('post_listing') or {})
+        current_post_listing.update(strip_runtime_fields(copy.deepcopy(post_listing or {})))
+        record['post_listing'] = current_post_listing
+        record['_post_listing_updated_at'] = datetime.now().isoformat()
+        record['_history_version'] = self.HISTORY_VERSION
+        existing[code] = record
+        self._write_all(self._sort_records(existing.values()))
+        return record

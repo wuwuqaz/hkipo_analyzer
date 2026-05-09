@@ -44,22 +44,36 @@ class IpoFilters:
         return filtered
 
     @staticmethod
-    def render_history_filters(query: str = "") -> tuple[str, bool, str]:
-        filter_col1, filter_col2, filter_col3 = st.columns([2, 1, 1])
+    def render_history_filters(query: str = "") -> tuple[str, bool, str, str]:
+        filter_col1, filter_col2, filter_col3, filter_col4 = st.columns([2, 1, 1, 1])
         with filter_col1:
             query = st.text_input("搜索股票代码或公司名", query, placeholder="如 01236 / 乐动", label_visibility="collapsed")
         with filter_col2:
             show_live = st.checkbox("显示仍在招股", value=False)
         with filter_col3:
             sort_by = st.selectbox("排序", ["截止日从近到远", "截止日从远到近", "评分从高到低", "评分从低到高"], label_visibility="collapsed")
-        return query, show_live, sort_by
+        with filter_col4:
+            tracking_status = st.selectbox("跟踪状态", ["全部", "未跟踪", "已完成", "待公告", "异常/部分"], label_visibility="collapsed")
+        return query, show_live, sort_by, tracking_status
 
     @staticmethod
     def apply_history_filters(ipos: list[dict], query: str, show_live: bool,
-                              is_live_fn) -> list[dict]:
+                              is_live_fn, tracking_status: str = "全部") -> list[dict]:
         visible = list(ipos)
         if not show_live:
             visible = [item for item in visible if not is_live_fn(item)]
+        if tracking_status and tracking_status != "全部":
+            def _status(item: dict) -> str:
+                return ((item or {}).get("post_listing") or {}).get("status") or ""
+
+            if tracking_status == "未跟踪":
+                visible = [item for item in visible if not _status(item)]
+            elif tracking_status == "已完成":
+                visible = [item for item in visible if _status(item) == "ok"]
+            elif tracking_status == "待公告":
+                visible = [item for item in visible if _status(item) == "pending_allotment"]
+            elif tracking_status == "异常/部分":
+                visible = [item for item in visible if _status(item) in ("error", "partial")]
         query_text = query.strip().lower()
         if query_text:
             visible = [

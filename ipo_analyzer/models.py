@@ -577,6 +577,7 @@ class IPOData:
     debug_info: Optional[dict[str, Any]] = None
     penalty_reason: Optional[str] = None
     _reanalysis: dict[str, Any] = field(default_factory=dict)
+    post_listing: dict[str, Any] = field(default_factory=dict)
 
     # 解析元信息
     pdf_downloaded: bool = False
