@@ -2,6 +2,7 @@
 
 from .utils import _is_num, _normalize_gm, _contains_any, SECTOR_KEYWORDS
 from .settings import SETTINGS
+from .industry_router import classify_company
 
 
 class ProspectusQualityAnalyzer:
@@ -60,7 +61,8 @@ class ProspectusQualityAnalyzer:
             reasons.append("已实现盈利")
         elif profitable is False:
             reasons.append("仍处亏损")
-            is_low_rev_biotech = (sector == 'healthcare' and _is_num(revenue) and revenue < SETTINGS.valuation.biotech_revenue_small)
+            profile = classify_company(prospectus_info, '')
+            is_low_rev_biotech = profile.is_low_revenue_biotech
             if is_low_rev_biotech and gross_margin_pct is not None and gross_margin_pct >= SETTINGS.prospectus_quality.gross_margin_excellent:
                 # 根据管线质量调节惩罚力度：优质管线减轻惩罚
                 rnd = prospectus_info.get('rnd_pipeline') or {}

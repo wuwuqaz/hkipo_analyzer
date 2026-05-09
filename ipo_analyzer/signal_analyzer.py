@@ -5,6 +5,7 @@ import re
 from .utils import _is_num, _normalize_gm, _contains_any, SECTOR_KEYWORDS
 from .settings import SETTINGS
 from .cornerstone import get_sovereign_capital, get_top_tier_capital, get_weak_signal_capital
+from .industry_router import classify_company
 
 
 class SignalComponentAnalyzer:
@@ -64,7 +65,7 @@ class SignalComponentAnalyzer:
             'real_money': self._analyze_real_money(ipo),
             'float_structure': self._analyze_float_structure(ipo, prospectus_info),
             'cornerstone_structure': self._analyze_cornerstone_structure(prospectus_info, text),
-            'valuation_framework': self._analyze_valuation_framework(prospectus_info),
+            'valuation_framework': self._analyze_valuation_framework(prospectus_info, text),
             'mainline_beta': self._analyze_mainline_beta(prospectus_info, text),
             'stock_connect_path': self._analyze_stock_connect_path(prospectus_info, text),
             'data_quality': self._analyze_data_quality(prospectus_info),
@@ -95,12 +96,8 @@ class SignalComponentAnalyzer:
 
         vm = components['valuation_framework']
         valuation_label = vm.get('label', '')
-        is_biotech_unprofitable = (
-            prospectus_info.get('sector') == 'healthcare'
-            and prospectus_info.get('profitable') is False
-            and ('-b' in str(prospectus_info.get('extracted_company_name', '')).lower()
-                 or 'biotech' in str(prospectus_info.get('_extracted_text', '')).lower())
-        )
+        profile = classify_company(prospectus_info, text)
+        is_biotech_unprofitable = profile.is_biotech and profile.is_unprofitable
         if is_biotech_unprofitable and valuation_label in ('缺失', '估值压力'):
             if prospectus_info.get('rnd_pipeline', {}).get('pipeline_quality_label'):
                 vm_strength = '中'
@@ -339,7 +336,7 @@ class SignalComponentAnalyzer:
         kw_groups = SECTOR_KEYWORDS.get(sector or 'unknown', {})
         return [kw for kw in kw_groups.get('industrial', []) if kw.lower() in context.lower()]
 
-    def _analyze_valuation_framework(self, prospectus_info):
+    def _analyze_valuation_framework(self, prospectus_info, text=''):
         valuation = prospectus_info.get('valuation') or {}
         peer_comparison = prospectus_info.get('peer_comparison', {}) or {}
         sector = prospectus_info.get('sector', 'unknown')
@@ -362,10 +359,10 @@ class SignalComponentAnalyzer:
         vsl = SETTINGS.valuation_score
         pt = SETTINGS.peer_comps
 
-        name = str(prospectus_info.get('extracted_company_name', '') or '').lower()
-        is_biotech = (sector == 'healthcare' and ('-b' in name or 'biotech' in name))
-        is_unprofitable = _is_num(net_profit) and net_profit <= 0
-        is_low_rev_biotech = is_biotech and _is_num(revenue) and revenue < vt.biotech_revenue_small
+        profile = classify_company(prospectus_info, text)
+        is_biotech = profile.is_biotech
+        is_unprofitable = profile.is_unprofitable
+        is_low_rev_biotech = profile.is_low_revenue_biotech
 
         abs_score = 0
         if is_low_rev_biotech:
@@ -646,7 +643,8 @@ class SignalComponentAnalyzer:
         parser_flags = prospectus_info.get('financial_data_quality_flags') or []
         sector = prospectus_info.get('sector', 'unknown')
         name = str(prospectus_info.get('extracted_company_name', '') or '').lower()
-        is_biotech = (sector == 'healthcare' and ('-b' in name or 'biotech' in name))
+        extracted_text = str(prospectus_info.get('_extracted_text', '') or prospectus_info.get('prospectus_text', ''))
+        is_biotech = profile.is_biotech if 'profile' in locals() else classify_company(prospectus_info, extracted_text).is_biotech
         profitable = prospectus_info.get('profitable')
         # 早期未商业化公司（18A/18C）的爆发增长和巨额亏损属于正常现象
         is_early_stage = _is_num(revenue_y1) and revenue_y1 < 50 and profitable is False

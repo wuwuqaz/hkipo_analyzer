@@ -7,39 +7,19 @@ logger = logging.getLogger(__name__)
 
 
 from .settings import SETTINGS
+from .industry_router import classify_company, CompanyProfile
 
 
 class ValuationAnalyzer:
     """估值分析器 — 支持绝对估值 + 相对估值 + 稀缺性 + 创新药 综合判断"""
 
-    _BIOTECH_KEYWORDS = [
-        "18A", "chapter 18a", '-b ', '-w ', "biotech", "innovative drug",
-        "clinical-stage", "drug candidate", "nda", "ind",
-        "phase i", "phase ii", "phase iii", "phase 1", "phase 2", "phase 3",
-        "parp inhibitor", "apatinib", "senaparib",
-        "pipeline", "core product", "candidate",
-    ]
 
-    @classmethod
-    def _is_biotech(cls, prospectus_info):
-        sector = prospectus_info.get("sector", "")
-        if sector != "healthcare":
-            return False
-        name = str(prospectus_info.get("extracted_company_name", "") or "")
-        if "-b" in name.lower():
-            return True
-        text = str(prospectus_info.get("_extracted_text", "") or "")
-        if not text:
-            text = prospectus_info.get("prospectus_text", "") or ""
-        hits = sum(1 for kw in cls._BIOTECH_KEYWORDS if kw.lower() in text.lower())
-        if hits >= SETTINGS.valuation.biotech_keyword_hits_min:
-            return True
-        subsector = prospectus_info.get("peer_comparison", {}).get("subsector", "")
-        if subsector in ("innovative_drug_biotech", "ai_drug_delivery_nanomedicine"):
-            return True
-        return False
 
     def analyze(self, prospectus_info, text='', ipo_data=None):
+        # 防御：某些调用者把 ipo_data 传到了 text 位置
+        if isinstance(text, dict):
+            ipo_data = text
+            text = ''
         result = {
             'pe_ratio': None, 'adjusted_pe_ratio': None, 'pb_ratio': None, 'ps_ratio': None,
             'valuation_label': '缺失', 'absolute_valuation_label': '缺失',
@@ -75,7 +55,9 @@ class ValuationAnalyzer:
             scarcity_score = peer_comparison.get('scarcity_score', 0)
             valuation_position = peer_comparison.get('valuation_position', '缺失')
 
-            is_biotech = self._is_biotech(prospectus_info)
+            # 行业路由（集中判定，替代分散的 _is_biotech）
+            profile = classify_company(prospectus_info, text)
+            is_biotech = profile.is_biotech
 
             # 币种转换（财务数据通常是RMB million）
             if fin_currency == "RMB":
@@ -386,6 +368,10 @@ class BusinessBreakdownAnalyzer:
     ]
 
     def analyze(self, prospectus_info, text='', ipo_data=None):
+        # 防御：某些调用者把 ipo_data 传到了 text 位置
+        if isinstance(text, dict):
+            ipo_data = text
+            text = ''
         result = {
             'segments': [],
             'main_segment': None,
@@ -798,6 +784,10 @@ class GeographicExpansionAnalyzer:
         return is_china, is_overseas
 
     def analyze(self, prospectus_info, text='', ipo_data=None):
+        # 防御：某些调用者把 ipo_data 传到了 text 位置
+        if isinstance(text, dict):
+            ipo_data = text
+            text = ''
         result = {
             'china_revenue_latest': None,
             'overseas_revenue_latest': None,
@@ -961,6 +951,10 @@ class CustomerSupplierAnalyzer:
             return None
 
     def analyze(self, prospectus_info, text='', ipo_data=None):
+        # 防御：某些调用者把 ipo_data 传到了 text 位置
+        if isinstance(text, dict):
+            ipo_data = text
+            text = ''
         result = {
             'top5_customer_revenue_pct': None,
             'largest_customer_revenue_pct': None,
@@ -1069,6 +1063,10 @@ class WorkingCapitalCashFlowAnalyzer:
         return round(latest, 3)
 
     def analyze(self, prospectus_info, text='', ipo_data=None):
+        # 防御：某些调用者把 ipo_data 传到了 text 位置
+        if isinstance(text, dict):
+            ipo_data = text
+            text = ''
         result = {
             'operating_cash_flow': None,
             'ocf_to_net_profit': None,
@@ -1151,6 +1149,10 @@ class ProductionCapacityAnalyzer:
         return None
 
     def analyze(self, prospectus_info, text='', ipo_data=None):
+        # 防御：某些调用者把 ipo_data 传到了 text 位置
+        if isinstance(text, dict):
+            ipo_data = text
+            text = ''
         result = {
             'utilization_rate': None,
             'expansion_plan': None,
@@ -1203,6 +1205,10 @@ class RnDPipelineAnalyzer:
     ]
 
     def analyze(self, prospectus_info, text='', ipo_data=None):
+        # 防御：某些调用者把 ipo_data 传到了 text 位置
+        if isinstance(text, dict):
+            ipo_data = text
+            text = ''
         result = {
             'rd_expense_latest': None, 'rd_expense_ratio': None,
             'product_count_approved': None, 'product_count_pipeline': None,
@@ -1354,6 +1360,10 @@ class RnDPipelineAnalyzer:
 
 class RiskFactorAnalyzer:
     def analyze(self, prospectus_info, text='', ipo_data=None):
+        # 防御：某些调用者把 ipo_data 传到了 text 位置
+        if isinstance(text, dict):
+            ipo_data = text
+            text = ''
         result = {
             'risks': {},
             'total_penalty': 0,
