@@ -51,14 +51,8 @@ class PeerAdminPage:
     def render(self):
         if st is None:
             return
-        st.markdown("""
-        <div style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);border-radius:20px;padding:24px 32px;color:white;margin-bottom:24px;">
-            <h1 style="color:white;font-size:26px;margin:0;">🧩 同行库管理</h1>
-            <p style="color:#94a3b8;margin:4px 0 0;font-size:14px;">
-                管理同行对比数据库 · 更新行情数据 · 查看过期标记
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+        from ui.renderers.html_renderer import HtmlRenderer
+        HtmlRenderer.hero_section("🧩 同行库管理", "管理同行对比数据库 · 更新行情数据 · 查看过期标记")
 
         from ipo_analyzer.peer_comps import _load_peer_data, _build_peer_meta
         raw = _load_peer_data()

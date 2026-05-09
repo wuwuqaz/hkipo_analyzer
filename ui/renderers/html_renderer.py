@@ -8,7 +8,7 @@ class HtmlRenderer:
     """HTML 渲染器，负责生成安全的 HTML 片段"""
 
     allowed_score_classes = {"score-excellent", "score-good", "score-medium", "score-poor", ""}
-    allowed_colors = {"#4ade80", "#a3e635", "#facc15", "#f87171"}
+    allowed_colors = {"#34d399", "#a3e635", "#fbbf24", "#fb7185"}
     allowed_tag_colors = {"green", "yellow", "red", "blue", "gray"}
 
     @staticmethod

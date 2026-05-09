@@ -276,7 +276,7 @@ class HistoryPage:
         if prev_score is None or curr_score is None:
             return
 
-        delta_color = "#16a34a" if score_delta and score_delta > 0 else ("#dc2626" if score_delta and score_delta < 0 else "#64748b")
+        delta_color = "#34d399" if score_delta and score_delta > 0 else ("#fb7185" if score_delta and score_delta < 0 else "#64748b")
         delta_sign = "+" if score_delta and score_delta > 0 else ""
 
         dim_rows = ""
@@ -288,33 +288,33 @@ class HistoryPage:
                 "theme_score": "主题",
                 "data_quality_score": "数据质量",
             }.get(dim, dim)
-            dim_color = "#16a34a" if delta > 0 else ("#dc2626" if delta < 0 else "#64748b")
+            dim_color = "#34d399" if delta > 0 else ("#fb7185" if delta < 0 else "#64748b")
             dim_sign = "+" if delta > 0 else ""
             dim_rows += (
-                f'<div style="display:inline-block;margin:2px 6px;padding:3px 8px;border-radius:8px;'
-                f'background:#f1f5f9;font-size:12px;">'
+                f'<div style="display:inline-block;margin:2px 4px;padding:4px 10px;border-radius:8px;'
+                f'background:rgba(255,255,255,0.04);border:1px solid rgba(148,163,184,0.1);font-size:12px;color:#94a3b8;">'
                 f'{dim_label}: <b style="color:{dim_color};">{dim_sign}{delta}</b></div>'
             )
 
         st.markdown(f"""
-        <div class="section-card" style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);color:white;padding:16px 20px;">
-            <div style="font-size:16px;font-weight:700;margin-bottom:8px;">📊 版本对比</div>
-            <div style="display:flex;gap:16px;align-items:center;margin-bottom:8px;">
-                <div style="text-align:center;">
-                    <div style="font-size:12px;color:#94a3b8;">上次评分</div>
-                    <div style="font-size:24px;font-weight:800;">{prev_score}</div>
+        <div class="glass-card glass-card-glow" style="padding:18px 22px;">
+            <div class="section-title">📊 版本对比</div>
+            <div style="display:flex;gap:20px;align-items:center;margin:12px 0;">
+                <div style="text-align:center;flex:1;">
+                    <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">上次评分</div>
+                    <div style="font-size:28px;font-weight:800;color:#94a3b8;font-family:JetBrains Mono,monospace;">{prev_score}</div>
                 </div>
-                <div style="font-size:20px;color:#94a3b8;">→</div>
-                <div style="text-align:center;">
-                    <div style="font-size:12px;color:#94a3b8;">本次评分</div>
-                    <div style="font-size:24px;font-weight:800;">{curr_score}</div>
+                <div style="font-size:24px;color:#475569;font-weight:300;">→</div>
+                <div style="text-align:center;flex:1;">
+                    <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">本次评分</div>
+                    <div style="font-size:28px;font-weight:800;color:#f1f5f9;font-family:JetBrains Mono,monospace;">{curr_score}</div>
                 </div>
-                <div style="text-align:center;">
-                    <div style="font-size:12px;color:#94a3b8;">变化</div>
-                    <div style="font-size:24px;font-weight:800;color:{delta_color};">{delta_sign}{score_delta}</div>
+                <div style="text-align:center;flex:1;">
+                    <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">变化</div>
+                    <div style="font-size:28px;font-weight:800;font-family:JetBrains Mono,monospace;color:{delta_color};text-shadow:0 0 12px {delta_color}40;">{delta_sign}{score_delta}</div>
                 </div>
             </div>
-            {f'<div style="font-size:13px;color:#94a3b8;margin-bottom:6px;">{changed_reason}</div>' if changed_reason else ''}
-            <div>{dim_rows}</div>
+            {f'<div style="font-size:13px;color:#64748b;margin-bottom:8px;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:8px;">{changed_reason}</div>' if changed_reason else ''}
+            <div style="display:flex;flex-wrap:wrap;gap:4px;">{dim_rows}</div>
         </div>
         """, unsafe_allow_html=True)

@@ -131,7 +131,7 @@ class DataFormatter:
         if rev and rev_y1 and rev_y1 != 0:
             rev_yoy = (rev - rev_y1) / abs(rev_y1) * 100
             rev_str = f"{rev:.1f} M"
-            color = '#ef4444' if rev_yoy > 0 else '#22c55e'
+            color = '#fb7185' if rev_yoy > 0 else '#34d399'
             arrow = '↑' if rev_yoy > 0 else '↓'
             return SafeHtml(
                 f"{_html(rev_str)} <span style='color:{color};font-size:12px;'>"
@@ -146,7 +146,7 @@ class DataFormatter:
         if np_val is not None and np_y1 is not None and np_y1 != 0:
             np_yoy = (np_val - np_y1) / abs(np_y1) * 100
             np_str = f"{np_val:.1f} M"
-            color = '#ef4444' if np_yoy > 0 else '#22c55e'
+            color = '#fb7185' if np_yoy > 0 else '#34d399'
             arrow = '↑' if np_yoy > 0 else '↓'
             return SafeHtml(
                 f"{_html(np_str)} <span style='color:{color};font-size:12px;'>"
@@ -162,7 +162,7 @@ class DataFormatter:
             gm_cur = _normalize_gm(gm)
             gm_delta = gm_cur - _normalize_gm(gm_y1)
             gm_str = f"{gm_cur:.1f}%"
-            color = '#ef4444' if gm_delta > 0 else '#22c55e'
+            color = '#fb7185' if gm_delta > 0 else '#34d399'
             arrow = '↑' if gm_delta > 0 else '↓'
             return SafeHtml(
                 f"{_html(gm_str)} <span style='color:{color};font-size:12px;'>"
