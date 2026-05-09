@@ -29,11 +29,13 @@ class ValuationAnalyzer:
             'valuation_framework_type': None,
             'valuation_profitability_type': None,
             'revenue_hkd_million': None,
+            'revenue_previous_hkd_million': None,
             'market_cap_hkd_million': None,
             'market_cap_to_rd_ratio': None,
             'biotech_valuation_label': None,
             'biotech_valuation_reasons': [],
             'biotech_stage_label': None,
+            'biotech_valuation_framework': None,
             'latest_clinical_stage': None,
             'phase_iii_count': 0,
             'nda_or_approved_count': 0,
@@ -68,15 +70,20 @@ class ValuationAnalyzer:
                 fx = 1.0
 
             revenue = None
+            revenue_previous = None
             net_profit_hkd = None
             adjusted_profit_hkd = None
             if _is_num(revenue_raw):
                 revenue = round(revenue_raw * fx, 2)
+            revenue_y1_raw = prospectus_info.get('revenue_y1')
+            if _is_num(revenue_y1_raw):
+                revenue_previous = round(revenue_y1_raw * fx, 2)
             if _is_num(net_profit):
                 net_profit_hkd = round(net_profit * fx, 2)
             if _is_num(adjusted_profit):
                 adjusted_profit_hkd = round(adjusted_profit * fx, 2)
             result['revenue_hkd_million'] = revenue
+            result['revenue_previous_hkd_million'] = revenue_previous
             result['net_profit_hkd_million'] = net_profit_hkd
             result['adjusted_profit_hkd_million'] = adjusted_profit_hkd
             result['market_cap_hkd_million'] = market_cap_m
@@ -176,7 +183,7 @@ class ValuationAnalyzer:
                     result['latest_clinical_stage'] = 'phase_iii'
                 else:
                     found_phase = re.search(r'phase\s*(ii|2)', text_for_pipeline, re.IGNORECASE)
-                    result['latest_clinical_stage'] = 'phase_ii' if found_phase else 'preclinical_or_discovery'
+                    result['latest_clinical_stage'] = 'phase_ii' if found_phase else 'early_stage'
 
                 stage = result['latest_clinical_stage'] or 'unknown'
                 if stage in ('approved', 'nda'):
@@ -208,7 +215,7 @@ class ValuationAnalyzer:
                 # 管线集中度
                 rnd_info = prospectus_info.get('rnd_pipeline', {}) or {}
                 product_count = rnd_info.get('product_count_pipeline', 0)
-                if isinstance(product_count, (int, float)) and product_count <= SETTINGS.valuation.biotech_pipeline_count_warning and stage in ('preclinical_or_discovery', 'phase_ii'):
+                if isinstance(product_count, (int, float)) and product_count <= SETTINGS.valuation.biotech_pipeline_count_warning and stage in ('early_stage', 'phase_ii'):
                     result['pipeline_concentration_warning'] = f'管线仅{product_count}个产品且阶段偏早，集中度风险高'
                     biotech_reasons.append(result['pipeline_concentration_warning'])
 
@@ -219,6 +226,19 @@ class ValuationAnalyzer:
                     biotech_label = "PS辅助/管线估值"
                 elif ps_val is not None and _is_num(revenue) and revenue < SETTINGS.valuation.biotech_revenue_moderate:
                     biotech_reasons.append(f"收入基数小(HKD M{revenue:.0f})，PS需谨慎解读")
+
+                # 确定 biotech 估值框架
+                if revenue_small:
+                    if result.get('market_cap_to_rd_ratio') is not None:
+                        result['biotech_valuation_framework'] = 'market_cap_rd'
+                    else:
+                        result['biotech_valuation_framework'] = 'pipeline_based'
+                elif ps_val is not None:
+                    result['biotech_valuation_framework'] = 'ps_reference'
+                elif result.get('market_cap_to_rd_ratio') is not None:
+                    result['biotech_valuation_framework'] = 'market_cap_rd'
+                else:
+                    result['biotech_valuation_framework'] = 'pipeline_based'
 
                 if result.get('market_cap_to_rd_ratio') is not None:
                     rdr = result['market_cap_to_rd_ratio']
@@ -266,6 +286,10 @@ class ValuationAnalyzer:
                 else:
                     final_label = "数据不足，需人工核对"
 
+            # 低收入 biotech：revenue_too_small_for_ps=True 时 valuation_label 不能是"很贵/明显偏贵"
+            if result.get('revenue_too_small_for_ps') and final_label in ('很贵', '明显偏贵'):
+                final_label = "PS失真，仅作参考"
+
             if relative_label and relative_label != '缺失' and not is_biotech:
                 if absolute_label in ('很贵',) and relative_label in ('合理', '相对低估', '偏贵但可解释'):
                     final_label = '偏贵但可解释'
@@ -297,9 +321,9 @@ class ValuationAnalyzer:
             if result.get('cash_runway_years') is not None:
                 reasons.append(f"现金runway {result['cash_runway_years']:.1f}年")
 
-            revenue_y1 = prospectus_info.get('revenue_y1')
-            if _is_num(revenue) and _is_num(revenue_y1) and revenue_y1 > 0:
-                growth = (revenue - revenue_y1) / revenue_y1
+            # 收入增长率使用同一币种口径（HKD）
+            if _is_num(revenue) and _is_num(revenue_previous) and revenue_previous > 0:
+                growth = (revenue - revenue_previous) / revenue_previous
                 reasons.append(f"收入增速{growth*100:.1f}%")
             gm = prospectus_info.get('gross_margin')
             if gm is not None and not (_is_num(gm) and gm > SETTINGS.prospectus_quality.gross_margin_anomaly_max):
@@ -327,7 +351,7 @@ class ValuationAnalyzer:
         if isinstance(old_valuation, dict):
             for key in ('cash_runway_years', 'revenue_quality', 'latest_clinical_stage',
                         'pipeline_concentration_warning', 'biotech_valuation_label',
-                        'biotech_stage_label'):
+                        'biotech_stage_label', 'biotech_valuation_framework'):
                 if result.get(key) in (None, '', 'standard') and old_valuation.get(key) not in (None, '', 'standard'):
                     result[key] = old_valuation[key]
 

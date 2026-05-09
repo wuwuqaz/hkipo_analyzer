@@ -85,7 +85,7 @@ def test_private_low_quality_not_in_quantitative():
         {"name": "Listed D Stale", "type": "listed", "ps": 6.0, "pe": 22.0, "data_quality": "high", "needs_refresh": True},
         {"name": "Listed E NoMetrics", "type": "listed", "ps": None, "pe": None, "market_cap_hkd_million": None, "data_quality": "moderate", "needs_refresh": False},
     ]
-    quant, qual = _split_peer_samples(mock_peers)
+    quant, qual, basis, q_count, ql_count = _split_peer_samples(mock_peers)
     quant_names = {p["name"] for p in quant}
     qual_names = {p["name"] for p in qual}
 

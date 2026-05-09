@@ -21,7 +21,7 @@ CSS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "style.css")
 
 
 @st.cache_data
-def _read_css(path: str):
+def _read_css(path: str, mtime: float):
     if not os.path.exists(path):
         return None
     with open(path, "r", encoding="utf-8") as f:
@@ -29,7 +29,8 @@ def _read_css(path: str):
 
 
 def _load_style() -> None:
-    css = _read_css(CSS_PATH)
+    css_mtime = os.path.getmtime(CSS_PATH) if os.path.exists(CSS_PATH) else 0
+    css = _read_css(CSS_PATH, css_mtime)
     if css is None:
         st.warning("样式文件 style.css 未找到，使用默认样式")
     else:

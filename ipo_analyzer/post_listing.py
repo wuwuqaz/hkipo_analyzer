@@ -135,6 +135,50 @@ def _extract_labeled_text(text: str, label_pattern: str, values: tuple[str, ...]
     return match.group(1)
 
 
+def _parse_allocation_pool(text: str, pool_name: str) -> dict[str, Any]:
+    rows = []
+    row_pattern = re.compile(
+        r"([0-9][0-9,]*)\s+([0-9][0-9,]*)\s+"
+        r"([0-9][0-9,]*)\s+out\s+of\s+([0-9][0-9,]*)\s+applicants"
+        r"(?:\s+to\s+receive\s+([0-9][0-9,]*)\s+H\s+Shares)?"
+        r"[\s\S]{0,120}?([0-9]+(?:\.[0-9]+)?)%",
+        re.IGNORECASE,
+    )
+    for match in row_pattern.finditer(text or ""):
+        applied = _to_int(match.group(1))
+        valid_apps = _to_int(match.group(2))
+        successful_apps = _to_int(match.group(3))
+        denominator = _to_int(match.group(4))
+        allocated_shares = _to_int(match.group(5))
+        allotment_pct = _to_float(match.group(6))
+        if applied is None or valid_apps is None or successful_apps is None:
+            continue
+        success_rate_pct = None
+        if denominator:
+            success_rate_pct = round(successful_apps / denominator * 100, 2)
+        rows.append(
+            {
+                "applied_shares": applied,
+                "valid_applications": valid_apps,
+                "successful_applications": successful_apps,
+                "allocated_shares": allocated_shares,
+                "allotment_pct": allotment_pct,
+                "success_rate_pct": success_rate_pct,
+            }
+        )
+
+    valid_total = sum(row["valid_applications"] for row in rows)
+    successful_total = sum(row["successful_applications"] for row in rows)
+    success_rate_pct = round(successful_total / valid_total * 100, 2) if valid_total else None
+    return {
+        "pool": pool_name,
+        "valid_applications": valid_total or None,
+        "successful_applications": successful_total or None,
+        "success_rate_pct": success_rate_pct,
+        "rows": rows,
+    }
+
+
 def parse_allotment_text(text: str) -> dict[str, Any]:
     """Parse core allocation metrics from an HKEX allotment announcement text."""
     result: dict[str, Any] = {}
@@ -216,6 +260,17 @@ def parse_allotment_text(text: str) -> dict[str, Any]:
                 break
 
     pool_a = _section(compact, r"\bPOOL\s+A\b", r"\bPOOL\s+B\b")
+    pool_b = _section(compact, r"\bPOOL\s+B\b", r"Total\s+number\s+of\s+Pool\s+B\s+successful\s+applicants|\n\s*As\s+of\s+the\s+date|\n\s*COLLECTION")
+    allocation_pools = {}
+    parsed_pool_a = _parse_allocation_pool(pool_a, "A")
+    parsed_pool_b = _parse_allocation_pool(pool_b, "B")
+    if parsed_pool_a.get("rows"):
+        allocation_pools["A"] = parsed_pool_a
+    if parsed_pool_b.get("rows"):
+        allocation_pools["B"] = parsed_pool_b
+    if allocation_pools:
+        result["allocation_pools"] = allocation_pools
+
     one_lot = re.search(
         r"([0-9][0-9,]*)\s+([0-9][0-9,]*)\s+"
         r"([0-9][0-9,]*)\s+out\s+of\s+([0-9][0-9,]*)\s+applicants"
@@ -236,6 +291,13 @@ def parse_allotment_text(text: str) -> dict[str, Any]:
             result["one_lot_success_rate_pct"] = round(successful_apps / denominator * 100, 2)
         elif pct is not None:
             result["one_lot_success_rate_pct"] = pct
+
+    if allocation_pools.get("A", {}).get("rows"):
+        first_row = allocation_pools["A"]["rows"][0]
+        result.setdefault("one_lot_applied_shares", first_row.get("applied_shares"))
+        result.setdefault("one_lot_valid_applications", first_row.get("valid_applications"))
+        result.setdefault("one_lot_successful_applications", first_row.get("successful_applications"))
+        result.setdefault("one_lot_success_rate_pct", first_row.get("success_rate_pct"))
 
     return result
 
@@ -439,6 +501,30 @@ def _download_allotment_pdf(url: str, stock_code: str, output_dir: str, force_re
     return pdf_path
 
 
+def _strip_script_style(html: str) -> str:
+    """Remove <script> and <style> blocks from HTML to avoid regex matches in JS/CSS code."""
+    cleaned = re.sub(r'<script\b[^>]*>.*?</script>', ' ', html, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r'<style\b[^>]*>.*?</style>', ' ', cleaned, flags=re.IGNORECASE | re.DOTALL)
+    return cleaned
+
+
+_GREY_PRICE_PATTERNS = [
+    re.compile(r'暗盘收报\s*([0-9]+(?:\.[0-9]+)?)\s*元', re.IGNORECASE),
+    re.compile(r'暗盘开报\s*([0-9]+(?:\.[0-9]+)?)\s*元', re.IGNORECASE),
+    re.compile(r'暗盘价[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)\s*(?:港元|HKD|HK\$)?', re.IGNORECASE),
+    re.compile(r'(?:暗盘|Grey\s*Market)[^0-9]{0,40}([0-9]+(?:\.[0-9]+)?)\s*(?:港元|HKD|HK\$)', re.IGNORECASE),
+]
+
+
+def _is_price_reasonable(price: float, final_offer_price: Any = None) -> bool:
+    if final_offer_price is None:
+        return True
+    base = _to_float(final_offer_price)
+    if base is None or base <= 0:
+        return True
+    return 0.1 * base <= price <= 10 * base
+
+
 def fetch_grey_market_performance(stock_code: str, final_offer_price: Any = None) -> dict[str, Any]:
     """Best-effort grey-market parser.
 
@@ -463,23 +549,25 @@ def fetch_grey_market_performance(stock_code: str, final_offer_price: Any = None
         if response.status_code != 200:
             payload["error"] = f"HTTP {response.status_code}"
             return payload
-        text = _clean_text(response.text)
+
+        text = _clean_text(_strip_script_style(response.text))
         if "暗盘" not in text and "grey" not in text.lower():
             payload["error"] = "grey market section not found"
             return payload
 
-        # Conservative parsing: only accept prices close to explicit grey-market wording.
-        match = re.search(
-            r"(?:暗盘|Grey\s*Market)[^0-9]{0,120}([0-9]+(?:\.[0-9]+)?)\s*(?:港元|HKD|HK\$)?",
-            text,
-            re.IGNORECASE,
-        )
-        if not match:
+        price = None
+        for pattern in _GREY_PRICE_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                candidate = _to_float(match.group(1))
+                if candidate is not None and _is_price_reasonable(candidate, final_offer_price):
+                    price = candidate
+                    break
+
+        if price is None:
             payload["error"] = "grey market price not found"
             return payload
-        price = _to_float(match.group(1))
-        if price is None:
-            return payload
+
         payload.update(
             {
                 "status": "ok",

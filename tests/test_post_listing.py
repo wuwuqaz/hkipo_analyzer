@@ -56,7 +56,19 @@ def test_parse_allotment_text_core_metrics():
     80,907
     648 out of 80,907 applicants to receive 200 H Shares
     0.80%
+    400
+    15,128
+    162 out of 15,128 applicants to receive 200 H Shares
+    0.54%
     POOL B
+    200,000
+    15,279
+    1,528 out of 15,279 applicants to receive 200 H Shares
+    0.01%
+    300,000
+    5,720
+    832 out of 5,720 applicants to receive 200 H Shares
+    0.01%
     """
 
     parsed = pl.parse_allotment_text(text)
@@ -74,6 +86,14 @@ def test_parse_allotment_text_core_metrics():
     assert parsed["final_international_offer_shares"] == 30000000
     assert parsed["one_lot_success_rate_pct"] == 0.8
     assert parsed["one_lot_valid_applications"] == 80907
+    assert parsed["allocation_pools"]["A"]["valid_applications"] == 96035
+    assert parsed["allocation_pools"]["A"]["successful_applications"] == 810
+    assert parsed["allocation_pools"]["A"]["rows"][1]["applied_shares"] == 400
+    assert parsed["allocation_pools"]["A"]["rows"][1]["allotment_pct"] == 0.54
+    assert parsed["allocation_pools"]["A"]["rows"][1]["success_rate_pct"] == 1.07
+    assert parsed["allocation_pools"]["B"]["valid_applications"] == 20999
+    assert parsed["allocation_pools"]["B"]["successful_applications"] == 2360
+    assert parsed["allocation_pools"]["B"]["rows"][1]["success_rate_pct"] == 14.55
 
 
 def test_find_allotment_announcement_filters_non_ipo(monkeypatch):
@@ -171,3 +191,167 @@ def test_history_store_update_post_listing_preserves_analysis_fields():
         assert latest["post_listing"]["one_lot_success_rate_pct"] == 0.8
     finally:
         shutil.rmtree(temp_dir)
+
+
+def test_update_post_listing_fills_actual_over_sub_ratio():
+    """Test that public_subscription_level from post_listing fills actual_over_sub_ratio."""
+    temp_dir = tempfile.mkdtemp()
+    try:
+        store = HistoryStore(temp_dir)
+        # Create initial record without actual_over_sub_ratio
+        initial = {
+            "hk_code": "01236",
+            "company_name": "LDROBOT",
+            "score": 50,
+            "actual_over_sub_ratio": None,
+        }
+        store.merge_analysis_result(initial)
+        
+        # Update with post_listing containing public_subscription_level
+        post_listing_data = {
+            "status": "ok",
+            "stock_code": "01236",
+            "company_name": "LDROBOT",
+            "final_offer_price": 26.36,
+            "public_subscription_level": 6707.66,
+            "international_subscription_level": 9.54,
+            "overall_success_rate_pct": 5.62,
+        }
+        updated = store.update_post_listing("01236", post_listing_data)
+        
+        assert updated is not None
+        assert updated["actual_over_sub_ratio"] == 6707.66
+        assert updated["over_sub_ratio_source"] == "post_listing_actual"
+        
+        # Verify it persists
+        latest = store.load(include_live=True)[0]
+        assert latest["actual_over_sub_ratio"] == 6707.66
+        assert latest["over_sub_ratio_source"] == "post_listing_actual"
+    finally:
+        shutil.rmtree(temp_dir)
+
+
+def test_update_post_listing_does_not_overwrite_existing():
+    """Test that existing actual_over_sub_ratio is not overwritten."""
+    temp_dir = tempfile.mkdtemp()
+    try:
+        store = HistoryStore(temp_dir)
+        # Create initial record with existing actual_over_sub_ratio
+        initial = {
+            "hk_code": "01236",
+            "company_name": "LDROBOT",
+            "score": 50,
+            "actual_over_sub_ratio": 4322.0,
+            "over_sub_ratio_source": "historical_actual",
+        }
+        store.merge_analysis_result(initial)
+        
+        # Update with post_listing containing different public_subscription_level
+        post_listing_data = {
+            "status": "ok",
+            "stock_code": "01236",
+            "public_subscription_level": 6707.66,
+        }
+        updated = store.update_post_listing("01236", post_listing_data)
+        
+        assert updated is not None
+        assert updated["actual_over_sub_ratio"] == 4322.0
+        assert updated["over_sub_ratio_source"] == "historical_actual"
+    finally:
+        shutil.rmtree(temp_dir)
+
+
+def test_strip_script_style():
+    html = """
+    <html>
+      <script>var x = 123;</script>
+      <style>.cls{color:red}</style>
+      <div>暗盘收报49.8元</div>
+    </html>
+    """
+    result = pl._strip_script_style(html)
+    assert "var x = 123" not in result
+    assert ".cls{color:red}" not in result
+    assert "暗盘收报49.8元" in result
+
+
+def test_is_price_reasonable():
+    assert pl._is_price_reasonable(49.8, 26.36) is True
+    assert pl._is_price_reasonable(26.36, 26.36) is True
+    assert pl._is_price_reasonable(980.0, 26.36) is False
+    assert pl._is_price_reasonable(2.0, 26.36) is False
+    assert pl._is_price_reasonable(49.8, None) is True
+    assert pl._is_price_reasonable(49.8, 0) is True
+
+
+def test_fetch_grey_market_performance_news_headline(monkeypatch):
+    html = """
+    <html>
+    <script>
+    var is980Mode = $(".div980").is(":visible");
+    var x = "暗盘";
+    </script>
+    <div class="newsBox">
+      <a href="/sc/stocks/news/aafn-con/NOW.1523652/ipo-news/AAFN"
+         title="《新股》乐动机器人暗盘收报49.8元 高上市价88.9%">
+        <div class="news-content-text">《新股》乐动机器人暗盘收报49.8元 高上市价88.9%</div>
+      </a>
+    </div>
+    <div class="ns1">
+      <div class="title">今日新股暗盘</div>
+    </div>
+    <table class="ns1 GMList-Container">
+      <tbody><tr><td class="txt_c msg" colspan="8">供应商是日没有新股暗盘</td></tr></tbody>
+    </table>
+    </html>
+    """
+
+    class FakeResponse:
+        status_code = 200
+        text = html
+
+    monkeypatch.setattr(pl.httpx, "get", lambda *args, **kwargs: FakeResponse())
+
+    result = pl.fetch_grey_market_performance("01236", final_offer_price=26.36)
+    assert result["status"] == "ok"
+    assert result["price"] == 49.8
+    assert abs(result["change_pct"] - 88.9) < 0.5
+
+
+def test_fetch_grey_market_performance_rejects_js_noise(monkeypatch):
+    """Regression test: JS code containing '暗盘' followed by '980' should not be matched."""
+    html = """
+    <html>
+    <body>
+      <script>
+        var is980Mode = $(".div980").is(":visible");
+        OA_show('Crazy_iPad_popup');
+      </script>
+      <div class="title">新股频道 IPO - 新股暗盘</div>
+      <div>暗盘收报49.8元</div>
+    </body>
+    </html>
+    """
+
+    class FakeResponse:
+        status_code = 200
+        text = html
+
+    monkeypatch.setattr(pl.httpx, "get", lambda *args, **kwargs: FakeResponse())
+
+    result = pl.fetch_grey_market_performance("01236", final_offer_price=26.36)
+    assert result["status"] == "ok"
+    assert result["price"] == 49.8
+
+
+def test_fetch_grey_market_performance_missing(monkeypatch):
+    html = "<html><body><div>普通页面</div></body></html>"
+
+    class FakeResponse:
+        status_code = 200
+        text = html
+
+    monkeypatch.setattr(pl.httpx, "get", lambda *args, **kwargs: FakeResponse())
+
+    result = pl.fetch_grey_market_performance("01236", final_offer_price=26.36)
+    assert result["status"] == "missing"

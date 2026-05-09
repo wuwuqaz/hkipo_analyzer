@@ -121,6 +121,7 @@ class DetailView:
             ("首日", self._format_price_perf(post.get("first_day"))),
             ("至今", self._format_price_perf(post.get("latest"))),
         ]
+        allocation_review = self._render_allocation_review(post)
 
         pdf = post.get("allotment_pdf") or {}
         source_url = pdf.get("source_url") or post.get("source_url")
@@ -145,6 +146,7 @@ class DetailView:
             {self.html.kpi_row(allotment_kpis)}
             <div style="border-top:1px solid rgba(148,163,184,0.1);margin:10px 0;"></div>
             {self.html.kpi_row(price_kpis)}
+            {allocation_review}
             {pdf_link}
             {message_html}
         </div>
@@ -175,6 +177,179 @@ class DetailView:
         date_html = f'<div style="font-size:11px;color:#94a3b8;">{self.html.escape(date)}</div>' if date else ""
         price_html = self.html.escape(self.fmt.format_number(price, " HKD")) if price is not None else "--"
         return SafeHtml(f'{price_html}{change_html}{date_html}')
+
+    def _render_allocation_review(self, post: dict) -> str:
+        pools = post.get("allocation_pools") or {}
+        if not pools:
+            return ""
+
+        pool_labels = {"A": "甲组", "B": "乙组"}
+        pool_html = ""
+        trend_rows = []
+        for key in ("A", "B"):
+            pool = pools.get(key) or {}
+            if not pool.get("rows"):
+                continue
+            pool_html += self._render_allocation_pool(pool, pool_labels.get(key, key))
+            for row in pool.get("rows") or []:
+                trend_row = dict(row)
+                trend_row["pool"] = key
+                trend_rows.append(trend_row)
+
+        if not pool_html:
+            return ""
+
+        trend_html = self._render_allocation_trend(trend_rows)
+        return SafeHtml(
+            '<div style="border-top:1px solid rgba(148,163,184,0.1);margin:14px 0 0;padding-top:14px;">'
+            '<div class="section-title">中签复盘</div>'
+            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;">'
+            f'{pool_html}'
+            '</div>'
+            f'{trend_html}'
+            '</div>'
+        )
+
+    def _render_allocation_pool(self, pool: dict, label: str) -> str:
+        rows_html = ""
+        for row in pool.get("rows") or []:
+            rows_html += (
+                "<tr>"
+                f"<td>{self._format_int(row.get('applied_shares'))}</td>"
+                f"<td>{self._format_int(row.get('valid_applications'))}</td>"
+                f"<td>{self._format_int(row.get('successful_applications'))}</td>"
+                f"<td>{self._format_pct(row.get('allotment_pct'))}</td>"
+                f"<td><b>{self._format_pct(row.get('success_rate_pct'))}</b></td>"
+                "</tr>"
+            )
+
+        summary = (
+            f"有效申请人数：{self._format_int(pool.get('valid_applications'))}"
+            f" | 中签总数：{self._format_int(pool.get('successful_applications'))}"
+            f" | 中签率：{self._format_pct(pool.get('success_rate_pct'))}"
+        )
+        return (
+            '<div style="border:1px solid rgba(148,163,184,0.18);border-radius:12px;overflow:hidden;'
+            'background:rgba(15,23,42,0.24);">'
+            '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;'
+            'border-bottom:1px solid rgba(148,163,184,0.14);">'
+            '<span style="display:inline-flex;align-items:center;justify-content:center;min-width:44px;'
+            'padding:5px 10px;border-radius:8px;background:#0f172a;color:#e2e8f0;font-weight:800;">'
+            f'{self.html.escape(label)}</span>'
+            f'<span style="font-size:12px;color:#94a3b8;">{self.html.escape(summary)}</span>'
+            '</div>'
+            '<div style="max-height:360px;overflow:auto;">'
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#cbd5e1;">'
+            '<thead style="position:sticky;top:0;background:#0f172a;color:#94a3b8;">'
+            '<tr>'
+            '<th style="padding:8px;text-align:right;">申请股数</th>'
+            '<th style="padding:8px;text-align:right;">有效申请人</th>'
+            '<th style="padding:8px;text-align:right;">中签人</th>'
+            '<th style="padding:8px;text-align:right;">一手中签率</th>'
+            '<th style="padding:8px;text-align:right;">中签率</th>'
+            '</tr>'
+            '</thead>'
+            f'<tbody>{rows_html}</tbody>'
+            '</table>'
+            '</div>'
+            '</div>'
+        )
+
+    def _render_allocation_trend(self, rows: list[dict]) -> str:
+        trend_rows = [
+            row for row in rows
+            if _is_num(row.get("success_rate_pct")) and _is_num(row.get("applied_shares"))
+        ]
+        if len(trend_rows) < 2:
+            return ""
+
+        width = 920
+        height = 240
+        left = 48
+        right = 22
+        top = 22
+        bottom = 42
+        plot_w = width - left - right
+        plot_h = height - top - bottom
+        max_rate = max(row["success_rate_pct"] for row in trend_rows)
+        y_max = max(100, ((int(max_rate) // 10) + 1) * 10)
+
+        points = []
+        labels = []
+        for idx, row in enumerate(trend_rows):
+            x = left + (plot_w * idx / max(1, len(trend_rows) - 1))
+            y = top + plot_h - (plot_h * row["success_rate_pct"] / y_max)
+            points.append(f"{x:.1f},{y:.1f}")
+            if idx == 0 or idx == len(trend_rows) - 1 or idx % 3 == 0:
+                labels.append(
+                    f'<text x="{x:.1f}" y="{height - 12}" text-anchor="middle" '
+                    f'font-size="9" fill="#64748b">{self._compact_shares(row.get("applied_shares"))}</text>'
+                )
+
+        grid = ""
+        for pct in range(0, int(y_max) + 1, 20):
+            y = top + plot_h - (plot_h * pct / y_max)
+            grid += (
+                f'<line x1="{left}" y1="{y:.1f}" x2="{width - right}" y2="{y:.1f}" '
+                'stroke="rgba(148,163,184,0.18)" stroke-dasharray="4 4"/>'
+                f'<text x="{left - 10}" y="{y + 4:.1f}" text-anchor="end" font-size="10" fill="#64748b">{pct}%</text>'
+            )
+
+        split_idx = next((idx for idx, row in enumerate(trend_rows) if row.get("pool") == "B"), None)
+        split_html = ""
+        if split_idx:
+            x = left + (plot_w * split_idx / max(1, len(trend_rows) - 1))
+            split_html = (
+                f'<line x1="{x:.1f}" y1="{top}" x2="{x:.1f}" y2="{top + plot_h}" '
+                'stroke="rgba(148,163,184,0.35)" stroke-dasharray="5 5"/>'
+                f'<rect x="{x - 58:.1f}" y="{top + 6}" width="116" height="22" rx="6" fill="#0f172a" '
+                'stroke="rgba(148,163,184,0.35)"/>'
+                f'<text x="{x:.1f}" y="{top + 21}" text-anchor="middle" font-size="11" fill="#cbd5e1">甲组结束 / 乙组开始</text>'
+            )
+
+        dots = ""
+        for point, row in zip(points, trend_rows):
+            x, y = point.split(",")
+            dots += (
+                f'<circle cx="{x}" cy="{y}" r="3.2" fill="#38bdf8" stroke="#0f172a" stroke-width="1.5">'
+                f'<title>{self._format_int(row.get("applied_shares"))}股: {self._format_pct(row.get("success_rate_pct"))}</title>'
+                '</circle>'
+            )
+
+        return (
+            '<div style="margin-top:14px;border:1px solid rgba(148,163,184,0.18);border-radius:12px;'
+            'padding:12px;background:rgba(15,23,42,0.22);overflow-x:auto;">'
+            '<div style="font-size:13px;font-weight:800;color:#e2e8f0;text-align:center;margin-bottom:6px;">'
+            '甲乙组中签率趋势</div>'
+            f'<svg viewBox="0 0 {width} {height}" width="100%" style="min-width:720px;display:block;">'
+            f'{grid}'
+            f'{split_html}'
+            f'<polyline points="{" ".join(points)}" fill="none" stroke="#38bdf8" stroke-width="2.4"/>'
+            f'{dots}'
+            f'{"".join(labels)}'
+            f'<text x="{width / 2:.1f}" y="{height - 2}" text-anchor="middle" font-size="11" fill="#94a3b8">申请股数</text>'
+            '</svg>'
+            '</div>'
+        )
+
+    def _format_pct(self, value) -> str:
+        if value is None:
+            return "--"
+        try:
+            return f"{float(value):.2f}%"
+        except Exception:
+            return str(value)
+
+    def _compact_shares(self, value) -> str:
+        try:
+            num = int(value)
+        except Exception:
+            return "--"
+        if num >= 1_000_000:
+            return f"{num / 1_000_000:.1f}M"
+        if num >= 1000:
+            return f"{num // 1000}K"
+        return str(num)
 
 
     def _render_score_waterfall(self, ipo: dict) -> None:

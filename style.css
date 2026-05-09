@@ -60,8 +60,35 @@
   color: var(--text-primary);
 }
 
-.stApp > header {
-  background: transparent !important;
+.stApp > header,
+header[data-testid="stHeader"],
+.stAppHeader {
+  display: none !important;
+  height: 0 !important;
+}
+
+header[data-testid="stHeader"] * ,
+.stAppHeader * {
+  display: none !important;
+}
+
+div[data-testid="stHeader"],
+div[data-testid="stToolbar"],
+div[data-testid="stDecoration"],
+div[data-testid="stStatusWidget"] {
+  display: none !important;
+  height: 0 !important;
+}
+
+.stApp div[data-testid="stAppViewContainer"] > .main,
+.stApp section.main,
+.stApp .main {
+  padding-top: 0 !important;
+}
+
+.stApp .block-container,
+.stApp div[data-testid="stVerticalBlock"] {
+  padding-top: 0.75rem !important;
 }
 
 .stApp a {

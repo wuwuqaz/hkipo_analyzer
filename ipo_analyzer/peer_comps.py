@@ -590,8 +590,13 @@ def _is_hk_peer(peer):
 def _split_peer_samples(matched_peers):
     """将 peers 分为 quantitative（可参与中位数计算）和 qualitative（仅参考）
 
-    策略：优先使用港股同行。如果港股定量样本 >= 2，则仅使用港股做定量对比；
-    否则 fallback 到全部 listed 同行（含美股/A股）。
+    策略：
+    - hk_quant >= 2 时，只用 hk_quant；
+    - hk_quant < 2 且 all listed quant >= 2 时，fallback 到 hk_quant + non_hk_quant；
+    - 只有一个可用样本时允许输出，但 quantitative_basis 标记为 single_reference。
+
+    返回: (quantitative_peers, qualitative_peers, quantitative_basis,
+           quantitative_peer_count, qualitative_peer_count)
     """
     def _is_quantitative(p):
         return (
@@ -606,16 +611,24 @@ def _split_peer_samples(matched_peers):
 
     hk_quant = [p for p in hk_peers if _is_quantitative(p)]
     non_hk_quant = [p for p in non_hk_peers if _is_quantitative(p)]
+    all_listed_quant = hk_quant + non_hk_quant
 
-    # 港股优先：只要有定量港股，就只使用港股；完全没有时才 fallback 到美股/A股
-    if len(hk_quant) >= 1:
+    if len(hk_quant) >= 2:
         quantitative_peers = hk_quant
+        quantitative_basis = "hk_peers"
+    elif len(all_listed_quant) >= 2:
+        quantitative_peers = all_listed_quant
+        quantitative_basis = "hk_plus_non_hk"
+    elif len(all_listed_quant) == 1:
+        quantitative_peers = all_listed_quant
+        quantitative_basis = "single_reference"
     else:
-        quantitative_peers = non_hk_quant
+        quantitative_peers = []
+        quantitative_basis = "none"
 
     quantitative_set = {id(p) for p in quantitative_peers}
     qualitative_peers = [p for p in matched_peers if id(p) not in quantitative_set]
-    return quantitative_peers, qualitative_peers
+    return quantitative_peers, qualitative_peers, quantitative_basis, len(quantitative_peers), len(qualitative_peers)
 
 
 def _calc_peer_medians(peers, exclude_private=True):
@@ -839,6 +852,9 @@ class PeerComparableAnalyzer:
             "matched_peers": [],
             "quantitative_peers": [],
             "qualitative_peers": [],
+            "quantitative_basis": "none",
+            "quantitative_peer_count": 0,
+            "qualitative_peer_count": 0,
             "company_ps": None, "company_pe": None, "company_pb": None,
             "peer_median_ps": None, "peer_median_pe": None, "peer_median_pb": None,
             "peer_ps_count": 0, "peer_pe_count": 0,
@@ -923,13 +939,14 @@ class PeerComparableAnalyzer:
         ]
 
         # 区分 quantitative / qualitative peers
-        quantitative_peers, qualitative_peers = _split_peer_samples(matched)
+        quantitative_peers, qualitative_peers, quantitative_basis, q_count, ql_count = _split_peer_samples(matched)
         result["quantitative_peers"] = quantitative_peers
         result["qualitative_peers"] = qualitative_peers
-        result["quantitative_peer_count"] = len(quantitative_peers)
-        result["qualitative_peer_count"] = len(qualitative_peers)
-        if len(quantitative_peers) < 2:
-            result["peer_sample_warning"] = f"quantitative peers 仅 {len(quantitative_peers)} 家，不参与强估值判断，仅作定性参考"
+        result["quantitative_basis"] = quantitative_basis
+        result["quantitative_peer_count"] = q_count
+        result["qualitative_peer_count"] = ql_count
+        if q_count < 2:
+            result["peer_sample_warning"] = f"quantitative peers 仅 {q_count} 家，不参与强估值判断，仅作定性参考"
         else:
             result["peer_sample_warning"] = None
 

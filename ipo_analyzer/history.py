@@ -11,6 +11,23 @@ from .settings import SETTINGS
 logger = logging.getLogger(__name__)
 
 
+def _is_dict_effectively_empty(d: dict) -> bool:
+    """Return True if a dict has no non-None scalar values (all values are None or empty)."""
+    if not isinstance(d, dict):
+        return False
+    for v in d.values():
+        if v is None or v == "":
+            continue
+        if isinstance(v, (list, tuple)) and len(v) == 0:
+            continue
+        if isinstance(v, dict):
+            if not _is_dict_effectively_empty(v):
+                return False
+            continue
+        return False
+    return True
+
+
 class HistoryStore:
     HISTORY_VERSION = SETTINGS.history.version
 
@@ -361,6 +378,8 @@ class HistoryStore:
                 continue
             if value is None or value == "":
                 continue
+            if key == 'prospectus_info' and isinstance(value, dict) and _is_dict_effectively_empty(value):
+                continue
             merged[key] = value
 
         merged.setdefault('hk_code', code)
@@ -388,6 +407,13 @@ class HistoryStore:
         record['post_listing'] = current_post_listing
         record['_post_listing_updated_at'] = datetime.now().isoformat()
         record['_history_version'] = self.HISTORY_VERSION
+        
+        # 从 post_listing 数据中提取真实公配倍数，填充到 actual_over_sub_ratio
+        public_sub = post_listing.get('public_subscription_level') if post_listing else None
+        if public_sub and not record.get('actual_over_sub_ratio'):
+            record['actual_over_sub_ratio'] = public_sub
+            record['over_sub_ratio_source'] = 'post_listing_actual'
+        
         existing[code] = record
         self._write_all(self._sort_records(existing.values()))
         return record

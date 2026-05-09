@@ -376,16 +376,21 @@ class ProspectusParser:
         return {}
 
     def _detect_financial_currency(self, text):
-        """从财务表附近识别币种：RMB/HKD，默认 RMB"""
-        unit_patterns = [
-            (r"RMB[’'‘`]?000|RMB\s*thousand|RMB\s*in\s*thousands|rmb[’'‘`]?000|rmb\s*thousand", "RMB"),
-            (r"HK\$[’'‘`]?000|HK\$\s*thousand|HK\$\s*in\s*thousands|HKD\s*thousand|hk\$[’'‘`]?000", "HKD"),
-            (r"US\$[’'‘`]?000|USD\s*thousand", "USD"),
+        """从财务表附近识别币种：RMB/HKD/USD，默认 RMB。
+        同时返回币种和单位（million/thousand/unknown）。"""
+        patterns = [
+            # (pattern, currency, unit)
+            (r"RMB\s*million|RMB\s*\(?million\)?|rmb\s*million", "RMB", "million"),
+            (r"HK\$\s*million|HKD\s*million|hk\$\s*million|HKD\s*\(?million\)?", "HKD", "million"),
+            (r"US\$\s*million|USD\s*million|us\$\s*million", "USD", "million"),
+            (r"RMB[’'‘`]?000|RMB\s*thousand|RMB\s*in\s*thousands|rmb[’'‘`]?000|rmb\s*thousand", "RMB", "thousand"),
+            (r"HK\$[’'‘`]?000|HK\$\s*thousand|HK\$\s*in\s*thousands|HKD\s*thousand|hk\$[’'‘`]?000", "HKD", "thousand"),
+            (r"US\$[’'‘`]?000|USD\s*thousand|us\$[’'‘`]?000", "USD", "thousand"),
         ]
-        for pat, currency in unit_patterns:
+        for pat, currency, unit in patterns:
             if re.search(pat, text, re.IGNORECASE):
-                return currency
-        return "RMB"  # 默认
+                return currency, unit
+        return "RMB", "unknown"  # 默认
 
     def _apply_financial_table_to_info(self, info, fin_table, source, force=False):
         if not fin_table:
@@ -600,11 +605,15 @@ class ProspectusParser:
             if identity['stock_code_match']:
                 logger.info("PDF内容匹配股票代码")
 
-        # 根据公司名称后缀修正行业分类（-B 强制 healthcare；-P 含医药信号时修正）
+        # 提取 listing_suffix
+        listing_suffix = None
         if company_name:
             cn_lower = company_name.lower()
             if any(s in cn_lower for s in ['-b', '－b', '－ｂ', '－Ｂ']):
                 info['sector'] = 'healthcare'
+                listing_suffix = 'B'
+            elif any(s in cn_lower for s in ['-w', '－w', '－ｗ', '－Ｗ']):
+                listing_suffix = 'W'
             elif any(s in cn_lower for s in ['-p', '－p', '－ｐ', '－Ｐ']) and info.get('sector') == 'hardtech':
                 healthcare_signals = [
                     'drug', 'pharmaceutical', 'medicine', 'clinical trial',
@@ -613,6 +622,9 @@ class ProspectusParser:
                 ]
                 if any(s in text.lower() for s in healthcare_signals):
                     info['sector'] = 'healthcare'
+                    listing_suffix = 'P'
+        if listing_suffix:
+            info['listing_suffix'] = listing_suffix
 
         info['parse_success'] = True
         return info
@@ -768,8 +780,11 @@ class ProspectusParser:
         extract_prospectus_basic_info(text, info)
 
         # 财务币种检测
-        if 'financial_currency' not in info:
-            info['financial_currency'] = self._detect_financial_currency(text)
+        if 'financial_currency' not in info or info.get('financial_currency_unit') is None:
+            detected_currency, detected_unit = self._detect_financial_currency(text)
+            info['financial_currency'] = detected_currency
+            info['financial_currency_unit'] = detected_unit
+            info['financial_currency_source'] = 'table_header_regex'
 
         self._sanitize_financial_info(info)
 

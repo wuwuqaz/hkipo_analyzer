@@ -1,6 +1,6 @@
 # 港股 IPO 打新分析 (hkipo_analyzer)
 
-**当前版本：0.4.0-alpha；状态：开发中，仅供研究参考**
+**当前版本：0.4.1-alpha；状态：开发中，仅供研究参考**
 
 自动获取港股招股IPO列表，下载招股书PDF，解析财务数据，运行多维度评分，通过Streamlit Web UI 展示或导出 PDF/JSON 报告。
 
@@ -117,6 +117,16 @@ hkipo_analyzer/
 综合结论覆盖"偏贵但可解释"、"赛道合理"、"PS辅助"等场景，避免成长型/稀缺赛道公司被简单阈值误判。
 
 ## 更新日志
+
+### 0.4.1-alpha — 2026-05-09
+- **fix: peer_comps.py _split_peer_samples 修正 fallback 逻辑**：hk_quant >= 2 时只用港股；hk_quant < 2 且 all listed quant >= 2 时 fallback 到 hk + non-HK；仅 1 个样本时标记 `quantitative_basis=single_reference`，避免有 non-HK 数据却误判"样本不足"
+- **fix: scoring.py 估值调整去重与 biotech 保护**：valuation_framework 已含 relative valuation 时不再重复扣 PS/同行偏贵；仅 quant_count >= 2 且 premium > 100% 才允许 severe penalty；低收入 biotech（revenue_too_small_for_ps=True）PS 只提示不硬扣；license_upfront_driven biotech 不用 PS 溢价直接扣分
+- **feat: scoring.py 输出完整 score_trace**：`raw_weighted_score`、`peer_adj`、`val_penalty`、`cap_reason`、`final_score_before_cap`、`final_score_after_cap`，解释最终分数来源
+- **fix: industry_router.py 强化 -B 识别**：删除 `-w ` biotech 关键词误触发；`listing_suffix=B` 或名称含 `-B` 时强制 `is_biotech=True`、`sector=healthcare`；`-W` 不作为 biotech 依据；支持从 `company_name_aliases` / `extracted_english_name` / `extracted_company_name` 中识别 `-B`
+- **fix: parser.py 币种与单位分离**：增强 `financial_currency` 识别（HKD million / HK$'000 / RMB'000 / US$ million 等）；新增 `financial_currency_unit` 与 `financial_currency_source`；输出 `listing_suffix`；确保 thousand 单位自动转为 million
+- **fix: analyzers.py 统一币种口径与临床阶段枚举**：收入增长率统一使用 `revenue_latest_hkd` vs `revenue_previous_hkd`；`latest_clinical_stage` 统一为 `approved/nda/phase_iii/phase_ii/early_stage`；低收入 biotech 禁止 valuation_label 为"很贵/明显偏贵"；新增 `biotech_valuation_framework`（pipeline_based / ps_reference / market_cap_rd）
+- **fix: core.py 避免重复扣分与 parse_success 提示**：`final_score` 输出 `score_trace`；`parse_success=False` 时 `analysis_mode="market_only"` 并提示"仅热度参考"；`_calculate_risk_penalty` 检查 quality reasons 避免同一风险重复扣分
+- **feat: 新增 8 个回归测试**：`test_peer_fallback_when_only_one_hk_peer`、`test_biotech_b_suffix_forces_special_valuation`、`test_w_suffix_not_biotech_keyword`、`test_low_revenue_biotech_ps_not_hard_penalty`、`test_currency_growth_uses_same_fx_basis`、`test_score_trace_contains_all_adjustments`、`test_no_prospectus_market_only_mode`、`test_no_double_count_peer_overvaluation_penalty`
 
 ### 0.4.0-alpha — 2026-05-07
 - **refactor: 进阶框架拆分为交易信号拆解**：`AdvancedIPOFrameworkAnalyzer` 重命名为 `SignalComponentAnalyzer`，不再输出独立 100 分主指标；新增 `signal_breakdown` 字段供 UI 展示（资金热度/筹码弹性/基石质量/估值解释/主题催化/港股通路径/数据置信度）

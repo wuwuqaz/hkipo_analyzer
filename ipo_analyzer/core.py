@@ -197,6 +197,7 @@ def _calculate_risk_penalty(prospectus_info):
     - 财务数据异常且无法解释
 
     注意：基石红旗已在 ScoringSystem.calculate 中处理，本函数不再重复扣分。
+    为避免重复扣分，已出现在 stock_quality reasons 中的同类风险不再扣 risk_penalty。
     """
     penalty_breakdown = []
     total_penalty = 0
@@ -204,81 +205,99 @@ def _calculate_risk_penalty(prospectus_info):
     risk_result = prospectus_info.get('risk_factors', {})
     customer_result = prospectus_info.get('customer_supplier', {})
     valuation = prospectus_info.get('valuation', {})
+    stock_quality = prospectus_info.get('stock_quality', {}) or {}
+    quality_reasons = [r.lower() for r in stock_quality.get('reasons', [])]
 
     rf = SETTINGS.risk_factor
 
+    def _already_in_quality(flag_keywords):
+        """检查 quality reasons 中是否已经提及同类风险。"""
+        for qr in quality_reasons:
+            if any(kw in qr for kw in flag_keywords):
+                return True
+        return False
+
     cash_runway = valuation.get('cash_runway_years')
     if _is_num(cash_runway) and cash_runway < 1:
-        penalty = min(5, rf.max_total_penalty - total_penalty)
-        total_penalty += penalty
-        penalty_breakdown.append({
-            'type': 'cash_runway',
-            'penalty': penalty,
-            'reason': f"现金runway仅{cash_runway:.1f}年，融资紧迫性高"
-        })
+        # 避免与 quality 中已提到的现金紧张重复扣分
+        if not _already_in_quality(['现金runway', '现金紧张', '融资紧迫']):
+            penalty = min(5, rf.max_total_penalty - total_penalty)
+            total_penalty += penalty
+            penalty_breakdown.append({
+                'type': 'cash_runway',
+                'penalty': penalty,
+                'reason': f"现金runway仅{cash_runway:.1f}年，融资紧迫性高"
+            })
 
     risk_flags = risk_result.get('flags', [])
     for flag in risk_flags:
         flag_str = str(flag).lower()
         if '重大诉讼' in flag or 'litigation' in flag_str:
-            penalty = min(3, rf.max_total_penalty - total_penalty)
-            total_penalty += penalty
-            penalty_breakdown.append({
-                'type': 'lawsuit',
-                'penalty': penalty,
-                'reason': str(flag)
-            })
+            if not _already_in_quality(['诉讼', 'litigation']):
+                penalty = min(3, rf.max_total_penalty - total_penalty)
+                total_penalty += penalty
+                penalty_breakdown.append({
+                    'type': 'lawsuit',
+                    'penalty': penalty,
+                    'reason': str(flag)
+                })
         elif '持续经营' in flag or 'going concern' in flag_str:
-            penalty = min(5, rf.max_total_penalty - total_penalty)
-            total_penalty += penalty
-            penalty_breakdown.append({
-                'type': 'going_concern',
-                'penalty': penalty,
-                'reason': str(flag)
-            })
+            if not _already_in_quality(['持续经营', 'going concern']):
+                penalty = min(5, rf.max_total_penalty - total_penalty)
+                total_penalty += penalty
+                penalty_breakdown.append({
+                    'type': 'going_concern',
+                    'penalty': penalty,
+                    'reason': str(flag)
+                })
         elif '审计保留' in flag or 'audit qualification' in flag_str:
-            penalty = min(5, rf.max_total_penalty - total_penalty)
-            total_penalty += penalty
-            penalty_breakdown.append({
-                'type': 'audit_qualification',
-                'penalty': penalty,
-                'reason': str(flag)
-            })
+            if not _already_in_quality(['审计保留', 'audit qualification']):
+                penalty = min(5, rf.max_total_penalty - total_penalty)
+                total_penalty += penalty
+                penalty_breakdown.append({
+                    'type': 'audit_qualification',
+                    'penalty': penalty,
+                    'reason': str(flag)
+                })
         elif '临床失败' in flag or 'clinical failure' in flag_str or '监管失败' in flag:
-            penalty = min(5, rf.max_total_penalty - total_penalty)
-            total_penalty += penalty
-            penalty_breakdown.append({
-                'type': 'clinical_regulatory_failure',
-                'penalty': penalty,
-                'reason': str(flag)
-            })
+            if not _already_in_quality(['临床失败', 'clinical failure', '监管失败']):
+                penalty = min(5, rf.max_total_penalty - total_penalty)
+                total_penalty += penalty
+                penalty_breakdown.append({
+                    'type': 'clinical_regulatory_failure',
+                    'penalty': penalty,
+                    'reason': str(flag)
+                })
         elif '财务数据异常' in flag or 'financial irregularity' in flag_str:
-            penalty = min(3, rf.max_total_penalty - total_penalty)
-            total_penalty += penalty
-            penalty_breakdown.append({
-                'type': 'financial_irregularity',
-                'penalty': penalty,
-                'reason': str(flag)
-            })
+            if not _already_in_quality(['财务数据异常', 'financial irregularity']):
+                penalty = min(3, rf.max_total_penalty - total_penalty)
+                total_penalty += penalty
+                penalty_breakdown.append({
+                    'type': 'financial_irregularity',
+                    'penalty': penalty,
+                    'reason': str(flag)
+                })
 
     largest_customer_pct = customer_result.get('largest_customer_revenue_pct') or customer_result.get('largest_customer_pct')
     top5_customer_pct = customer_result.get('top5_customer_revenue_pct') or customer_result.get('top5_customer_pct')
     if _is_num(largest_customer_pct) and largest_customer_pct >= 50:
-        penalty = min(3, rf.max_total_penalty - total_penalty)
-        total_penalty += penalty
-        penalty_breakdown.append({
-            'type': 'customer_concentration',
-            'penalty': penalty,
-            'reason': f"最大客户占比{largest_customer_pct:.0f}%，客户集中度极高"
-        })
+        if not _already_in_quality(['客户集中', 'customer concentration']):
+            penalty = min(3, rf.max_total_penalty - total_penalty)
+            total_penalty += penalty
+            penalty_breakdown.append({
+                'type': 'customer_concentration',
+                'penalty': penalty,
+                'reason': f"最大客户占比{largest_customer_pct:.0f}%，客户集中度极高"
+            })
     elif _is_num(top5_customer_pct) and top5_customer_pct >= 80:
-        penalty = min(3, rf.max_total_penalty - total_penalty)
-        total_penalty += penalty
-        penalty_breakdown.append({
-            'type': 'customer_concentration',
-            'penalty': penalty,
-            'reason': f"前五大客户占比{top5_customer_pct:.0f}%，客户集中度极高"
-        })
+        if not _already_in_quality(['客户集中', 'customer concentration']):
+            penalty = min(3, rf.max_total_penalty - total_penalty)
+            total_penalty += penalty
+            penalty_breakdown.append({
+                'type': 'customer_concentration',
+                'penalty': penalty,
+                'reason': f"前五大客户占比{top5_customer_pct:.0f}%，客户集中度极高"
+            })
 
     total_penalty = min(total_penalty, rf.max_total_penalty)
     
@@ -336,6 +355,14 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
 
     final_score = max(0, min(100, scoring['score'] - total_risk_penalty))
 
+    # parse_success=False 时，明确提示仅热度参考
+    parse_success = prospectus_info.get('parse_success', False)
+    analysis_mode = 'full'
+    if not parse_success:
+        analysis_mode = 'market_only'
+        if "仅热度参考" not in str(scoring.get('reasons', [])):
+            scoring.setdefault('reasons', []).append("招股书解析失败，评分仅热度参考")
+
     ipo_data['score'] = final_score
     ipo_data['subscription_score'] = scoring.get('subscription_score', 0)
     ipo_data['fundamental_score'] = scoring.get('fundamental_score', stock_quality.get('score', 0))
@@ -352,7 +379,9 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
     # 权重配置信息
     ipo_data['weight_profile'] = scoring.get('weight_profile')
     ipo_data['debug_info'] = scoring.get('debug_info')
+    ipo_data['score_trace'] = scoring.get('score_trace')
     ipo_data['penalty_reason'] = scoring.get('penalty_reason')
+    ipo_data['analysis_mode'] = analysis_mode
     # 兼容旧字段（deprecated）
     ipo_data['advanced_framework_score'] = signal_result.get('score', 0)
     ipo_data['advanced_score_adjustment'] = 0  # 已废弃，固定为0
@@ -806,6 +835,23 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
         'hk_code': resolved_stock_code,
     }
     
+    # 从历史库加载已有的上市后跟踪数据
+    history_store = HistoryStore(output_dir)
+    existing_records = history_store.load()
+    for record in existing_records:
+        if record.get('hk_code') == resolved_stock_code:
+            # 加载已保存的 actual_over_sub_ratio
+            if 'actual_over_sub_ratio' in record:
+                ipo_data['actual_over_sub_ratio'] = record['actual_over_sub_ratio']
+            # 加载 post_listing 数据
+            if 'post_listing' in record:
+                ipo_data['post_listing'] = record['post_listing']
+                # 如果 post_listing 中有 public_subscription_level 但 actual_over_sub_ratio 为空，填充它
+                psl = record['post_listing'].get('public_subscription_level')
+                if psl and 'actual_over_sub_ratio' not in ipo_data:
+                    ipo_data['actual_over_sub_ratio'] = psl
+            break
+    
     # 处理历史热度数据
     heat_data_source = 'missing'
     if historical_market_data:
@@ -856,9 +902,15 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
             else:
                 ipo_data['market_heat'] = "冷清"
     else:
-        ipo_data['over_sub_ratio'] = None
-        ipo_data['over_sub_ratio_source'] = 'missing'
-        messages.append("未提供历史孖展/超购数据，本次按招股书阶段权重评分")
+        existing_actual_over = ipo_data.get('actual_over_sub_ratio')
+        if existing_actual_over is not None:
+            ipo_data['over_sub_ratio'] = existing_actual_over
+            ipo_data['over_sub_ratio_source'] = 'post_listing_actual'
+            messages.append("使用上市后跟踪数据中的真实公配倍数")
+        else:
+            ipo_data['over_sub_ratio'] = None
+            ipo_data['over_sub_ratio_source'] = 'missing'
+            messages.append("未提供历史孖展/超购数据，本次按招股书阶段权重评分")
     
     # 运行评分管线
     prospectus_text = prospectus_info.get('_extracted_text', '') or ""

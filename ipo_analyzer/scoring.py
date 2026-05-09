@@ -53,7 +53,7 @@ class ScoringSystem:
         forecast_over_sub_ratio = ipo.get('forecast_over_sub_ratio')
         market_heat = ipo.get('market_heat', '')
 
-        has_heat = _is_num(over_sub_ratio) and over_sub_ratio_source in ("actual", "forecast", "estimated", "historical_actual", "historical_forecast")
+        has_heat = _is_num(over_sub_ratio) and over_sub_ratio_source in ("actual", "forecast", "estimated", "historical_actual", "historical_forecast", "post_listing_actual")
         has_market = _is_num(forecast_over_sub_ratio) or market_heat in ("温和", "热门", "极热")
 
         if has_heat or has_market:
@@ -92,20 +92,44 @@ class ScoringSystem:
         quant_count = peer_comparison.get('quantitative_peer_count')
         val_label = valuation.get('valuation_label', '')
         rel_val_label = valuation.get('relative_valuation_label', '')
+        revenue_too_small_for_ps = valuation.get('revenue_too_small_for_ps', False)
+        revenue_quality = valuation.get('revenue_quality', 'standard')
+        is_license_driven = revenue_quality == 'license_upfront_driven'
+
+        # 判断 valuation_framework 是否已经包含相对估值（避免重复扣分）
+        valuation_framework_type = valuation.get('valuation_framework_type', '')
+        has_relative_valuation_in_framework = bool(rel_val_label and rel_val_label != '缺失')
 
         insufficient_peer_sample = bool(peer_comparison.get('peer_sample_warning')) or '样本不足' in str(peer_valuation_pos)
         if _is_num(quant_count) and quant_count < 2:
             insufficient_peer_sample = True
 
         peer_adj = 0
-        is_clearly_overvalued = (
-            ('明显偏贵' in str(peer_valuation_pos)) or
-            ('PS辅助(明显偏贵)' in str(peer_valuation_pos)) or
-            (_is_num(relative_ps_premium) and float(relative_ps_premium) > 100)
-        )
-        is_somewhat_overvalued = (
-            _is_num(relative_ps_premium) and float(relative_ps_premium) > 50
-        )
+        # 只有 quant_count >= 2 且 premium > 100% 时才允许 severe penalty
+        is_clearly_overvalued = False
+        is_somewhat_overvalued = False
+        if _is_num(quant_count) and quant_count >= 2:
+            is_clearly_overvalued = (
+                ('明显偏贵' in str(peer_valuation_pos)) or
+                ('PS辅助(明显偏贵)' in str(peer_valuation_pos)) or
+                (_is_num(relative_ps_premium) and float(relative_ps_premium) > 100)
+            )
+            is_somewhat_overvalued = (
+                _is_num(relative_ps_premium) and float(relative_ps_premium) > 50
+            )
+
+        # 对 low_revenue_biotech 且 revenue_too_small_for_ps=True，PS 只提示不硬扣
+        if revenue_too_small_for_ps and (is_clearly_overvalued or is_somewhat_overvalued):
+            reasons.append("低收入biotech PS失真，同行溢价仅作提示，不硬扣分")
+            is_clearly_overvalued = False
+            is_somewhat_overvalued = False
+
+        # 对 license_upfront_driven 的 biotech，不用 PS 溢价直接扣分
+        if is_license_driven and (is_clearly_overvalued or is_somewhat_overvalued):
+            reasons.append("收入以授权/里程碑为主，PS溢价不直接扣分")
+            is_clearly_overvalued = False
+            is_somewhat_overvalued = False
+
         if is_clearly_overvalued:
             peer_adj = -5
             reasons.append("同行估值明显偏贵：公司PS显著高于同行中位数")
@@ -131,26 +155,29 @@ class ScoringSystem:
                 reasons.append("同行对比偏弱: 相对同行估值偏高(-5分)")
 
         val_penalty = 0
-        revenue_quality = valuation.get('revenue_quality', 'standard')
-        is_license_driven = revenue_quality == 'license_upfront_driven'
 
         if isinstance(valuation, dict):
-            if val_label in ('很贵',):
-                if is_license_driven:
-                    val_penalty = -1
-                    reasons.append("收入以授权/里程碑为主，绝对估值标签仅作提示")
-                elif rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
-                    val_penalty = -2
-                else:
-                    val_penalty = -5
-            elif val_label in ('偏贵', '明显偏贵'):
-                if is_license_driven:
-                    val_penalty = 0
-                    reasons.append("收入以授权/里程碑为主，相对估值标签不直接扣分")
-                elif rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
-                    val_penalty = -1
-                else:
-                    val_penalty = -3
+            # valuation_framework 已包含 relative valuation 时，不重复扣同一类 PS/同行偏贵
+            if has_relative_valuation_in_framework and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
+                # 相对估值已合理，不再因绝对估值偏贵而重扣
+                pass
+            else:
+                if val_label in ('很贵',):
+                    if is_license_driven:
+                        val_penalty = -1
+                        reasons.append("收入以授权/里程碑为主，绝对估值标签仅作提示")
+                    elif rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
+                        val_penalty = -2
+                    else:
+                        val_penalty = -5
+                elif val_label in ('偏贵', '明显偏贵'):
+                    if is_license_driven:
+                        val_penalty = 0
+                        reasons.append("收入以授权/里程碑为主，相对估值标签不直接扣分")
+                    elif rel_val_label and rel_val_label in ('合理', '相对低估', '偏贵但可解释'):
+                        val_penalty = -1
+                    else:
+                        val_penalty = -3
             if scarcity >= 7 and val_label in ('很贵', '偏贵', '明显偏贵'):
                 val_penalty += 2
                 reasons.append(f"稀缺赛道高估值容忍(+2)")
@@ -183,6 +210,7 @@ class ScoringSystem:
                 'estimated': '估算',
                 'historical_actual': '历史实际',
                 'historical_forecast': '历史预测',
+                'post_listing_actual': '上市后',
             }.get(ipo.get('over_sub_ratio_source'), '可用')
             mh = SETTINGS.market_heat
             if over_sub >= mh.extreme:
@@ -439,6 +467,23 @@ class ScoringSystem:
 
         final_score_after_cap = score
 
+        # 完整的 score_trace，解释最终分数从哪里来
+        score_trace = {
+            'raw_weighted_score': round(raw_final, 2),
+            'peer_adj': peer_adj,
+            'val_penalty': val_penalty,
+            'risk_penalty_placeholder': 0,  # risk_penalty 在 core.py 中单独计算并扣除
+            'cap_reason': cap_reason,
+            'final_score_before_cap': final_score_before_cap,
+            'final_score_after_cap': final_score_after_cap,
+            'weight_profile': weight_profile,
+            'trade_score': trade_score,
+            'fundamental_score': fundamental_score,
+            'valuation_score': valuation_score,
+            'theme_score': theme_score,
+            'data_quality_score': data_quality_score,
+        }
+
         return {
             'score': min(100, max(0, score)),
             'subscription_score': subscription_score,
@@ -457,6 +502,7 @@ class ScoringSystem:
                 f"({weight_profile['reason']})"
             ),
             'penalty_reason': penalty_reason,
+            'score_trace': score_trace,
             'debug_info': {
                 'over_sub_ratio': over_sub,
                 'over_sub_ratio_source': ipo.get('over_sub_ratio_source'),

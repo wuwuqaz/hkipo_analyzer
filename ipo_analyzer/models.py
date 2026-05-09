@@ -311,6 +311,7 @@ class PeerComparisonResult:
     company_market_cap_vs_peer_pct: Optional[float] = None
     quantitative_peers: list[dict[str, Any]] = field(default_factory=list)
     qualitative_peers: list[dict[str, Any]] = field(default_factory=list)
+    quantitative_basis: str = "none"
     quantitative_peer_count: int = 0
     qualitative_peer_count: int = 0
     peer_sample_warning: Optional[str] = None
@@ -437,6 +438,7 @@ class ProspectusInfo:
     listing_date: Optional[str] = None
     results_date: Optional[str] = None
     sector: str = "unknown"
+    listing_suffix: Optional[str] = None
 
     # --- 财务数据 ---
     revenue: Optional[float] = None
@@ -458,6 +460,8 @@ class ProspectusInfo:
     adjusted_profit_latest_RMB: Optional[float] = None
     pro_forma_NTA_per_share_HKD: Optional[float] = None
     financial_currency: str = "RMB"
+    financial_currency_unit: str = "unknown"
+    financial_currency_source: Optional[str] = None
     financial_extract_confidence: Optional[str] = None
     financial_data_quality_flags: list[str] = field(default_factory=list)
     financial_table: Optional[dict[str, Any]] = None
@@ -575,7 +579,9 @@ class IPOData:
     data_confidence_gate_warning: Optional[str] = None
     risk_penalty_breakdown: list[dict[str, Any]] = field(default_factory=list)
     debug_info: Optional[dict[str, Any]] = None
+    score_trace: Optional[dict[str, Any]] = None
     penalty_reason: Optional[str] = None
+    analysis_mode: str = "full"
     _reanalysis: dict[str, Any] = field(default_factory=dict)
     post_listing: dict[str, Any] = field(default_factory=dict)
 

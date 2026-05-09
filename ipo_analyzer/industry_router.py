@@ -15,7 +15,7 @@ from .settings import SETTINGS
 # ---------------------------------------------------------------------------
 
 _BIOTECH_KEYWORDS = [
-    "18A", "chapter 18a", '-b ', '-w ', "biotech", "innovative drug",
+    "18A", "chapter 18a", '-b ', "biotech", "innovative drug",
     "clinical-stage", "drug candidate", "nda", "ind",
     "phase i", "phase ii", "phase iii", "phase 1", "phase 2", "phase 3",
     "parp inhibitor", "apatinib", "senaparib",
@@ -101,8 +101,36 @@ def _text_hits(text: str, keywords: list[str]) -> int:
     return sum(1 for kw in keywords if kw.lower() in lower)
 
 
+def _has_b_suffix_in_names(prospectus_info: dict) -> bool:
+    """从公司名称及别名中识别 -B 后缀。"""
+    names_to_check = []
+    name = prospectus_info.get("extracted_company_name", "")
+    if name:
+        names_to_check.append(str(name))
+    eng_name = prospectus_info.get("extracted_english_name", "")
+    if eng_name:
+        names_to_check.append(str(eng_name))
+    for alias in prospectus_info.get("company_name_aliases", []):
+        if isinstance(alias, str):
+            names_to_check.append(alias)
+    for n in names_to_check:
+        lower = n.lower()
+        if "-b" in lower or "－b" in lower or "－ｂ" in lower or "－Ｂ" in lower:
+            return True
+    return False
+
+
 def _is_biotech(prospectus_info: dict, text: str) -> bool:
     """判定是否为 biotech 公司。"""
+    # listing_suffix == "B" 强制认定为 biotech
+    listing_suffix = prospectus_info.get("listing_suffix", "")
+    if listing_suffix == "B":
+        return True
+
+    # 从名称别名中识别 -B
+    if _has_b_suffix_in_names(prospectus_info):
+        return True
+
     sector = prospectus_info.get("sector", "")
     if sector != "healthcare":
         return False
@@ -170,6 +198,16 @@ def classify_company(prospectus_info: dict, text: str = "") -> CompanyProfile:
     # 文本回退：若未传入 text，尝试从 prospectus_info 获取
     if not text:
         text = str(prospectus_info.get('_extracted_text', '') or prospectus_info.get('prospectus_text', ''))
+
+    # listing_suffix 处理："B" 强制 healthcare + biotech；"W" 不作为 biotech 依据
+    listing_suffix = prospectus_info.get("listing_suffix", "")
+    if not listing_suffix:
+        # 从名称中推断 listing_suffix
+        if _has_b_suffix_in_names(prospectus_info):
+            listing_suffix = "B"
+        # 未来可扩展 W/P 的推断
+    if listing_suffix == "B":
+        sector = "healthcare"
 
     profile = CompanyProfile(
         sector=sector,
