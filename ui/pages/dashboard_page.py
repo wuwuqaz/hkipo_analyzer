@@ -56,16 +56,29 @@ class DashboardPage:
 
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown('<div class="section-title">📋 选择查看详情</div>', unsafe_allow_html=True)
-        codes = [f"{r['股票代码']} - {r['公司名称']} ({r['总评分']})" for r in rows]
-        selected = st.selectbox("选择IPO", [""] + codes, format_func=lambda x: "请选择..." if x == "" else x, label_visibility="collapsed")
-        st.markdown('</div>', unsafe_allow_html=True)
 
-        if selected and selected != "":
-            stock_code = selected.split(" - ", 1)[0].strip()
-            for ipo in filtered:
-                if ipo.get("hk_code") == stock_code:
-                    self.detail_view.render(ipo)
-                    break
+        if not rows:
+            st.info("没有可查看详情的IPO")
+        else:
+            codes = [f"{r['股票代码']} - {r['公司名称']} (打新 {r['打新交易分']})" for r in rows]
+
+            selected = st.radio(
+                "选择IPO查看详情",
+                ["（不选择）"] + codes,
+                index=0,
+                format_func=lambda x: x if x != "（不选择）" else "请选择一只IPO...",
+                label_visibility="collapsed",
+                horizontal=True
+            )
+
+            if selected and selected != "（不选择）":
+                stock_code = selected.split(" - ", 1)[0].strip()
+                for ipo in filtered:
+                    if ipo.get("hk_code") == stock_code:
+                        self.detail_view.render(ipo)
+                        break
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
     def _render_hero(self) -> None:
         self.html.hero_section(

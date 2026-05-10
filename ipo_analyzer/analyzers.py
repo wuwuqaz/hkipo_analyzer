@@ -31,6 +31,14 @@ class ValuationAnalyzer:
             'revenue_hkd_million': None,
             'revenue_previous_hkd_million': None,
             'market_cap_hkd_million': None,
+            'valuation_price_basis': prospectus_info.get('valuation_price_basis', 'prospectus_price'),
+            'indicative_offer_price': prospectus_info.get('indicative_offer_price'),
+            'final_offer_price': prospectus_info.get('final_offer_price'),
+            'indicative_market_cap_hkd_million': prospectus_info.get('indicative_market_cap_hkd_million'),
+            'final_market_cap_hkd_million': prospectus_info.get('final_market_cap_hkd_million'),
+            'final_ps_ratio': prospectus_info.get('final_ps_ratio'),
+            'final_total_fund': prospectus_info.get('final_total_fund'),
+            'final_public_offer': prospectus_info.get('final_public_offer'),
             'market_cap_to_rd_ratio': None,
             'biotech_valuation_label': None,
             'biotech_valuation_reasons': [],
@@ -116,6 +124,8 @@ class ValuationAnalyzer:
                 result['pb_ratio'] = round(offer_price / nta_per_share, 2)
             if _is_num(market_cap_m) and _is_num(revenue) and revenue > 0:
                 result['ps_ratio'] = round(market_cap_m / revenue, 2)
+                if result.get('valuation_price_basis') == 'final_price':
+                    result['final_ps_ratio'] = result['ps_ratio']
 
             # 研发费用倍数（对生物科技重要）
             if _is_num(market_cap_m) and _is_num(rd_expense) and rd_expense > 0:
@@ -347,6 +357,12 @@ class ValuationAnalyzer:
             logger.warning("%s: %s", type(self).__name__, e)
 
         # 合并旧 valuation 中因文本缺失而无法重新计算的字段
+        cashflow = prospectus_info.get('cashflow') or {}
+        if isinstance(cashflow, dict) and _is_num(cashflow.get('cash_runway_years')):
+            result['cash_runway_years'] = cashflow.get('cash_runway_years')
+            runway_reason = f"现金runway {cashflow.get('cash_runway_years'):.1f}年"
+            if runway_reason not in result.get('valuation_reasons', []):
+                result.setdefault('valuation_reasons', []).append(runway_reason)
         old_valuation = prospectus_info.get('valuation') or {}
         if isinstance(old_valuation, dict):
             for key in ('cash_runway_years', 'revenue_quality', 'latest_clinical_stage',
@@ -524,7 +540,7 @@ class BusinessBreakdownAnalyzer:
         name_without_footnote = re.sub(r'\(\d+\)$', '', clean_stripped).strip()
         if not name_without_footnote:
             return False
-        if any(c.isdigit() for c in name_without_footnote):
+        if re.search(r'\d{2,}', name_without_footnote):
             return False
         if not re.match(r'^[A-Z]', name_without_footnote):
             return False
@@ -909,6 +925,13 @@ class GeographicExpansionAnalyzer:
         lines = text.split('\n')
         result = {'china': {}, 'overseas': {}}
 
+        year_matches = re.findall(r'\b(20\d{2})\b', text)
+        geo_years = sorted({int(y) for y in year_matches if 2015 <= int(y) <= 2030})
+        if len(geo_years) < 2:
+            from datetime import date
+            this_year = date.today().year
+            geo_years = [this_year - 2, this_year - 1, this_year]
+
         for i, line in enumerate(lines):
             ll = line.lower().strip()
             if 'subtotal' in ll or 'total' in ll:
@@ -941,12 +964,20 @@ class GeographicExpansionAnalyzer:
             if len(pcts) >= 2 and len(amounts) >= 2:
                 if key in result and result[key]:
                     continue
-                result[key] = {2023 + yi: pcts[yi] for yi in range(min(len(pcts), 3))}
+                n_pcts = min(len(pcts), len(geo_years), 3)
+                used_years = geo_years[-n_pcts:] if len(geo_years) >= n_pcts else geo_years
+                result[key] = {used_years[yi]: pcts[yi] for yi in range(n_pcts)}
 
         return result
 
 
 class CustomerSupplierAnalyzer:
+    _NUM_WORDS = {
+        'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+        'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+        'all': None,
+    }
+
     @staticmethod
     def _latest_pct_after(text, phrase_pattern, window=900, stop_patterns=None):
         """Extract the latest track-record percentage after a customer/supplier phrase."""
@@ -974,6 +1005,143 @@ class CustomerSupplierAnalyzer:
         except ValueError:
             return None
 
+    @classmethod
+    def _num_token(cls, token, total=None):
+        if token is None:
+            return None
+        raw = str(token).strip().lower()
+        if raw.isdigit():
+            return int(raw)
+        if raw == 'all' and total is not None:
+            return total
+        return cls._NUM_WORDS.get(raw)
+
+    @staticmethod
+    def _latest_pct_near(text, phrase_pattern, window=900, stop_patterns=None):
+        matches = list(re.finditer(phrase_pattern, text, re.IGNORECASE))
+        if not matches:
+            return None
+        segment = text[matches[-1].start():matches[-1].end() + window]
+        for stop_pattern in stop_patterns or []:
+            stop = re.search(stop_pattern, segment[matches[-1].end() - matches[-1].start():], re.IGNORECASE)
+            if stop:
+                segment = segment[:matches[-1].end() - matches[-1].start() + stop.start()]
+                break
+        pcts = re.findall(r'(\d+(?:\.\d+)?)\s*%', segment)
+        if pcts:
+            try:
+                return float(pcts[-1])
+            except ValueError:
+                return None
+        year_pct = []
+        for m in re.finditer(r'(20\d{2})[^%]{0,120}?(\d+(?:\.\d+)?)\s*%', segment, re.IGNORECASE):
+            try:
+                year_pct.append((int(m.group(1)), float(m.group(2))))
+            except ValueError:
+                continue
+        if year_pct:
+            return sorted(year_pct, key=lambda item: item[0])[-1][1]
+        return None
+
+    def _extract_customer_quality(self, text):
+        lower = text.lower()
+        result = {
+            'customer_retention_rate_pct': None,
+            'net_dollar_retention_rate_pct': None,
+            'top_global_service_robotics_customers_count': None,
+            'top_global_service_robotics_customers_total': None,
+            'top_global_commercial_service_robotics_customers_count': None,
+            'top_global_commercial_service_robotics_customers_total': None,
+            'head_customer_supply_chain': None,
+            'customer_quality_score': 0,
+            'customer_quality_label': '缺失',
+            'customer_quality_reasons': [],
+            'customer_validation_summary': '',
+        }
+
+        top_service = re.search(
+            r'\b(7|seven)\s+(?:of|out\s+of)\s+(?:the\s+)?(?:top\s+)?(10|ten)\s+global\s+service\s+robot(?:ics)?\s+compan',
+            lower,
+            re.IGNORECASE,
+        )
+        if not top_service:
+            top_service = re.search(
+                r'\b(7|seven)\s+(?:of|out\s+of)\s+(?:the\s+)?(?:world|global)[^.\n]{0,80}?service\s+robot(?:ics)?\s+compan',
+                lower,
+                re.IGNORECASE,
+            )
+        if top_service:
+            count = self._num_token(top_service.group(1), 10)
+            total = self._num_token(top_service.group(2), 10) if top_service.lastindex and top_service.lastindex >= 2 else 10
+            result['top_global_service_robotics_customers_count'] = count
+            result['top_global_service_robotics_customers_total'] = total or 10
+
+        top_commercial = re.search(
+            r'\b(all|5|five)\s+(?:of\s+)?(?:the\s+)?(?:top\s+)?(5|five)\s+global\s+commercial\s+service\s+robot(?:ics)?\s+compan',
+            lower,
+            re.IGNORECASE,
+        )
+        if top_commercial:
+            total = self._num_token(top_commercial.group(2), 5) or 5
+            count = self._num_token(top_commercial.group(1), total)
+            result['top_global_commercial_service_robotics_customers_count'] = count
+            result['top_global_commercial_service_robotics_customers_total'] = total
+
+        result['customer_retention_rate_pct'] = self._latest_pct_near(
+            text,
+            r'customer\s+retention\s+rate|客户留存率',
+            stop_patterns=[r'net\s+dollar\s+retention|net\s+revenue\s+retention|\bNDR\b|净美元留存|净收入留存'],
+        )
+        result['net_dollar_retention_rate_pct'] = self._latest_pct_near(
+            text,
+            r'net\s+dollar\s+retention\s+rate|net\s+revenue\s+retention|\bNDR\b|净美元留存率|净收入留存率',
+        )
+
+        has_head_customer = any([
+            result['top_global_service_robotics_customers_count'],
+            result['top_global_commercial_service_robotics_customers_count'],
+            'supply chain' in lower and 'customer' in lower,
+        ])
+        result['head_customer_supply_chain'] = bool(has_head_customer) if has_head_customer else None
+
+        score = 0
+        reasons = []
+        service_count = result['top_global_service_robotics_customers_count']
+        service_total = result['top_global_service_robotics_customers_total']
+        if service_count and service_total:
+            score += 25 if service_count / service_total >= 0.6 else 15
+            reasons.append(f"进入全球头部服务机器人客户供应链({service_count}/{service_total})")
+        commercial_count = result['top_global_commercial_service_robotics_customers_count']
+        commercial_total = result['top_global_commercial_service_robotics_customers_total']
+        if commercial_count and commercial_total:
+            score += 20 if commercial_count >= commercial_total else 12
+            reasons.append(f"覆盖全球头部商用服务机器人客户({commercial_count}/{commercial_total})")
+        retention = result['customer_retention_rate_pct']
+        if _is_num(retention):
+            if retention >= 95:
+                score += 20
+            elif retention >= 85:
+                score += 12
+            reasons.append(f"客户留存率{retention:.0f}%")
+        ndr = result['net_dollar_retention_rate_pct']
+        if _is_num(ndr):
+            if ndr >= 120:
+                score += 20
+            elif ndr >= 100:
+                score += 12
+            reasons.append(f"净美元留存率{ndr:.0f}%")
+
+        result['customer_quality_score'] = min(100, score)
+        if score >= 70:
+            result['customer_quality_label'] = '强'
+        elif score >= 45:
+            result['customer_quality_label'] = '中'
+        elif score > 0:
+            result['customer_quality_label'] = '弱'
+        result['customer_quality_reasons'] = reasons
+        result['customer_validation_summary'] = '；'.join(reasons[:4])
+        return result
+
     def analyze(self, prospectus_info, text='', ipo_data=None):
         # 防御：某些调用者把 ipo_data 传到了 text 位置
         if isinstance(text, dict):
@@ -984,6 +1152,17 @@ class CustomerSupplierAnalyzer:
             'largest_customer_revenue_pct': None,
             'top5_supplier_purchase_pct': None,
             'largest_supplier_purchase_pct': None,
+            'customer_retention_rate_pct': None,
+            'net_dollar_retention_rate_pct': None,
+            'top_global_service_robotics_customers_count': None,
+            'top_global_service_robotics_customers_total': None,
+            'top_global_commercial_service_robotics_customers_count': None,
+            'top_global_commercial_service_robotics_customers_total': None,
+            'head_customer_supply_chain': None,
+            'customer_quality_score': 0,
+            'customer_quality_label': '缺失',
+            'customer_quality_reasons': [],
+            'customer_validation_summary': '',
             'concentration_risk_label': '缺失',
             'concentration_score_penalty': 0,
             'confidence': 'missing',
@@ -1058,6 +1237,10 @@ class CustomerSupplierAnalyzer:
 
             if top5_cust is not None:
                 result['confidence'] = 'regex_context'
+            quality = self._extract_customer_quality(text)
+            result.update(quality)
+            if quality.get('customer_quality_score', 0) > 0:
+                result['confidence'] = 'regex_context'
         except Exception as e:
             logger.warning("%s: %s", type(self).__name__, e)
         return result
@@ -1076,6 +1259,12 @@ class WorkingCapitalCashFlowAnalyzer:
             return None
 
         row = row_match.group(0)
+        row = re.split(
+            r'\n\s*\n|\n\s*(?:Financial assets|Financial liabilities|Cash and cash equivalents|Net cash generated from investing|Net cash used in investing)\b',
+            row,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
         nums = _extract_table_nums(row, 2, min_val=500)
         if not nums:
             return None
@@ -1083,6 +1272,41 @@ class WorkingCapitalCashFlowAnalyzer:
         latest = nums[-1]
         unit_context = text[max(0, row_match.start() - 500):row_match.start()].lower()
         if "rmb'000" in unit_context or "rmb’000" in unit_context or "in thousands" in unit_context:
+            latest = latest / 1000
+        return round(latest, 3)
+
+    @staticmethod
+    def _extract_latest_row_value(text, label_pattern, min_val=0):
+        lines = text.split('\n')
+        for idx, line in enumerate(lines):
+            if not re.match(rf'\s*{label_pattern}\b', line, re.IGNORECASE):
+                continue
+            window = ' '.join(l.strip() for l in lines[idx:min(idx + 6, len(lines))])
+            nums = _extract_table_nums(window, 3, min_val=min_val)
+            if len(nums) < 2:
+                continue
+            latest = nums[2] if len(nums) >= 3 else nums[-1]
+            unit_context = '\n'.join(lines[max(0, idx - 8):idx]).lower()
+            if "rmb'000" in unit_context or "rmb'000" in unit_context or "in thousands" in unit_context:
+                latest = latest / 1000
+            return round(latest, 3)
+
+        match = re.search(
+            rf'\n\s*{label_pattern}(?P<row>[\s\S]{{0,260}}?)(?=\n[A-Z][A-Za-z /&(),-]{{4,}}|\n\d+\.|\Z)',
+            text,
+            re.IGNORECASE,
+        )
+        if not match:
+            return None
+        row = match.group(0)
+        nums = _extract_table_nums(row, 3, min_val=min_val)
+        if not nums:
+            nums = _extract_table_nums(row, 2, min_val=min_val)
+        if len(nums) < 2:
+            return None
+        latest = nums[2] if len(nums) >= 3 else nums[-1]
+        unit_context = text[max(0, match.start() - 700):match.start()].lower()
+        if "rmb'000" in unit_context or "rmb'000" in unit_context or "in thousands" in unit_context:
             latest = latest / 1000
         return round(latest, 3)
 
@@ -1094,9 +1318,15 @@ class WorkingCapitalCashFlowAnalyzer:
         result = {
             'operating_cash_flow': None,
             'ocf_to_net_profit': None,
+            'ocf_to_revenue': None,
+            'cash_and_cash_equivalents': None,
+            'cash_runway_years': None,
+            'post_ipo_cash_runway_years': None,
             'inventory_turnover_days_latest': None,
+            'receivables_turnover_days_latest': None,
             'receivables_growth_vs_revenue': None,
             'cash_quality_label': '缺失',
+            'financing_dependency_label': '缺失',
             'working_capital_risks': [],
             'confidence': 'missing',
         }
@@ -1111,9 +1341,28 @@ class WorkingCapitalCashFlowAnalyzer:
                 if years:
                     result['operating_cash_flow'] = ocf_table['operating_cash_flow'][years[-1]]
 
+            result['cash_and_cash_equivalents'] = self._extract_latest_row_value(
+                text,
+                r'Cash\s+and\s+cash\s+equivalents',
+                min_val=100,
+            )
+
             net_profit = prospectus_info.get('net_profit')
             if _is_num(net_profit) and net_profit > 0 and _is_num(result['operating_cash_flow']):
                 result['ocf_to_net_profit'] = round(abs(result['operating_cash_flow']) / net_profit, 2)
+            revenue = prospectus_info.get('revenue')
+            fin_currency = prospectus_info.get('financial_currency', 'RMB')
+            if fin_currency == 'RMB':
+                fx = SETTINGS.fx.rmb_to_hkd
+            elif fin_currency == 'USD':
+                fx = SETTINGS.fx.usd_to_hkd
+            else:
+                fx = 1.0
+            revenue_hkd = None
+            if _is_num(revenue) and revenue > 0:
+                revenue_hkd = revenue * fx
+            if _is_num(revenue_hkd) and revenue_hkd > 0 and _is_num(result['operating_cash_flow']):
+                result['ocf_to_revenue'] = round(result['operating_cash_flow'] / revenue_hkd, 2)
 
             inv_match = re.search(r'inventory\s+turnover\s+days\s+were\s+([\d,]+)\s*,\s*([\d,]+)\s*(?:and|&)\s*([\d,]+)', text, re.IGNORECASE)
             if inv_match:
@@ -1121,13 +1370,43 @@ class WorkingCapitalCashFlowAnalyzer:
                     result['inventory_turnover_days_latest'] = float(inv_match.group(3).replace(',', ''))
                 except ValueError:
                     pass
+            if result['inventory_turnover_days_latest'] is None:
+                inv_match = re.search(r'inventor(?:y|ies)\s+turnover\s+days[^.\n]{0,160}?([\d,]+(?:\.\d+)?)\s*(?:days)?', text, re.IGNORECASE)
+                if inv_match:
+                    try:
+                        result['inventory_turnover_days_latest'] = float(inv_match.group(1).replace(',', ''))
+                    except ValueError:
+                        pass
+
+            rec_match = re.search(r'(?:trade\s+)?receivables?\s+turnover\s+days\s+were\s+([\d,]+)\s*,\s*([\d,]+)\s*(?:and|&)\s*([\d,]+)', text, re.IGNORECASE)
+            if rec_match:
+                try:
+                    result['receivables_turnover_days_latest'] = float(rec_match.group(3).replace(',', ''))
+                except ValueError:
+                    pass
+
+            operating_cash_flow = result.get('operating_cash_flow')
+            cash_balance = result.get('cash_and_cash_equivalents')
+            if _is_num(cash_balance) and _is_num(operating_cash_flow) and operating_cash_flow < 0:
+                result['cash_runway_years'] = round(cash_balance / abs(operating_cash_flow), 1)
+                net_proceeds_hkd = prospectus_info.get('net_proceeds_hkd_million')
+                if _is_num(net_proceeds_hkd):
+                    fin_currency = prospectus_info.get('financial_currency', 'RMB')
+                    if fin_currency == 'RMB':
+                        net_proceeds_same_currency = net_proceeds_hkd / SETTINGS.fx.rmb_to_hkd
+                    elif fin_currency == 'USD':
+                        net_proceeds_same_currency = net_proceeds_hkd / SETTINGS.fx.usd_to_hkd
+                    else:
+                        net_proceeds_same_currency = net_proceeds_hkd
+                    result['post_ipo_cash_runway_years'] = round((cash_balance + net_proceeds_same_currency) / abs(operating_cash_flow), 1)
 
             risks = []
             ocf_np = result.get('ocf_to_net_profit')
-            operating_cash_flow = result.get('operating_cash_flow')
             if _is_num(operating_cash_flow) and operating_cash_flow < 0:
                 result['cash_quality_label'] = '弱'
                 risks.append('经营现金流为负')
+                if _is_num(result.get('ocf_to_revenue')):
+                    risks.append(f"经营现金流/收入{result['ocf_to_revenue']*100:.1f}%")
             elif ocf_np is not None:
                 cf = SETTINGS.cash_flow
                 if ocf_np >= cf.ocf_np_strong:
@@ -1142,8 +1421,21 @@ class WorkingCapitalCashFlowAnalyzer:
             if inv_days is not None and inv_days > SETTINGS.cash_flow.inventory_days_warning:
                 risks.append(f'存货周转天数偏高({inv_days:.0f}天)')
 
+            runway = result.get('cash_runway_years')
+            post_runway = result.get('post_ipo_cash_runway_years')
+            if _is_num(runway):
+                if runway < 1:
+                    result['financing_dependency_label'] = '高'
+                    risks.append(f'上市前现金runway约{runway:.1f}年')
+                elif runway < 2:
+                    result['financing_dependency_label'] = '中'
+                else:
+                    result['financing_dependency_label'] = '低'
+            if _is_num(post_runway):
+                risks.append(f'募资后现金runway约{post_runway:.1f}年')
+
             result['working_capital_risks'] = risks
-            if result['operating_cash_flow'] is not None or inv_days is not None:
+            if result['operating_cash_flow'] is not None or inv_days is not None or result.get('cash_and_cash_equivalents') is not None:
                 result['confidence'] = 'regex_context'
         except Exception as e:
             logger.warning("%s: %s", type(self).__name__, e)
@@ -1159,7 +1451,7 @@ class ProductionCapacityAnalyzer:
             pcts = re.findall(r'(\d+(?:\.\d+)?)\s*%', segment)
             if pcts:
                 try:
-                    return max(float(p) for p in pcts)
+                    return float(pcts[-1])
                 except ValueError:
                     return None
 
@@ -1395,15 +1687,18 @@ class RiskFactorAnalyzer:
         }
         try:
             risk_categories = {
-                'regulatory_risk': ['regulatory', 'nmpa', 'fda', 'registration', 'approval', 'clinical trial approval'],
-                'vbp_pricing_risk': ['volume-based procurement', 'centralized procurement', 'government pricing', 'price reduction', 'price cut', 'reimbursement'],
-                'rd_failure_risk': ['r&d', 'clinical trial', 'product development', 'pipeline', 'failure'],
-                'distributor_risk': ['distributor', 'distribution', 'dealer', 'sales channel'],
-                'competition_risk': ['competition', 'competitive', 'market share', 'competitor'],
+                'price_competition_risk': ['average selling price', r'\bASP\b', 'price competition', 'price pressure', 'price reduction', 'decreased by'],
+                'cash_flow_pressure_risk': ['net cash used in operating activities', 'operating cash flow', 'working capital pressure', 'cash outflow'],
+                'inventory_pressure_risk': ['inventory', 'built up inventory', 'write-down', 'obsolete', 'slow-moving'],
                 'customer_concentration_risk': ['customer concentration', 'largest customer', 'dependent on'],
-                'supplier_risk': ['supplier', 'raw material', 'supply chain', 'single source'],
-                'inventory_risk': ['inventory', 'write-down', 'obsolete', 'slow-moving'],
-                'overseas_risk': ['overseas', 'export', 'foreign', 'currency', 'exchange rate'],
+                'supplier_concentration_risk': ['supplier', 'raw material', 'supply chain', 'single source'],
+                'overseas_channel_tariff_risk': ['overseas', 'export', 'tariff', 'trade protection', 'customs', 'amazon', 'sales channels', 'logistics'],
+                'social_insurance_housing_fund_risk': ['social insurance', 'housing provident fund', 'underpaid', 'shortfall', '住房公积金', '社保'],
+                'product_liability_after_sales_risk': ['product liability', 'warranty', 'after-sales', 'product recall', 'defect', 'return'],
+                'foreign_exchange_risk': ['foreign currency risk', 'exchange rate', 'RMB weakens', 'RMB strengthens'],
+                'seasonality_risk': ['seasonality', 'seasonal', 'seasonal fluctuations', 'peak season'],
+                'fundraising_dependency_risk': ['use of proceeds', 'fund our', 'working capital', 'cash runway', 'financing needs'],
+                'competition_risk': ['competition', 'competitive', 'market share', 'competitor'],
                 'fvtpl_risk': ['fvtpl', 'fair value', 'financial assets', 'investment securities'],
             }
 
@@ -1421,7 +1716,11 @@ class RiskFactorAnalyzer:
                 for kw in keywords:
                     count = len(re.findall(kw, risk_section, re.IGNORECASE))
                     if count > 0:
-                        first_match = re.search(rf'.{{0,60}}{re.escape(kw)}.{{0,60}}', risk_section, re.IGNORECASE)
+                        is_regex_kw = any(c in kw for c in r'\.+*?[](){}|^$')
+                        if is_regex_kw:
+                            first_match = re.search(rf'.{{0,60}}{kw}.{{0,60}}', risk_section, re.IGNORECASE)
+                        else:
+                            first_match = re.search(rf'.{{0,60}}{re.escape(kw)}.{{0,60}}', risk_section, re.IGNORECASE)
                         if first_match:
                             evidence.append(first_match.group(0).strip()[:120])
                 if len(evidence) >= rt.evidence_high:
@@ -1438,7 +1737,35 @@ class RiskFactorAnalyzer:
                     'score_penalty': penalty,
                 }
 
-            result['total_penalty'] = min(rt.max_total_penalty, total_penalty)
+            cashflow = prospectus_info.get('cashflow') or {}
+            if _is_num(cashflow.get('operating_cash_flow')) and cashflow.get('operating_cash_flow') < 0:
+                cat = result['risks'].setdefault('cash_flow_pressure_risk', {
+                    'risk_level': '低', 'evidence_count': 0, 'evidence_sample': [], 'score_penalty': 0,
+                })
+                cat['risk_level'] = '中'
+                cat['score_penalty'] = max(cat.get('score_penalty', 0), 1)
+                cat['evidence_count'] = max(cat.get('evidence_count', 0), 1)
+                cat['evidence_sample'] = (cat.get('evidence_sample') or [])[:1] + [
+                    f"经营现金流为负({cashflow.get('operating_cash_flow')})"
+                ]
+
+            asp_evidence = []
+            for match in re.finditer(
+                r'(?:average\s+selling\s+price|ASP)[^.\n]{0,180}?(?:decreas|declin)[^.\n]{0,120}?(\d+(?:\.\d+)?)\s*%',
+                risk_section,
+                re.IGNORECASE,
+            ):
+                asp_evidence.append(match.group(0).strip()[:160])
+            if asp_evidence:
+                cat = result['risks'].setdefault('price_competition_risk', {
+                    'risk_level': '低', 'evidence_count': 0, 'evidence_sample': [], 'score_penalty': 0,
+                })
+                cat['risk_level'] = '中' if len(asp_evidence) < 2 else '高'
+                cat['score_penalty'] = max(cat.get('score_penalty', 0), 1 if len(asp_evidence) < 2 else 3)
+                cat['evidence_count'] = max(cat.get('evidence_count', 0), len(asp_evidence))
+                cat['evidence_sample'] = asp_evidence[:2]
+
+            result['total_penalty'] = min(rt.max_total_penalty, sum(v.get('score_penalty', 0) for v in result['risks'].values()))
             result['confidence'] = 'keyword_only'
         except Exception as e:
             logger.warning("%s: %s", type(self).__name__, e)

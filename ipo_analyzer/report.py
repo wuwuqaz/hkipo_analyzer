@@ -276,6 +276,8 @@ def export_pdf_report(results, output_file):
             sector_label = sector_map.get(prospectus_info.get('sector', 'unknown'), '未明确')
 
             offer_price = prospectus_info.get('offer_price') or prospectus_info.get('max_price') or ipo.get('max_price')
+            indicative_offer_price = prospectus_info.get('indicative_offer_price')
+            price_basis = "最终价" if prospectus_info.get('valuation_price_basis') == 'final_price' else "招股价"
             board_lot = prospectus_info.get('lot_size') or ipo.get('lot_size')
             entry_fee_hkd = prospectus_info.get('entry_fee_hkd')
             market_cap_million = prospectus_info.get('market_cap_hkd_million')
@@ -354,8 +356,9 @@ def export_pdf_report(results, output_file):
             add_section("发行信息", _C['brand'])
             add_pair("公司名称", ipo.get('company_name', '--'), "股票代码", f"{ipo.get('hk_code', '--')}.HK", _C['blue_bg'], l_bold=True)
             add_pair("所属行业", sector_label, "发行机制", mechanism, _C['blue_bg'])
-            add_pair("招股价", f"HK${offer_price:.2f}" if _is_num(offer_price) else "--", "每手股数", f"{int(board_lot)}" if board_lot else "--", _C['green_light'], l_color=_C['red'], l_bold=True)
-            add_pair("入场费", _fmt_entry_fee(entry_fee_hkd), "公开发售比例", f"{public_offer_ratio_pct:.2f}%" if public_offer_ratio_pct is not None else "--", _C['green_light'], l_color=_C['red'], l_bold=True)
+            add_pair(price_basis, f"HK${offer_price:.2f}" if _is_num(offer_price) else "--", "原招股价", f"HK${indicative_offer_price:.2f}" if _is_num(indicative_offer_price) else "--", _C['green_light'], l_color=_C['red'], l_bold=True)
+            add_pair("每手股数", f"{int(board_lot)}" if board_lot else "--", "入场费", _fmt_entry_fee(entry_fee_hkd), _C['green_light'], r_color=_C['red'], r_bold=True)
+            add_pair("公开发售比例", f"{public_offer_ratio_pct:.2f}%" if public_offer_ratio_pct is not None else "--", "估值口径", price_basis, _C['green_light'])
             add_pair("全球发售(万股)", _fmt_shares_m(global_offer_shares), "公开发售(万股)", _fmt_shares_m(hk_offer_shares), _C['yellow_bg'])
             add_pair("国际发售(万股)", _fmt_shares_m(intl_offer_shares), "发售手数(全球/公开)", f"{global_offer_lots:,.0f}/{hk_offer_lots:,.0f}" if global_offer_lots is not None and hk_offer_lots is not None else "--", _C['yellow_bg'])
             add_pair("招股日期", f"{format_iso_date(ipo.get('apply_start_date', ''))} ~ {format_iso_date(ipo.get('apply_end_date', ''))}", "预计上市", listing_date or "--", _C['amber_bg2'])
@@ -459,8 +462,8 @@ def export_pdf_report(results, output_file):
             ]))
             return tbl
 
-        avg_score = sum(item.get('score', 0) for item in results) / len(results)
-        best_item = max(results, key=lambda item: item.get('score', 0))
+        avg_score = sum(item.get('ipo_trade_score', item.get('trade_score', item.get('score', 0))) for item in results) / len(results)
+        best_item = max(results, key=lambda item: item.get('ipo_trade_score', item.get('trade_score', item.get('score', 0))))
         prospectus_count = sum(1 for item in results if item.get('prospectus_info'))
         quality_count = sum(1 for item in results if item.get('stock_quality', {}).get('score', 0) >= 45)
         def _has_effective_cornerstone_v2(item):
@@ -488,9 +491,10 @@ def export_pdf_report(results, output_file):
             ]))
             return card
 
+        best_trade_score = best_item.get('ipo_trade_score', best_item.get('trade_score', best_item.get('score', 0)))
         summary = Table([[
-            metric_card("平均总分", f"{avg_score:.0f}", _score_color(avg_score)),
-            metric_card("最高总分", f"{best_item.get('score', 0)}", _score_color(best_item.get('score', 0))),
+            metric_card("平均打新分", f"{avg_score:.0f}", _score_color(avg_score)),
+            metric_card("最高打新分", f"{best_trade_score}", _score_color(best_trade_score)),
             metric_card("招股书解析", f"{prospectus_count}", _C['teal']),
             metric_card("质地达标", f"{quality_count}", _C['blue']),
             metric_card("基石V2", f"{cornerstone_count}", _C['gold']),
@@ -510,16 +514,17 @@ def export_pdf_report(results, output_file):
             Paragraph(f"<b>{'排名'}</b>", styles["Label"]),
             Paragraph(f"<b>{'公司'}</b>", styles["Label"]),
             Paragraph(f"<b>{'代码'}</b>", styles["Label"]),
-            Paragraph(f"<b>{'总分'}</b>", styles["Label"]),
+            Paragraph(f"<b>{'打新/长期'}</b>", styles["Label"]),
             Paragraph(f"<b>{'申购判断'}</b>", styles["Label"]),
             Paragraph(f"<b>{'超购倍数'}</b>", styles["Label"]),
             Paragraph(f"<b>{'基石/质地'}</b>", styles["Label"]),
         ]]
 
         for idx, ipo in enumerate(results, 1):
-            total_score = ipo.get('score', 0)
+            total_score = ipo.get('ipo_trade_score', ipo.get('trade_score', ipo.get('score', 0)))
+            long_score = ipo.get('long_term_score', ipo.get('fundamental_score', 0))
             cornerstone_analysis = ipo.get('prospectus_info', {}).get('cornerstone_analysis', {}) or {}
-            recommendation = cornerstone_analysis.get('recommendation')
+            recommendation = ipo.get('subscription_recommendation') or cornerstone_analysis.get('recommendation')
             if not recommendation:
                 recommendation = _score_label(total_score)
             over_sub = ipo.get('actual_over_sub_ratio') or ipo.get('forecast_over_sub_ratio') or ipo.get('over_sub_ratio')
@@ -539,7 +544,7 @@ def export_pdf_report(results, output_file):
                 Paragraph(str(idx), styles["Value"]),
                 Paragraph(ipo.get('company_name', ''), styles["Value"]),
                 Paragraph(ipo.get('hk_code', ''), styles["Value"]),
-                Paragraph(f"<font color='{sc}'><b>{total_score}</b></font>", styles["Value"]),
+                Paragraph(f"<font color='{sc}'><b>{total_score}</b></font><br/><font size='7' color='{_C['slate_400']}'>长 {long_score}</font>", styles["Value"]),
                 _recommend_tag(recommendation, total_score),
                 Paragraph(over_text, styles["Value"]),
                 Paragraph(f"{cornerstone_text}<br/><font size='7' color='{_C['slate_400']}'>质地{quality_label} {quality_score}分</font>", styles["Value"]),
@@ -568,21 +573,23 @@ def export_pdf_report(results, output_file):
 
         company_name = ipo.get('company_name', 'N/A')
         hk_code = ipo.get('hk_code', 'N/A')
-        total_score = ipo.get('score', 0)
+        total_score = ipo.get('ipo_trade_score', ipo.get('trade_score', ipo.get('score', 0)))
+        long_score = ipo.get('long_term_score', ipo.get('fundamental_score', 0))
+        recommendation = ipo.get('subscription_recommendation') or _score_label(total_score)
         sc = _score_color(total_score)
 
         header_data = [
             [
                 Paragraph(f"<b>{company_name}</b><br/><font size=9 color='{_C['slate_500']}'>HKEX {hk_code}</font>", styles["IPOTitle"]),
-                Paragraph(f"<font size='32' color='{sc}'><b>{total_score}</b></font>", styles["Score"]),
+                Paragraph(f"<font size='32' color='{sc}'><b>{total_score}</b></font><br/><font size='8' color='{_C['slate_500']}'>长期 {long_score}/100</font>", styles["Score"]),
             ],
             [
                 Paragraph("", styles["Value"]),
                 _progress_bar(total_score, width=120, height=5, bar_color=sc),
             ],
             [
-                _recommend_tag(_score_label(total_score), total_score),
-                Paragraph(f"<font size=7.5 color='{_C['slate_400']}'>综合评分</font>", styles["MutedValue"]),
+                _recommend_tag(recommendation, total_score),
+                Paragraph(f"<font size=7.5 color='{_C['slate_400']}'>打新交易分</font>", styles["MutedValue"]),
             ],
         ]
         header = Table(header_data, colWidths=[340, 160])
@@ -648,7 +655,7 @@ def export_pdf_report(results, output_file):
                 ])
             final_score = ipo.get('score', 0)
             waterfall_rows.append([
-                Paragraph("<b>最终评分</b>", styles["Label"]),
+                Paragraph("<b>旧综合分</b>", styles["Label"]),
                 Paragraph("", styles["Label"]),
                 Paragraph("", styles["Label"]),
                 Paragraph(f"<font color='{_score_color(final_score)}'><b>{final_score}</b></font>", styles["Label"]),

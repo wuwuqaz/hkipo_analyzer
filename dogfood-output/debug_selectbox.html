@@ -1,0 +1,881 @@
+<!DOCTYPE html><html lang="en"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link rel="shortcut icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;📊&lt;/text&gt;&lt;/svg&gt;">
+    <link rel="preload" href="./static/media/SourceSansVF-Upright.ttf.BsWL4Kly.woff2" as="font" type="font/woff2" crossorigin="">
+
+    <title>港股IPO打新分析</title>
+
+    <!-- initialize window.prerenderReady to false and then set to true in React app when app is ready for indexing -->
+    <script>
+      window.prerenderReady = false
+    </script>
+    <script type="module" crossorigin="" src="./static/js/index.6xX1278W.js"></script>
+    <link rel="stylesheet" crossorigin="" href="./static/css/index.CIiu7Ygf.css">
+  <style media=""></style><style data-emotion="st-emotion-cache-global" data-s=""></style><style data-emotion="st-emotion-cache" data-s=""></style><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/index.FFOzOWzC.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/useBasicWidgetState.CedkNjUW.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/FormClearHelper.DTcdrasw.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/index.B4dUQfni.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/checkbox.yZOfXCeX.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/index.CFMf5_ez.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/withFullScreenWrapper.C3561XxJ.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/Toolbar.C77ar7rq.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/sprintf.D7DtBTRn.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/createDownloadLinkElement.ZaXNnPK4.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/toConsumableArray.De7I7KVR.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/possibleConstructorReturn.CqidKeei.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/createSuper.Dh9w1cs8.js"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/FileDownload.esm.CN4j9-1w.js"><link rel="stylesheet" crossorigin="" href="http://localhost:8501/static/css/index.CHEnSPGk.css"><link rel="modulepreload" as="script" crossorigin="" href="http://localhost:8501/static/js/index.64ejlaaT.js"></head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"><div class=""><div class="withScreencast" data-testid="stScreencast"><div class="stApp stAppEmbeddingId-terzc98lfoni streamlit-wide st-emotion-cache-1r4qj8v ee4bbma0" data-testid="stApp" data-test-script-state="notRunning" data-test-connection-state="CONNECTED"><div class="stAppViewContainer appview-container st-emotion-cache-1yiq2ps e4man110" data-testid="stAppViewContainer" data-layout="wide"><section class="stSidebar st-emotion-cache-1legitb e6f82ta0" data-testid="stSidebar" aria-expanded="true" style="position: relative; user-select: auto; width: 256px; height: auto; box-sizing: border-box; flex-shrink: 0;"><div data-testid="stSidebarContent" class="st-emotion-cache-1csi29a e6f82ta2"><div data-testid="stSidebarHeader" class="st-emotion-cache-10p9htt e6f82ta4"><div data-testid="stLogoSpacer" class="st-emotion-cache-11ukie e6f82ta7"></div><div data-testid="stSidebarCollapseButton" class="st-emotion-cache-qmp9ai e6f82ta8"><button kind="headerNoPadding" data-testid="stBaseButton-headerNoPadding" aria-label="" class="st-emotion-cache-1aplgmp e8vg11g15"><span color="rgba(49, 51, 63, 0.6)" class="st-emotion-cache-189uypx e1t4gh342"><span color="rgba(49, 51, 63, 0.6)" data-testid="stIconMaterial" translate="no" class="st-emotion-cache-pd6qx2 ejhh0er0">keyboard_double_arrow_left</span></span></button></div></div><div data-testid="stSidebarUserContent" class="st-emotion-cache-1r1cntt e6f82ta1"><div class="st-emotion-cache-8atqhb e4man115"><div direction="column" height="auto" class="stVerticalBlock st-emotion-cache-tn0cau e196pkbe2" data-testid="stVerticalBlock"><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stMarkdown" data-testid="stMarkdown"><div data-testid="stMarkdownContainer" class="st-emotion-cache-1fwbbrh et2rgd20"><div style="text-align: center; padding: 20px 0px 16px;">
+    <div style="font-size: 28px;">📊</div>
+    <div style="font-size: 18px; font-weight: 700; color: rgb(241, 245, 249);">港股IPO分析</div>
+    <div style="font-size: 12px; color: rgb(100, 116, 139); margin-top: 4px;">IPO Analyzer Pro</div>
+</div></div></div></div><div class="stElementContainer element-container st-emotion-cache-zh2fnc e196pkbe0" data-testid="stElementContainer" data-stale="false" width="fit-content" height="auto" overflow="visible"><div class="stRadio" data-testid="stRadio"><label data-testid="stWidgetLabel" aria-hidden="true" class="st-emotion-cache-1s2v671 e1gk92lc0"><div data-testid="stMarkdownContainer" class="st-emotion-cache-uujwi5 et2rgd20"><p>导航</p></div></label><div role="radiogroup" aria-label="导航" class="st-ae st-af st-ag st-ah st-ai st-aj st-ak st-al"><label data-baseweb="radio" class="st-am st-ae st-an st-ai st-ao st-ap st-aq st-ar st-as st-at"><div class="st-au st-av st-aw st-ax st-ay st-az st-b0 st-ae st-b1 st-b2 st-b3 st-b4 st-b5 st-b6 st-b7 st-b8 st-b9 st-ba st-bb st-bc"><div class="st-bd st-aw st-ax st-ay st-az st-be st-bb st-bc st-bf"></div></div><input name="" tabindex="0" type="radio" class="st-bg st-bh st-ao st-b4 st-aq st-b6 st-bi st-bj st-bk st-ar st-bl st-bm" value="0" checked=""><div class="st-b8 st-bn st-bo st-bp st-bq st-br st-bs st-bt st-bu st-bv st-bw"><div data-testid="stMarkdownContainer" class="st-emotion-cache-17k2yau et2rgd20"><p>🏠 首页 Dashboard</p></div></div></label><label data-baseweb="radio" class="st-am st-ae st-an st-ai st-ao st-ap st-aq st-ar st-as st-at"><div class="st-au st-bx st-aw st-ax st-ay st-az st-b0 st-ae st-b1 st-b2 st-b3 st-b4 st-b5 st-b6 st-b7 st-b8 st-b9 st-ba st-bb st-bc"><div class="st-by st-aw st-ax st-ay st-az st-bz st-bb st-bc st-c0"></div></div><input name="" tabindex="-1" type="radio" class="st-bg st-bh st-ao st-b4 st-aq st-b6 st-bi st-bj st-bk st-ar st-bl st-bm" value="1"><div class="st-b8 st-bn st-bo st-bp st-bq st-br st-bs st-bt st-bu st-bv st-bw"><div data-testid="stMarkdownContainer" class="st-emotion-cache-17k2yau et2rgd20"><p>📤 手动上传分析</p></div></div></label><label data-baseweb="radio" class="st-am st-ae st-an st-ai st-ao st-ap st-aq st-ar st-as st-at"><div class="st-au st-bx st-aw st-ax st-ay st-az st-b0 st-ae st-b1 st-b2 st-b3 st-b4 st-b5 st-b6 st-b7 st-b8 st-b9 st-ba st-bb st-bc"><div class="st-by st-aw st-ax st-ay st-az st-bz st-bb st-bc st-c0"></div></div><input name="" tabindex="-1" type="radio" class="st-bg st-bh st-ao st-b4 st-aq st-b6 st-bi st-bj st-bk st-ar st-bl st-bm" value="2"><div class="st-b8 st-bn st-bo st-bp st-bq st-br st-bs st-bt st-bu st-bv st-bw"><div data-testid="stMarkdownContainer" class="st-emotion-cache-17k2yau et2rgd20"><p>📚 历史分析</p></div></div></label><label data-baseweb="radio" class="st-am st-ae st-an st-ai st-ao st-ap st-aq st-ar st-as st-at"><div class="st-au st-bx st-aw st-ax st-ay st-az st-b0 st-ae st-b1 st-b2 st-b3 st-b4 st-b5 st-b6 st-b7 st-b8 st-b9 st-ba st-bb st-bc"><div class="st-by st-aw st-ax st-ay st-az st-bz st-bb st-bc st-c0"></div></div><input name="" tabindex="-1" type="radio" class="st-bg st-bh st-ao st-b4 st-aq st-b6 st-bi st-bj st-bk st-ar st-bl st-bm" value="3"><div class="st-b8 st-bn st-bo st-bp st-bq st-br st-bs st-bt st-bu st-bv st-bw"><div data-testid="stMarkdownContainer" class="st-emotion-cache-17k2yau et2rgd20"><p>🧩 同行库管理</p></div></div></label></div></div></div><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stMarkdown" data-testid="stMarkdown"><div data-testid="stMarkdownContainer" class="st-emotion-cache-1fwbbrh et2rgd20"><hr></div></div></div><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stMarkdown" data-testid="stMarkdown"><div data-testid="stCaptionContainer" class="st-emotion-cache-lcte13 et2rgd20"><p>⚠️ 免责声明：本工具仅用于打新分析辅助，不构成投资建议。投资有风险，入市需谨慎。</p></div></div></div></div></div></div></div><div><div style="position: absolute; user-select: none; width: 8px; height: 100%; top: 0px; cursor: col-resize; right: -6px;"><div class="st-emotion-cache-m0hag0 e6f82ta3"></div></div></div></section><div class="st-emotion-cache-6px8kg e4man1110"><header class="stAppHeader st-emotion-cache-1ffuo7c e3g0k5y1" data-testid="stHeader"><div class="stAppToolbar st-emotion-cache-14vh5up e3g0k5y2" data-testid="stToolbar"><div class="st-emotion-cache-1j22a0y e3g0k5y4"><div class="st-emotion-cache-70qvj9 e3g0k5y5"></div><div class="st-emotion-cache-scp8yw e3g0k5y6"><div class="stToolbarActions st-emotion-cache-1p1m4ay ekuhni82" data-testid="stToolbarActions"></div><div class="stAppDeployButton" data-testid="stAppDeployButton"><button kind="header" data-testid="stBaseButton-header" aria-label="" class="st-emotion-cache-egm30d e8vg11g14"><div class="st-emotion-cache-1wbqy5l e17qgqm80"><span>Deploy</span></div></button></div><span id="MainMenu" class="stMainMenu st-emotion-cache-czk5ss eonxpjd8" data-testid="stMainMenu" aria-haspopup="true" aria-expanded="false"><button kind="headerNoPadding" data-testid="stBaseButton-headerNoPadding" aria-label="" class="st-emotion-cache-1aplgmp e8vg11g15"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="e1t4gh341 st-emotion-cache-1pbsqtx ex0cdmw0"><path fill="none" d="M0 0h24v24H0V0z"></path><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"></path></svg></button></span></div></div></div></header><section tabindex="0" class="stMain st-emotion-cache-4rsbii e4man111" data-testid="stMain"><div class="stMainBlockContainer block-container st-emotion-cache-zy6yx3 e4man114" data-testid="stMainBlockContainer"><div direction="column" height="auto" class="stVerticalBlock st-emotion-cache-tn0cau e196pkbe2" data-testid="stVerticalBlock"><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stMarkdown" data-testid="stMarkdown"><div data-testid="stMarkdownContainer" class="st-emotion-cache-3uj0rx et2rgd20"><style>@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=JetBrains+Mono:wght@400;500;600;700&family=Unbounded:wght@500;600;700;800&display=swap');
+
+:root {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #111827;
+  --bg-tertiary: #1a2332;
+  --bg-card: rgba(17, 24, 39, 0.75);
+  --bg-card-hover: rgba(26, 35, 50, 0.85);
+  --bg-glass: rgba(255, 255, 255, 0.03);
+  --bg-glass-hover: rgba(255, 255, 255, 0.06);
+
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --text-emphasis: #ffffff;
+
+  --accent-cyan: #06b6d4;
+  --accent-cyan-light: #22d3ee;
+  --accent-cyan-dark: #0891b2;
+  --accent-amber: #f59e0b;
+  --accent-amber-light: #fbbf24;
+  --accent-emerald: #10b981;
+  --accent-emerald-light: #34d399;
+  --accent-rose: #f43f5e;
+  --accent-rose-light: #fb7185;
+  --accent-blue: #3b82f6;
+  --accent-violet: #8b5cf6;
+
+  --score-excellent: #34d399;
+  --score-good: #a3e635;
+  --score-medium: #fbbf24;
+  --score-poor: #fb7185;
+
+  --border-subtle: rgba(148, 163, 184, 0.1);
+  --border-glow: rgba(6, 182, 212, 0.3);
+  --border-glow-strong: rgba(6, 182, 212, 0.5);
+
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3);
+  --shadow-glow: 0 0 20px rgba(6, 182, 212, 0.15);
+  --shadow-glow-strong: 0 0 30px rgba(6, 182, 212, 0.25);
+
+  --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-display: 'Unbounded', sans-serif;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-slow: 0.4s ease;
+}
+
+/* ===== Base ===== */
+.stApp {
+  background: var(--bg-primary);
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+}
+
+.stApp > header,
+header[data-testid="stHeader"],
+.stAppHeader {
+  display: none !important;
+  height: 0 !important;
+}
+
+header[data-testid="stHeader"] * ,
+.stAppHeader * {
+  display: none !important;
+}
+
+div[data-testid="stHeader"],
+div[data-testid="stToolbar"],
+div[data-testid="stDecoration"],
+div[data-testid="stStatusWidget"] {
+  display: none !important;
+  height: 0 !important;
+}
+
+.stApp div[data-testid="stAppViewContainer"] > .main,
+.stApp section.main,
+.stApp .main {
+  padding-top: 0 !important;
+}
+
+.stApp .block-container,
+.stApp div[data-testid="stVerticalBlock"] {
+  padding-top: 0.75rem !important;
+}
+
+.stApp a {
+  color: var(--accent-cyan);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.stApp a:hover {
+  color: var(--accent-cyan-light);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
+/* ===== Sidebar ===== */
+section[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, #080c14 0%, #0d1520 50%, #0a0e17 100%);
+  border-right: 1px solid var(--border-subtle);
+}
+
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] div[data-baseweb="select"] > label,
+section[data-testid="stSidebar"] button[kind="secondary"] {
+  color: var(--text-secondary);
+}
+
+section[data-testid="stSidebar"] .stRadio > label {
+  background: var(--bg-glass);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+  transition: all var(--transition-normal);
+  position: relative;
+  overflow: hidden;
+}
+
+section[data-testid="stSidebar"] .stRadio > label::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent-cyan);
+  transform: scaleY(0);
+  transition: transform var(--transition-normal);
+}
+
+section[data-testid="stSidebar"] .stRadio > label:hover {
+  background: rgba(6, 182, 212, 0.08);
+  border-color: var(--border-glow);
+}
+
+section[data-testid="stSidebar"] .stRadio > label[data-selected="true"],
+section[data-testid="stSidebar"] .stRadio label.css-1j72d1t {
+  background: rgba(6, 182, 212, 0.1) !important;
+  border-color: var(--border-glow) !important;
+}
+
+section[data-testid="stSidebar"] .stRadio > label[data-selected="true"]::before,
+section[data-testid="stSidebar"] .stRadio label.css-1j72d1t::before {
+  transform: scaleY(1);
+}
+
+section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] {
+  gap: 2px;
+}
+
+/* ===== Glass Card System ===== */
+.glass-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: var(--radius-lg);
+  padding: 18px 22px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-card);
+  transition: all var(--transition-normal);
+}
+
+.glass-card:hover {
+  border-color: rgba(148, 163, 184, 0.15);
+  box-shadow: var(--shadow-card), 0 0 0 1px rgba(6, 182, 212, 0.05);
+}
+
+.glass-card-glow {
+  border-color: var(--border-glow);
+  box-shadow: var(--shadow-card), var(--shadow-glow);
+}
+
+.glass-card-glow:hover {
+  border-color: var(--border-glow-strong);
+  box-shadow: var(--shadow-card), var(--shadow-glow-strong);
+}
+
+.section-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: var(--radius-lg);
+  padding: 18px 22px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-card);
+  transition: all var(--transition-normal);
+}
+
+.section-title {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  border-left: 3px solid var(--accent-cyan);
+}
+
+/* ===== Metric Cards ===== */
+.metric-card {
+  background: linear-gradient(135deg, rgba(17, 24, 39, 0.8) 0%, rgba(26, 35, 50, 0.6) 100%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+  text-align: center;
+  transition: all var(--transition-normal);
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(148, 163, 184, 0.2);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+}
+
+.metric-card .label {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 6px;
+}
+
+.metric-card .value {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.metric-card .sub {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+
+/* Score colors on dark */
+.score-excellent .value {
+  color: var(--score-excellent);
+  text-shadow: 0 0 12px rgba(52, 211, 153, 0.3);
+}
+
+.score-good .value {
+  color: var(--score-good);
+  text-shadow: 0 0 12px rgba(163, 230, 53, 0.25);
+}
+
+.score-medium .value {
+  color: var(--score-medium);
+  text-shadow: 0 0 12px rgba(251, 191, 36, 0.25);
+}
+
+.score-poor .value {
+  color: var(--score-poor);
+  text-shadow: 0 0 12px rgba(251, 113, 133, 0.25);
+}
+
+/* ===== KPI Grid ===== */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.kpi-item {
+  background: var(--bg-glass);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  border: 1px solid var(--border-subtle);
+  transition: background var(--transition-fast);
+}
+
+.kpi-item:hover {
+  background: var(--bg-glass-hover);
+}
+
+.kpi-item .kpi-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.kpi-item .kpi-value {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 3px;
+}
+
+/* ===== Tags ===== */
+.tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+}
+
+.tag-green {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--score-excellent);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+}
+
+.tag-yellow {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--score-medium);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+}
+
+.tag-red {
+  background: rgba(251, 113, 133, 0.15);
+  color: var(--score-poor);
+  border: 1px solid rgba(251, 113, 133, 0.25);
+}
+
+.tag-blue {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.tag-gray {
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--text-secondary);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+/* ===== Progress Bar ===== */
+.progress-bar {
+  height: 6px;
+  background: rgba(148, 163, 184, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.progress-bar .fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.8s ease;
+  position: relative;
+}
+
+.progress-bar .fill::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+  background: inherit;
+  filter: blur(6px);
+  opacity: 0.6;
+}
+
+/* ===== Hero Section ===== */
+.hero-gradient {
+  background: linear-gradient(135deg, #0f172a 0%, #1a2332 50%, #0d1520 100%);
+  border-radius: var(--radius-xl);
+  padding: 32px 36px;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+  border: 1px solid var(--border-subtle);
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-gradient::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at 30% 50%, rgba(6, 182, 212, 0.06) 0%, transparent 50%),
+              radial-gradient(circle at 70% 50%, rgba(245, 158, 11, 0.04) 0%, transparent 50%);
+  animation: heroGlow 8s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+.hero-gradient h1 {
+  font-family: var(--font-display);
+  color: var(--text-emphasis) !important;
+  font-size: 28px !important;
+  font-weight: 700 !important;
+  margin-bottom: 8px !important;
+  position: relative;
+  z-index: 1;
+}
+
+.hero-gradient p {
+  color: var(--text-secondary) !important;
+  font-size: 14px !important;
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes heroGlow {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  100% { transform: translate(2%, 1%) rotate(1deg); }
+}
+
+/* ===== Diagnostics / Reason Chips ===== */
+.diag-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+.diag-item:last-child {
+  border-bottom: none;
+}
+
+.diag-label {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.diag-value {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.reason-chip {
+  display: inline-block;
+  padding: 4px 12px;
+  margin: 3px;
+  border-radius: 20px;
+  font-size: 12px;
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--text-secondary);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  transition: all var(--transition-fast);
+}
+
+.reason-chip:hover {
+  background: rgba(148, 163, 184, 0.15);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+/* ===== Cornerstone Row ===== */
+.cornerstone-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-glass);
+  border-radius: var(--radius-md);
+  margin-bottom: 6px;
+  border: 1px solid var(--border-subtle);
+  font-size: 13px;
+  transition: background var(--transition-fast);
+}
+
+.cornerstone-row:hover {
+  background: var(--bg-glass-hover);
+}
+
+/* ===== DataFrames (Streamlit tables) ===== */
+.dataframe th {
+  background: rgba(6, 182, 212, 0.08) !important;
+  color: var(--accent-cyan-light) !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  font-family: var(--font-sans) !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
+}
+
+.dataframe td {
+  font-size: 13px !important;
+  color: var(--text-secondary) !important;
+  background: transparent !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.06) !important;
+}
+
+.dataframe tr:hover td {
+  background: rgba(6, 182, 212, 0.03) !important;
+}
+
+/* Streamlit native table */
+.stDataFrame {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.stDataFrame [data-testid="stDataFrameResizable"] {
+  border: none !important;
+}
+
+.stDataFrame thead tr th {
+  background: rgba(6, 182, 212, 0.06) !important;
+  color: var(--accent-cyan-light) !important;
+  font-size: 13px !important;
+}
+
+.stDataFrame tbody tr td {
+  color: var(--text-secondary) !important;
+}
+
+/* ===== Buttons ===== */
+.stButton > button[kind="primary"] {
+  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%) !important;
+  border: none !important;
+  border-radius: var(--radius-md) !important;
+  padding: 10px 24px !important;
+  font-weight: 600 !important;
+  font-family: var(--font-sans) !important;
+  color: white !important;
+  box-shadow: 0 4px 16px rgba(6, 182, 212, 0.25) !important;
+  transition: all var(--transition-normal) !important;
+  position: relative;
+  overflow: hidden;
+}
+
+.stButton > button[kind="primary"]:hover {
+  box-shadow: 0 6px 24px rgba(6, 182, 212, 0.4) !important;
+  transform: translateY(-1px);
+}
+
+.stButton > button[kind="primary"]:active {
+  transform: translateY(0);
+}
+
+.stButton > button[kind="secondary"] {
+  background: rgba(148, 163, 184, 0.08) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-md) !important;
+  padding: 10px 24px !important;
+  font-weight: 500 !important;
+  font-family: var(--font-sans) !important;
+  color: var(--text-secondary) !important;
+  transition: all var(--transition-normal) !important;
+}
+
+.stButton > button[kind="secondary"]:hover {
+  background: rgba(148, 163, 184, 0.15) !important;
+  border-color: rgba(148, 163, 184, 0.25) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Download buttons */
+.stDownloadButton > button {
+  background: rgba(6, 182, 212, 0.1) !important;
+  border: 1px solid var(--border-glow) !important;
+  border-radius: var(--radius-md) !important;
+  padding: 8px 20px !important;
+  font-weight: 500 !important;
+  font-family: var(--font-sans) !important;
+  color: var(--accent-cyan) !important;
+  transition: all var(--transition-normal) !important;
+}
+
+.stDownloadButton > button:hover {
+  background: rgba(6, 182, 212, 0.18) !important;
+  box-shadow: var(--shadow-glow) !important;
+}
+
+/* ===== Streamlit Native Components ===== */
+/* Selectbox */
+div[data-baseweb="select"] {
+  background: var(--bg-glass) !important;
+  border-color: var(--border-subtle) !important;
+  border-radius: var(--radius-sm) !important;
+}
+
+div[data-baseweb="select"]:hover {
+  border-color: var(--border-glow) !important;
+}
+
+div[data-baseweb="select"] span {
+  color: var(--text-primary) !important;
+}
+
+/* Checkbox */
+.stCheckbox label {
+  color: var(--text-secondary) !important;
+}
+
+.stCheckbox label:hover {
+  color: var(--text-primary) !important;
+}
+
+/* File uploader */
+section[data-testid="stFileUploader"] {
+  background: var(--bg-glass) !important;
+  border: 2px dashed var(--border-subtle) !important;
+  border-radius: var(--radius-lg) !important;
+  padding: 20px !important;
+  transition: all var(--transition-normal) !important;
+}
+
+section[data-testid="stFileUploader"]:hover {
+  border-color: var(--border-glow) !important;
+  background: rgba(6, 182, 212, 0.04) !important;
+}
+
+section[data-testid="stFileUploader"] button {
+  background: rgba(6, 182, 212, 0.15) !important;
+  border: 1px solid var(--border-glow) !important;
+  color: var(--accent-cyan) !important;
+  border-radius: var(--radius-sm) !important;
+}
+
+/* Text input */
+.stTextInput input {
+  background: var(--bg-glass) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-sm) !important;
+  color: var(--text-primary) !important;
+  font-family: var(--font-sans) !important;
+}
+
+.stTextInput input:focus {
+  border-color: var(--border-glow-strong) !important;
+  box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.15) !important;
+}
+
+/* Number input */
+.stNumberInput input {
+  background: var(--bg-glass) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-sm) !important;
+  color: var(--text-primary) !important;
+  font-family: var(--font-mono) !important;
+}
+
+.stNumberInput input:focus {
+  border-color: var(--border-glow-strong) !important;
+  box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.15) !important;
+}
+
+/* Expander */
+.streamlit-expanderHeader {
+  color: var(--text-secondary) !important;
+  font-weight: 500 !important;
+  background: var(--bg-glass) !important;
+  border-radius: var(--radius-sm) !important;
+  transition: all var(--transition-fast) !important;
+}
+
+.streamlit-expanderHeader:hover {
+  color: var(--text-primary) !important;
+  background: var(--bg-glass-hover) !important;
+}
+
+/* Info / Success / Warning / Error banners */
+.stAlert {
+  border-radius: var(--radius-md) !important;
+  border: 1px solid var(--border-subtle) !important;
+}
+
+.stAlert[data-baseweb="notification"] {
+  background: var(--bg-card) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+.stAlert p {
+  color: var(--text-secondary) !important;
+}
+
+.st-bd, .st-be, .st-bf, .st-bg {
+  border-color: var(--border-subtle) !important;
+}
+
+div[data-testid="stNotification"] {
+  background: var(--bg-card) !important;
+  backdrop-filter: blur(12px) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+
+/* Multiselect */
+div[data-baseweb="select"] > div {
+  background: var(--bg-glass) !important;
+}
+
+/* Dataframe pagination */
+div[data-testid="stDataFrame"] nav button {
+  background: var(--bg-glass) !important;
+  border: 1px solid var(--border-subtle) !important;
+  color: var(--text-secondary) !important;
+  border-radius: var(--radius-sm) !important;
+}
+
+div[data-testid="stDataFrame"] nav button:hover {
+  background: var(--bg-glass-hover) !important;
+  border-color: var(--border-glow) !important;
+}
+
+/* Tabs */
+.stTabs button {
+  color: var(--text-tertiary) !important;
+  border-bottom: 2px solid transparent !important;
+}
+
+.stTabs button[aria-selected="true"] {
+  color: var(--accent-cyan) !important;
+  border-bottom-color: var(--accent-cyan) !important;
+}
+
+/* ===== Spinner ===== */
+.stSpinner {
+  color: var(--accent-cyan) !important;
+}
+
+/* ===== Metrics (st.metric) ===== */
+div[data-testid="stMetric"] {
+  background: var(--bg-glass);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+}
+
+div[data-testid="stMetric"] label {
+  color: var(--text-tertiary) !important;
+  font-size: 13px !important;
+}
+
+div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+  color: var(--text-primary) !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  font-family: var(--font-mono) !important;
+}
+
+div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
+  font-size: 13px !important;
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.35);
+}
+
+/* ===== Animation Keyframes ===== */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(6, 182, 212, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.fade-in {
+  animation: fadeInUp 0.4s ease forwards;
+}
+
+.fade-in-delay-1 { animation-delay: 0.05s; }
+.fade-in-delay-2 { animation-delay: 0.1s; }
+.fade-in-delay-3 { animation-delay: 0.15s; }
+
+/* ===== Empty State ===== */
+.empty-state-icon {
+  font-size: 56px;
+  margin-bottom: 16px;
+  opacity: 0.6;
+}
+
+/* ===== Version Delta Card ===== */
+.version-delta-card {
+  background: linear-gradient(135deg, rgba(17, 24, 39, 0.9) 0%, rgba(26, 35, 50, 0.7) 100%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 18px 22px;
+  margin-bottom: 12px;
+}
+
+/* ===== Metric Row (horizontal) ===== */
+.metrics-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.metrics-row .metric-card {
+  flex: 1;
+}
+
+/* ===== Number formatting for financial data ===== */
+.num-positive {
+  color: var(--accent-rose) !important;
+}
+
+.num-negative {
+  color: var(--score-excellent) !important;
+}
+
+.num-neutral {
+  color: var(--text-secondary) !important;
+}
+</style></div></div></div><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stMarkdown" data-testid="stMarkdown"><div data-testid="stMarkdownContainer" class="st-emotion-cache-3uj0rx et2rgd20"><div class="hero-gradient">
+    <div data-testid="stHeadingWithActionElements" class="st-emotion-cache-ua1rfn et2rgd22"><h1 id="ipo">📊 港股 IPO 打新分析<span data-testid="stHeaderActionElements" class="st-emotion-cache-gi0tri et2rgd23"><a href="#ipo" class="st-emotion-cache-yinll1 et2rgd21"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3"></path><line x1="8" y1="12" x2="16" y2="12"></line></svg></a></span></h1></div>
+    <p>智能招股书解析 · 多维评分体系 · 一键生成报告</p>
+</div></div></div></div><div data-testid="stLayoutWrapper" width="100%" height="auto" overflow="visible" class="st-emotion-cache-18kf3ut e196pkbe3"><div direction="row" overflow="visible" height="auto" class="stHorizontalBlock st-emotion-cache-1permvm e196pkbe2" data-testid="stHorizontalBlock" data-test-scroll-behavior="normal"><div class="stColumn st-emotion-cache-uxxra0 e196pkbe1" data-testid="stColumn"><div direction="column" height="100%" class="stVerticalBlock st-emotion-cache-wfksaw e196pkbe2" data-testid="stVerticalBlock"><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stButton st-emotion-cache-8atqhb e1mlolmg0" data-testid="stButton"><button kind="primary" data-testid="stBaseButton-primary" aria-label="" class="st-emotion-cache-1cl4umz e8vg11g1"><div data-testid="stMarkdownContainer" class="st-emotion-cache-12j140x et2rgd20"><p>🔄 更新IPO（使用缓存）</p></div></button></div></div></div></div><div class="stColumn st-emotion-cache-uxxra0 e196pkbe1" data-testid="stColumn"><div direction="column" height="100%" class="stVerticalBlock st-emotion-cache-wfksaw e196pkbe2" data-testid="stVerticalBlock"><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stButton st-emotion-cache-8atqhb e1mlolmg0" data-testid="stButton"><button kind="secondary" data-testid="stBaseButton-secondary" aria-label="" class="st-emotion-cache-5qfegl e8vg11g2"><div data-testid="stMarkdownContainer" class="st-emotion-cache-12j140x et2rgd20"><p>⚡ 强制刷新（重新下载）</p></div></button></div></div></div></div><div class="stColumn st-emotion-cache-11af4nl e196pkbe1" data-testid="stColumn"><div direction="column" height="100%" class="stVerticalBlock st-emotion-cache-wfksaw e196pkbe2" data-testid="stVerticalBlock"><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stMarkdown" data-testid="stMarkdown"><div data-testid="stMarkdownContainer" class="st-emotion-cache-3uj0rx et2rgd20"><div style="text-align: right; color: rgb(100, 116, 139); font-size: 13px; padding-top: 8px;">最新缓存时间: 2026-05-09 22:23</div></div></div></div></div></div></div></div><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stMarkdown" data-testid="stMarkdown"><div data-testid="stMarkdownContainer" class="st-emotion-cache-3uj0rx et2rgd20"><div style="font-size: 14px; color: rgb(100, 116, 139); margin-bottom: 12px;">共 <b>1</b> 只正在招股</div></div></div></div><div data-testid="stLayoutWrapper" width="100%" height="auto" overflow="visible" class="st-emotion-cache-18kf3ut e196pkbe3"><div direction="row" overflow="visible" height="auto" class="stHorizontalBlock st-emotion-cache-1permvm e196pkbe2" data-testid="stHorizontalBlock" data-test-scroll-behavior="normal"><div class="stColumn st-emotion-cache-139jccg e196pkbe1" data-testid="stColumn"><div direction="column" height="100%" class="stVerticalBlock st-emotion-cache-wfksaw e196pkbe2" data-testid="stVerticalBlock"><div class="stElementContainer element-container st-emotion-cache-zh2fnc e196pkbe0" data-testid="stElementContainer" data-stale="false" width="fit-content" height="auto" overflow="visible"><div class="row-widget stCheckbox st-emotion-cache-mo6sqg eg2gxky0" data-testid="stCheckbox"><label data-baseweb="checkbox" class="st-am st-ae st-an st-ai st-c1 st-aq st-ao st-at"><span class="st-c2 st-bb st-bc st-c3 st-b9 st-b1 st-c4 st-c5 st-c6 st-c7 st-c8 st-c9 st-ca st-cb st-cc st-cd st-ce st-cf st-cg st-ch st-ci st-cj st-ck st-cl st-cm st-cn st-co st-b8 st-cp st-cq st-cr st-cs st-ct st-aq st-b6 st-cu st-cv"></span><input aria-label="🏆 高分（≥60）" aria-checked="false" type="checkbox" class="st-cw st-bg st-bh st-cx st-cy st-cz st-bm" value=""><div class="st-b8 st-d0 st-bo st-bp st-bq st-br st-d1 st-bt st-bu st-bv"><div visibility="0" data-testid="stWidgetLabel" class="st-emotion-cache-y4bq5x eg2gxky1"><div data-testid="stMarkdownContainer" class="st-emotion-cache-12j140x et2rgd20"><p>🏆 高分（≥60）</p></div></div></div></label></div></div></div></div><div class="stColumn st-emotion-cache-139jccg e196pkbe1" data-testid="stColumn"><div direction="column" height="100%" class="stVerticalBlock st-emotion-cache-wfksaw e196pkbe2" data-testid="stVerticalBlock"><div class="stElementContainer element-container st-emotion-cache-zh2fnc e196pkbe0" data-testid="stElementContainer" data-stale="false" width="fit-content" height="auto" overflow="visible"><div class="row-widget stCheckbox st-emotion-cache-mo6sqg eg2gxky0" data-testid="stCheckbox"><label data-baseweb="checkbox" class="st-am st-ae st-an st-ai st-c1 st-aq st-ao st-at"><span class="st-c2 st-bb st-bc st-c3 st-b9 st-b1 st-c4 st-c5 st-c6 st-c7 st-c8 st-c9 st-ca st-cb st-cc st-cd st-ce st-cf st-cg st-ch st-ci st-cj st-ck st-cl st-cm st-cn st-co st-b8 st-cp st-cq st-cr st-cs st-ct st-aq st-b6 st-cu st-cv"></span><input aria-label="🛡️ 低风险" aria-checked="false" type="checkbox" class="st-cw st-bg st-bh st-cx st-cy st-cz st-bm" value=""><div class="st-b8 st-d0 st-bo st-bp st-bq st-br st-d1 st-bt st-bu st-bv"><div visibility="0" data-testid="stWidgetLabel" class="st-emotion-cache-y4bq5x eg2gxky1"><div data-testid="stMarkdownContainer" class="st-emotion-cache-12j140x et2rgd20"><p>🛡️ 低风险</p></div></div></div></label></div></div></div></div><div class="stColumn st-emotion-cache-139jccg e196pkbe1" data-testid="stColumn"><div direction="column" height="100%" class="stVerticalBlock st-emotion-cache-wfksaw e196pkbe2" data-testid="stVerticalBlock"><div class="stElementContainer element-container st-emotion-cache-zh2fnc e196pkbe0" data-testid="stElementContainer" data-stale="false" width="fit-content" height="auto" overflow="visible"><div class="row-widget stCheckbox st-emotion-cache-mo6sqg eg2gxky0" data-testid="stCheckbox"><label data-baseweb="checkbox" class="st-am st-ae st-an st-ai st-c1 st-aq st-ao st-at"><span class="st-c2 st-bb st-bc st-c3 st-b9 st-b1 st-c4 st-c5 st-c6 st-c7 st-c8 st-c9 st-ca st-cb st-cc st-cd st-ce st-cf st-cg st-ch st-ci st-cj st-ck st-cl st-cm st-cn st-co st-b8 st-cp st-cq st-cr st-cs st-ct st-aq st-b6 st-cu st-cv"></span><input aria-label="🏛️ 有基石" aria-checked="false" type="checkbox" class="st-cw st-bg st-bh st-cx st-cy st-cz st-bm" value=""><div class="st-b8 st-d0 st-bo st-bp st-bq st-br st-d1 st-bt st-bu st-bv"><div visibility="0" data-testid="stWidgetLabel" class="st-emotion-cache-y4bq5x eg2gxky1"><div data-testid="stMarkdownContainer" class="st-emotion-cache-12j140x et2rgd20"><p>🏛️ 有基石</p></div></div></div></label></div></div></div></div><div class="stColumn st-emotion-cache-139jccg e196pkbe1" data-testid="stColumn"><div direction="column" height="100%" class="stVerticalBlock st-emotion-cache-wfksaw e196pkbe2" data-testid="stVerticalBlock"><div class="stElementContainer element-container st-emotion-cache-zh2fnc e196pkbe0" data-testid="stElementContainer" data-stale="false" width="fit-content" height="auto" overflow="visible"><div class="row-widget stCheckbox st-emotion-cache-mo6sqg eg2gxky0" data-testid="stCheckbox"><label data-baseweb="checkbox" class="st-am st-ae st-an st-ai st-c1 st-aq st-ao st-at"><span class="st-c2 st-bb st-bc st-c3 st-b9 st-b1 st-c4 st-c5 st-c6 st-c7 st-c8 st-c9 st-ca st-cb st-cc st-cd st-ce st-cf st-cg st-ch st-ci st-cj st-ck st-cl st-cm st-cn st-co st-b8 st-cp st-cq st-cr st-cs st-ct st-aq st-b6 st-cu st-cv"></span><input aria-label="💰 估值合理" aria-checked="false" type="checkbox" class="st-cw st-bg st-bh st-cx st-cy st-cz st-bm" value=""><div class="st-b8 st-d0 st-bo st-bp st-bq st-br st-d1 st-bt st-bu st-bv"><div visibility="0" data-testid="stWidgetLabel" class="st-emotion-cache-y4bq5x eg2gxky1"><div data-testid="stMarkdownContainer" class="st-emotion-cache-12j140x et2rgd20"><p>💰 估值合理</p></div></div></div></label></div></div></div></div></div></div><div class="stElementContainer element-container st-emotion-cache-a6f95b e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="90px" overflow="visible"><div data-testid="stFullScreenFrame" class="st-emotion-cache-uwwqev e13s7uld0"><div class="stDataFrame st-emotion-cache-1kta6t8 e8es05k0" data-testid="stDataFrame"><div class="stElementToolbar st-emotion-cache-2h0ntr ekeylwq0" data-testid="stElementToolbar" target=".e8es05k0"><div data-testid="stElementToolbarButtonContainer" class="st-emotion-cache-12rj9lz ekeylwq1"><div aria-haspopup="true" aria-expanded="false"><div data-testid="stElementToolbarButton"><div data-testid="stTooltipHoverTarget" class="stTooltipHoverTarget" id="bui3__anchor" style="display: flex; flex-direction: row; justify-content: flex-end; width: auto;"><button kind="elementToolbar" data-testid="stBaseButton-elementToolbar" aria-label="Show/hide columns" class="st-emotion-cache-18ac3gt e8vg11g20"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor" xmlns="http://www.w3.org/2000/svg" data-testid="stElementToolbarButtonIcon" class="e1t4gh341 st-emotion-cache-1u2dcfn ex0cdmw0"><path fill="none" d="M0 0h24v24H0V0z"></path><path d="M12 6a9.77 9.77 0 018.82 5.5C19.17 14.87 15.79 17 12 17s-7.17-2.13-8.82-5.5A9.77 9.77 0 0112 6m0-2C7 4 2.73 7.11 1 11.5 2.73 15.89 7 19 12 19s9.27-3.11 11-7.5C21.27 7.11 17 4 12 4zm0 5a2.5 2.5 0 010 5 2.5 2.5 0 010-5m0-2c-2.48 0-4.5 2.02-4.5 4.5S9.52 16 12 16s4.5-2.02 4.5-4.5S14.48 7 12 7z"></path></svg></button></div></div></div><div data-testid="stElementToolbarButton"><div data-testid="stTooltipHoverTarget" class="stTooltipHoverTarget" id="bui4__anchor" style="display: flex; flex-direction: row; justify-content: flex-end; width: auto;"><button kind="elementToolbar" data-testid="stBaseButton-elementToolbar" aria-label="Download as CSV" class="st-emotion-cache-18ac3gt e8vg11g20"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor" xmlns="http://www.w3.org/2000/svg" data-testid="stElementToolbarButtonIcon" class="e1t4gh341 st-emotion-cache-1u2dcfn ex0cdmw0"><rect width="24" height="24" fill="none"></rect><path d="M18 15v3H6v-3H4v3c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-3h-2zm-1-4l-1.41-1.41L13 12.17V4h-2v8.17L8.41 9.59 7 11l5 5 5-5z"></path></svg></button></div></div><div data-testid="stElementToolbarButton"><div data-testid="stTooltipHoverTarget" class="stTooltipHoverTarget" id="bui5__anchor" style="display: flex; flex-direction: row; justify-content: flex-end; width: auto;"><button kind="elementToolbar" data-testid="stBaseButton-elementToolbar" aria-label="Search" class="st-emotion-cache-18ac3gt e8vg11g20"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor" xmlns="http://www.w3.org/2000/svg" data-testid="stElementToolbarButtonIcon" class="e1t4gh341 st-emotion-cache-1u2dcfn ex0cdmw0"><path fill="none" d="M0 0h24v24H0V0z"></path><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg></button></div></div><div data-testid="stElementToolbarButton"><div data-testid="stTooltipHoverTarget" class="stTooltipHoverTarget" id="bui6__anchor" style="display: flex; flex-direction: row; justify-content: flex-end; width: auto;"><button kind="elementToolbar" data-testid="stBaseButton-elementToolbar" aria-label="Fullscreen" class="st-emotion-cache-18ac3gt e8vg11g20"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor" xmlns="http://www.w3.org/2000/svg" data-testid="stElementToolbarButtonIcon" class="e1t4gh341 st-emotion-cache-1u2dcfn ex0cdmw0"><path fill="none" d="M0 0h24v24H0V0z"></path><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"></path></svg></button></div></div></div></div><div data-testid="stDataFrameResizable" style="position: relative; user-select: auto; border: 1px solid rgba(49, 51, 63, 0.1); border-radius: 0.5rem; width: 1504px; height: 90px; max-width: 1504px; max-height: 90px; min-width: 52px; min-height: 72px; box-sizing: border-box; flex-shrink: 0;"><div class="stDataFrameGlideDataEditor gdg-wmyidgi" style="--wmyidgi-0: 1504px; --wmyidgi-1: 70px; --gdg-accent-color: #ff4b4b; --gdg-accent-fg: #ffffff; --gdg-accent-light: rgba(255, 75, 75, 0.1); --gdg-text-dark: #31333F; --gdg-text-medium: rgba(49, 51, 63, 0.8); --gdg-text-light: rgba(49, 51, 63, 0.4); --gdg-text-bubble: rgba(49, 51, 63, 0.6); --gdg-bg-icon-header: rgba(49, 51, 63, 0.6); --gdg-fg-icon-header: #ffffff; --gdg-text-header: rgba(49, 51, 63, 0.6); --gdg-text-group-header: rgba(49, 51, 63, 0.6); --gdg-bg-group-header: rgba(248, 249, 251, 1); --gdg-bg-group-header-hovered: rgba(151, 166, 195, 0.1); --gdg-text-header-selected: #ffffff; --gdg-bg-cell: #ffffff; --gdg-bg-cell-medium: #ffffff; --gdg-bg-header: rgba(248, 249, 251, 1); --gdg-bg-header-has-focus: rgba(151, 166, 195, 0.1); --gdg-bg-header-hovered: rgba(151, 166, 195, 0.1); --gdg-bg-bubble: #f0f2f6; --gdg-bg-bubble-selected: hsla(220, 25%, 100%, 1); --gdg-bubble-height: 20px; --gdg-bubble-padding: 8px; --gdg-bubble-margin: 4px; --gdg-bg-search-result: rgba(255, 75, 75, 0.1); --gdg-border-color: rgba(49, 51, 63, 0.1); --gdg-horizontal-border-color: rgba(49, 51, 63, 0.1); --gdg-drilldown-border: rgba(151, 166, 195, 0.25); --gdg-link-color: #0054a3; --gdg-cell-horizontal-padding: 8px; --gdg-cell-vertical-padding: 3px; --gdg-header-font-style: 400 14px; --gdg-base-font-style: 400 14px; --gdg-marker-font-style: 9px; --gdg-font-family: &quot;Source Sans&quot;, sans-serif; --gdg-editor-font-size: 0.875rem; --gdg-checkbox-max-size: 16px; --gdg-resize-indicator-color: #ff4b4b;"><div><div class="gdg-s1dgczr6" style="--s1dgczr6-0: auto;"><div class="dvn-underlay"><canvas data-testid="data-grid-canvas" tabindex="0" width="1504" height="90" style="contain: strict; display: block; cursor: default; width: 1504px; height: 90px;"><table role="grid" aria-rowcount="2" aria-multiselectable="true" aria-colcount="15"><thead role="rowgroup"><tr role="row" aria-rowindex="1"><th role="columnheader" aria-selected="false" aria-colindex="1" tabindex="-1">股票代码</th><th role="columnheader" aria-selected="false" aria-colindex="2" tabindex="-1">公司名称</th><th role="columnheader" aria-selected="false" aria-colindex="3" tabindex="-1">总评分</th><th role="columnheader" aria-selected="false" aria-colindex="4" tabindex="-1">申购热度</th><th role="columnheader" aria-selected="false" aria-colindex="5" tabindex="-1">基本面</th><th role="columnheader" aria-selected="false" aria-colindex="6" tabindex="-1">风险扣分</th><th role="columnheader" aria-selected="false" aria-colindex="7" tabindex="-1">市场热度</th><th role="columnheader" aria-selected="false" aria-colindex="8" tabindex="-1">估值</th><th role="columnheader" aria-selected="false" aria-colindex="9" tabindex="-1">毛利率</th><th role="columnheader" aria-selected="false" aria-colindex="10" tabindex="-1">净利润(M)</th><th role="columnheader" aria-selected="false" aria-colindex="11" tabindex="-1">截止日</th><th role="columnheader" aria-selected="false" aria-colindex="12" tabindex="-1">跟踪</th><th role="columnheader" aria-selected="false" aria-colindex="13" tabindex="-1">一手中签率</th><th role="columnheader" aria-selected="false" aria-colindex="14" tabindex="-1">首日涨跌</th><th role="columnheader" aria-selected="false" aria-colindex="15" tabindex="-1">至今涨跌</th></tr></thead><tbody role="rowgroup"><tr role="row" aria-selected="false" aria-rowindex="2"><td role="gridcell" aria-colindex="1" aria-selected="false" aria-readonly="true" id="glide-cell-0-0" data-testid="glide-cell-0-0" tabindex="-1">06871</td><td role="gridcell" aria-colindex="2" aria-selected="false" aria-readonly="true" id="glide-cell-1-0" data-testid="glide-cell-1-0" tabindex="-1">翼菲科技</td><td role="gridcell" aria-colindex="3" aria-selected="false" aria-readonly="true" id="glide-cell-2-0" data-testid="glide-cell-2-0" tabindex="-1">54/100</td><td role="gridcell" aria-colindex="4" aria-selected="false" aria-readonly="true" id="glide-cell-3-0" data-testid="glide-cell-3-0" tabindex="-1">63</td><td role="gridcell" aria-colindex="5" aria-selected="false" aria-readonly="true" id="glide-cell-4-0" data-testid="glide-cell-4-0" tabindex="-1">35</td><td role="gridcell" aria-colindex="6" aria-selected="false" aria-readonly="true" id="glide-cell-5-0" data-testid="glide-cell-5-0" tabindex="-1">-0</td><td role="gridcell" aria-colindex="7" aria-selected="false" aria-readonly="true" id="glide-cell-6-0" data-testid="glide-cell-6-0" tabindex="-1">热门</td><td role="gridcell" aria-colindex="8" aria-selected="false" aria-readonly="true" id="glide-cell-7-0" data-testid="glide-cell-7-0" tabindex="-1">PS辅助估值</td><td role="gridcell" aria-colindex="9" aria-selected="false" aria-readonly="true" id="glide-cell-8-0" data-testid="glide-cell-8-0" tabindex="-1">24.8%</td><td role="gridcell" aria-colindex="10" aria-selected="false" aria-readonly="true" id="glide-cell-9-0" data-testid="glide-cell-9-0" tabindex="-1">-152.94</td><td role="gridcell" aria-colindex="11" aria-selected="false" aria-readonly="true" id="glide-cell-10-0" data-testid="glide-cell-10-0" tabindex="-1">2026-05-13</td><td role="gridcell" aria-colindex="12" aria-selected="false" aria-readonly="true" id="glide-cell-11-0" data-testid="glide-cell-11-0" tabindex="-1">未跟踪</td><td role="gridcell" aria-colindex="13" aria-selected="false" aria-readonly="true" id="glide-cell-12-0" data-testid="glide-cell-12-0" tabindex="-1">--</td><td role="gridcell" aria-colindex="14" aria-selected="false" aria-readonly="true" id="glide-cell-13-0" data-testid="glide-cell-13-0" tabindex="-1">--</td><td role="gridcell" aria-colindex="15" aria-selected="false" aria-readonly="true" id="glide-cell-14-0" data-testid="glide-cell-14-0" tabindex="-1">--</td></tr></tbody></table></canvas><canvas width="1504" height="36" style="position: absolute; top: 0px; left: 0px; width: 1504px; height: 36px;"></canvas></div><div draggable="false" class="dvn-scroller stDataFrameGlideDataEditor" style="width: 1504px; height: 90px;"><div class="dvn-scroll-inner dvn-hidden"><div class="dvn-stack"><div style="width: 1068px; height: 0px;"></div><div style="width: 0px; height: 70px;"></div></div></div></div></div></div></div><div><div style="position: absolute; user-select: none; width: 20px; height: 20px; z-index: 1; right: -10px; bottom: -10px; cursor: se-resize;"></div></div></div></div></div></div><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stMarkdown" data-testid="stMarkdown"><div data-testid="stMarkdownContainer" class="st-emotion-cache-3uj0rx et2rgd20"><div class="section-card"></div></div></div></div><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stMarkdown" data-testid="stMarkdown"><div data-testid="stMarkdownContainer" class="st-emotion-cache-3uj0rx et2rgd20"><div class="section-title">📋 选择查看详情</div></div></div></div><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stSelectbox" data-testid="stSelectbox"><label data-testid="stWidgetLabel" aria-hidden="true" class="st-emotion-cache-12x9678 e1gk92lc0"><div data-testid="stMarkdownContainer" class="st-emotion-cache-3qzj0x et2rgd20"><p>选择IPO</p></div></label><div data-baseweb="select" class="st-bp st-bq st-d2 st-d3 st-bt st-bu st-c6 st-bv st-d4"><div class="st-d5 st-d6 st-d7 st-d8 st-c6 st-cx st-d4 st-ae st-d9 st-da st-cb st-cc st-cd st-ce st-c7 st-c8 st-c9 st-ca st-db st-bb st-bc st-bo st-dc st-dd st-de st-df st-bd st-dg"><div class="st-c6 st-bv st-dh st-di st-dj st-ae st-au st-dk st-cx st-dl st-dm st-dn st-do"><div value="请选择..." class="st-dp st-c6 st-b6 st-dq st-dr st-cx st-ds st-dt st-du">请选择...</div><div class="st-bv st-co st-dr st-dv st-dw st-dx st-dy st-dz st-b0 st-c6 st-b7 st-ao st-aq st-e0 st-b4 st-bi st-bk st-ar st-bj st-e1 st-e2"><input aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" aria-label="Selected 请选择.... 选择IPO" role="combobox" tabindex="0" class="st-bp st-bq st-br st-d3 st-bt st-bu st-bo st-e3 st-ef st-dr st-e5 st-dw st-dx st-dy st-dz st-b0 st-co st-b7 st-ao st-aq st-b6 st-b4 st-bi st-bk st-ar st-bj" value=""><div class="st-bp st-bq st-br st-d3 st-bt st-bu st-bm st-e6 st-e7 st-e8 st-bh st-e9 st-ea"></div></div></div><div class="st-c6 st-bv st-ae st-ba st-au st-eb st-do"><svg data-baseweb="icon" title="open" viewBox="0 0 24 24" class="st-co st-ec st-bo st-ed st-ee" style="cursor: pointer;"><title>open</title><path transform="rotate(270, 12, 12)" fill-rule="evenodd" clip-rule="evenodd" d="M9 12C9 12.2652 9.10536 12.5196 9.29289 12.7071L13.2929 16.7071C13.6834 17.0976 14.3166 17.0976 14.7071 16.7071C15.0976 16.3166 15.0976 15.6834 14.7071 15.2929L11.4142 12L14.7071 8.70711C15.0976 8.31658 15.0976 7.68342 14.7071 7.29289C14.3166 6.90237 13.6834 6.90237 13.2929 7.29289L9.29289 11.2929C9.10536 11.4804 9 11.7348 9 12Z"></path></svg></div></div></div></div></div><div class="stElementContainer element-container st-emotion-cache-1vo6xi6 e196pkbe0" data-testid="stElementContainer" data-stale="false" width="100%" height="auto" overflow="visible"><div class="stMarkdown" data-testid="stMarkdown"><div data-testid="stMarkdownContainer" class="st-emotion-cache-3uj0rx et2rgd20"></div></div></div></div></div><div data-testid="stAppIframeResizerAnchor" data-iframe-height="true" class="st-emotion-cache-1dumvfu e4man119"></div></section></div></div></div></div><div data-testid="portal" id="portal" class="st-emotion-cache-1q6lfs0 e19n7mk11"></div></div><div class=""></div></div>
+  
+
+<div style="opacity: 0; pointer-events: none; position: fixed; color: rgb(248, 249, 251);"></div></body><canvas style="display: none; opacity: 0; position: fixed;"></canvas><canvas style="display: none; opacity: 0; position: fixed;"></canvas><canvas style="display: none; opacity: 0; position: fixed;"></canvas></html>

@@ -189,12 +189,34 @@ class ProspectusQualityAnalyzer:
                 'label': cs.get('concentration_risk_label', '--'),
                 'detail': f"Top5客户{cs.get('top5_customer_revenue_pct', '--')}%，Top5供应商{cs.get('top5_supplier_purchase_pct', '--')}%",
             }
+            customer_quality_score = cs.get('customer_quality_score', 0)
+            if customer_quality_score:
+                customer_bonus = round(min(15, customer_quality_score / 100 * 15))
+                score += customer_bonus
+                for reason in cs.get('customer_quality_reasons', [])[:2]:
+                    reasons.append(f"客户质量: {reason}")
+                dimensions['customer_quality'] = {
+                    'label': cs.get('customer_quality_label', '--'),
+                    'detail': cs.get('customer_validation_summary') or '头部客户验证待补充',
+                }
 
         cf = prospectus_info.get('cashflow', {})
         if isinstance(cf, dict) and cf.get('cash_quality_label') not in ('缺失', None):
             dimensions['cashflow'] = {
                 'label': cf.get('cash_quality_label', '--'),
-                'detail': f"OCF/净利润{cf.get('ocf_to_net_profit', '--')}；存货周转{cf.get('inventory_turnover_days_latest', '--')}天",
+                'detail': (
+                    f"OCF/收入{cf.get('ocf_to_revenue', '--')}；"
+                    f"上市前runway{cf.get('cash_runway_years', '--')}年；"
+                    f"存货周转{cf.get('inventory_turnover_days_latest', '--')}天"
+                ),
+            }
+
+        growth_status = prospectus_info.get('growth_validation_status')
+        growth_summary = prospectus_info.get('growth_validation_summary')
+        if growth_status:
+            dimensions['growth_validation'] = {
+                'label': '已解释' if growth_status == 'explained' else '未解释',
+                'detail': growth_summary or '',
             }
 
         rnd = prospectus_info.get('rnd_pipeline', {})

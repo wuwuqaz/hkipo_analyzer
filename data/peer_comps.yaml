@@ -26,6 +26,15 @@ hardtech:
       - intelligent driving
       - lawn mower
       - robotic
+    business_line_groups:
+      visual_perception:
+        label: 视觉感知业务
+        segment_keywords: [visual perception, sensor, algorithm module]
+        peer_tags: [lidar, perception, sensor]
+      robot_lawn_mower:
+        label: 割草机器人业务
+        segment_keywords: [robot lawn mower, lawn mower, mower]
+        peer_tags: [mower, cleaning robot, smart home]
     peers:
       - name: 速腾聚创
         ticker: "2498.HK"
@@ -80,6 +89,30 @@ hardtech:
         type: private
         tags: [robotics, cleaning robot, mower, smart home]
         notes: "未上市，高速增长的扫地机器人独角兽"
+      - name: 科沃斯
+        ticker: "603486.SH"
+        type: listed
+        tags: [robotics, cleaning robot, smart home]
+        market_cap_hkd_million: 26000
+        revenue_million: 15500
+        net_profit_million: 600
+        ps: 1.7
+        pe: 43.3
+        gross_margin_pct: 45.0
+        revenue_growth_pct: 8.0
+        notes: "服务机器人与智能家居清洁设备龙头"
+      - name: iRobot
+        ticker: "IRBT"
+        type: listed
+        tags: [robotics, cleaning robot, smart home]
+        market_cap_hkd_million: 1800
+        revenue_million: 6800
+        net_profit_million: -1200
+        ps: 0.3
+        pe: null
+        gross_margin_pct: 22.0
+        revenue_growth_pct: -15.0
+        notes: "海外扫地机器人品牌，经营承压，仅作智能家居机器人参考"
 
   ai_chip_semiconductor:
     keywords:

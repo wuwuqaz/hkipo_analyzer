@@ -287,11 +287,21 @@ def _is_pure_junk(name):
         'enable us', 'driven by', 'growing demand', 'increasing demand',
         'market is', 'market size', 'expected to', 'continue to',
         'performed well', 'strong growth', 'significant growth',
+        'visual perception technology', 'robot visual perception',
+        'intelligent robot visual perception', 'service robot visual',
+        'robotics visual perception', 'commercial service robot',
     ]
     if any(phrase in lower for phrase in _GENERIC_PHRASES):
         return True
+    industry_words = {
+        'robot', 'robotic', 'robotics', 'visual', 'perception', 'technology',
+        'technologies', 'sensor', 'sensors', 'algorithm', 'module', 'modules',
+        'intelligent', 'commercial', 'service',
+    }
+    words = [w.strip(' ,.;:()[]').lower() for w in name.strip().split()]
+    if len(words) >= 3 and len(set(words) - industry_words) == 0:
+        return True
     # 英文候选超过6个单词
-    words = name.strip().split()
     if len(words) > 6:
         return True
     # 包含换行符
@@ -787,6 +797,77 @@ def _calc_valuation_position(company_ps, peer_median_ps, scarcity, premium):
     return "缺失"
 
 
+def _calc_business_line_weighted_peer_ps(prospectus_info, matched_peers, subsector_key):
+    """For mixed robotics issuers, value perception and mower lines separately."""
+    if subsector_key != "robotics_visual_perception":
+        return None
+    biz = prospectus_info.get("business_breakdown") or {}
+    segments = biz.get("segments") or []
+    if not segments:
+        return None
+
+    groups = {
+        "visual_perception": {
+            "label": "视觉感知业务",
+            "segment_keywords": ("visual", "perception", "sensor", "algorithm"),
+            "peer_tags": ("lidar", "perception", "sensor"),
+        },
+        "robot_lawn_mower": {
+            "label": "割草机器人业务",
+            "segment_keywords": ("lawn", "mower"),
+            "peer_tags": ("mower", "cleaning robot", "smart home"),
+        },
+    }
+
+    details = []
+    weighted_sum = 0.0
+    weight_total = 0.0
+    for group_key, cfg in groups.items():
+        share = 0.0
+        matched_segment_names = []
+        for seg in segments:
+            name = str(seg.get("name") or "").lower()
+            if any(kw in name for kw in cfg["segment_keywords"]):
+                seg_share = seg.get("share_pct")
+                if _is_num(seg_share):
+                    share += float(seg_share)
+                    matched_segment_names.append(seg.get("name"))
+        if share <= 0:
+            continue
+
+        peer_ps_values = []
+        peer_names = []
+        for peer in matched_peers:
+            if peer.get("type") != "listed" or not _is_num(peer.get("ps")):
+                continue
+            tags = {str(t).lower() for t in peer.get("tags", [])}
+            if tags & {t.lower() for t in cfg["peer_tags"]}:
+                peer_ps_values.append(float(peer["ps"]))
+                peer_names.append(peer.get("name"))
+        if not peer_ps_values:
+            continue
+        group_median = round(median(peer_ps_values), 2) if len(peer_ps_values) >= 2 else round(peer_ps_values[0], 2)
+        weighted_sum += group_median * share
+        weight_total += share
+        details.append({
+            "group": group_key,
+            "label": cfg["label"],
+            "share_pct": round(share, 1),
+            "peer_median_ps": group_median,
+            "peer_count": len(peer_ps_values),
+            "peer_names": peer_names[:6],
+            "segment_names": matched_segment_names[:6],
+        })
+
+    if not details or weight_total <= 0:
+        return None
+    weighted_peer_ps = round(weighted_sum / weight_total, 2)
+    return {
+        "weighted_peer_ps": weighted_peer_ps,
+        "business_line_peer_valuation": details,
+    }
+
+
 def _build_summary(vp, subsector_key, matched_peers, company_ps, peer_median_ps, peer_median_pe, company_pe):
     if vp == "缺失":
         return "无足够同行数据，无法进行相对估值判断"
@@ -859,6 +940,11 @@ class PeerComparableAnalyzer:
             "peer_median_ps": None, "peer_median_pe": None, "peer_median_pb": None,
             "peer_ps_count": 0, "peer_pe_count": 0,
             "relative_ps_premium_pct": None, "relative_pe_premium_pct": None,
+            "weighted_peer_ps": None,
+            "relative_weighted_ps_premium_pct": None,
+            "weighted_valuation_position": None,
+            "business_line_peer_valuation": [],
+            "peer_candidate_filter_warnings": [],
             "valuation_position": "缺失",
             "scarcity_score": 0, "peer_score": 0,
             "summary": "", "warnings": [],
@@ -970,6 +1056,19 @@ class PeerComparableAnalyzer:
                 (company_pe - peer_median_pe) / peer_median_pe * 100, 1
             )
 
+        weighted = _calc_business_line_weighted_peer_ps(prospectus_info, matched, sk)
+        if weighted:
+            result.update(weighted)
+            weighted_peer_ps = result.get("weighted_peer_ps")
+            if _is_num(company_ps) and _is_num(weighted_peer_ps) and weighted_peer_ps > 0:
+                result["relative_weighted_ps_premium_pct"] = round(
+                    (company_ps - weighted_peer_ps) / weighted_peer_ps * 100, 1
+                )
+                result["weighted_valuation_position"] = _calc_valuation_position(
+                    company_ps, weighted_peer_ps, scarcity=0,
+                    premium=result["relative_weighted_ps_premium_pct"],
+                )
+
         # 市值对比（当 PS/PE 不可用或作为补充参考）
         company_mc = prospectus_info.get("market_cap_hkd_million") or company_ps  # 尽可能使用
         if company_ps is None and _is_num(company_mc):
@@ -990,8 +1089,11 @@ class PeerComparableAnalyzer:
         try:
             rev = prospectus_info.get("revenue")
             rev_y1 = prospectus_info.get("revenue_y1")
+            premium_for_score = result.get("relative_weighted_ps_premium_pct")
+            if premium_for_score is None:
+                premium_for_score = result["relative_ps_premium_pct"]
             peer_scr = _calc_peer_score(
-                scarcity, result["relative_ps_premium_pct"], rev, rev_y1, matched_sector,
+                scarcity, premium_for_score, rev, rev_y1, matched_sector,
             )
         except Exception:
             peer_scr = 0
@@ -1003,6 +1105,8 @@ class PeerComparableAnalyzer:
             result["valuation_position"] = _calc_valuation_position(
                 company_ps, peer_median_ps, scarcity, result["relative_ps_premium_pct"]
             )
+        if result.get("weighted_valuation_position") not in (None, "缺失"):
+            result["valuation_position"] = result["weighted_valuation_position"]
 
         # 11. 总结
         try:
@@ -1010,6 +1114,11 @@ class PeerComparableAnalyzer:
                 result["valuation_position"], sk, matched,
                 company_ps, peer_median_ps, peer_median_pe, company_pe,
             )
+            if result.get("weighted_peer_ps"):
+                result["summary"] += (
+                    f"；按业务占比加权同行PS {result['weighted_peer_ps']:.1f}x"
+                    f"({result.get('relative_weighted_ps_premium_pct', 0):+.0f}%)"
+                )
         except Exception:
             result["summary"] = f"细分赛道: {sk}；同行对比完成"
 

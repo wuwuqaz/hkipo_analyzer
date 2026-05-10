@@ -10,6 +10,90 @@ class ScoringSystem:
     """评分系统"""
 
     @staticmethod
+    def _score_band(score, high=70, mid=50, low=35, high_label="高", mid_label="中", low_label="偏弱"):
+        if score >= high:
+            return high_label
+        if score >= mid:
+            return mid_label
+        if score >= low:
+            return low_label
+        return "弱"
+
+    @staticmethod
+    def _valuation_pressure_label(valuation_score, valuation):
+        label = str((valuation or {}).get('valuation_label') or '')
+        if any(x in label for x in ('很贵', '明显偏贵', '估值压力')):
+            return '高'
+        if any(x in label for x in ('偏贵', 'PS辅助')):
+            return '中'
+        if valuation_score >= 65:
+            return '低'
+        if valuation_score >= 40:
+            return '中'
+        return '高'
+
+    def _build_strategy_scores(self, prospectus_info, trade_score, fundamental_score, valuation_score, theme_score, data_quality_score):
+        valuation = prospectus_info.get('valuation') or {}
+        customer = prospectus_info.get('customer_supplier') or {}
+        cashflow = prospectus_info.get('cashflow') or {}
+        risk_factors = prospectus_info.get('risk_factors') or {}
+
+        customer_quality = customer.get('customer_quality_score', 0)
+        long_raw = (
+            fundamental_score * 0.50
+            + valuation_score * 0.22
+            + data_quality_score * 0.13
+            + min(100, customer_quality) * 0.12
+            + theme_score * 0.03
+        )
+        if cashflow.get('cash_quality_label') == '弱':
+            long_raw -= 4
+        if _is_num(cashflow.get('cash_runway_years')) and cashflow.get('cash_runway_years') < 1:
+            long_raw -= 2
+        if _is_num(risk_factors.get('total_penalty')):
+            long_raw -= min(8, risk_factors.get('total_penalty'))
+
+        ipo_trade_score = int(min(100, max(0, round(trade_score))))
+        long_term_score = int(min(100, max(0, round(long_raw))))
+        valuation_pressure = self._valuation_pressure_label(valuation_score, valuation)
+        ipo_trade_label = self._score_band(ipo_trade_score, high=75, mid=60, low=40, high_label='极高', mid_label='高', low_label='中')
+        long_term_label = self._score_band(long_term_score, high=70, mid=55, low=25, high_label='强', mid_label='中等', low_label='中等偏弱')
+
+        reasons = []
+        if ipo_trade_score >= 75:
+            reasons.append('公开认购/筹码/资金信号强，首日交易属性突出')
+        elif ipo_trade_score >= 60:
+            reasons.append('打新交易信号偏强')
+        else:
+            reasons.append('打新交易信号未形成强共识')
+
+        if customer_quality >= 60:
+            reasons.append('头部客户验证和复购能力对长期质量有支撑')
+        if cashflow.get('cash_quality_label') == '弱':
+            reasons.append('经营现金流偏弱，需关注营运资金压力')
+        if valuation_pressure in ('中', '高'):
+            reasons.append(f'估值压力{valuation_pressure}，不宜只看热度忽略定价')
+
+        if ipo_trade_score >= 70 and long_term_score < 55:
+            recommendation = '可打新，但不宜当成长线价值股处理'
+        elif ipo_trade_score >= 70 and long_term_score >= 65 and valuation_pressure != '高':
+            recommendation = '积极申购，可跟踪中线持有条件'
+        elif ipo_trade_score >= 55:
+            recommendation = '可小注参与，偏首日交易'
+        else:
+            recommendation = '谨慎申购或观望'
+
+        return {
+            'ipo_trade_score': ipo_trade_score,
+            'ipo_trade_label': ipo_trade_label,
+            'long_term_score': long_term_score,
+            'long_term_label': long_term_label,
+            'valuation_pressure_label': valuation_pressure,
+            'subscription_recommendation': recommendation,
+            'recommendation_reasons': reasons[:5],
+        }
+
+    @staticmethod
     def _component_label(score, score_type):
         if score_type == "heat":
             if score >= 35:
@@ -88,7 +172,9 @@ class ScoringSystem:
         scarcity = peer_comparison.get('scarcity_score', 0)
         peer_score_val = peer_comparison.get('peer_score', 0)
         peer_valuation_pos = peer_comparison.get('valuation_position', '')
-        relative_ps_premium = peer_comparison.get('relative_ps_premium_pct')
+        relative_ps_premium = peer_comparison.get('relative_weighted_ps_premium_pct')
+        if relative_ps_premium is None:
+            relative_ps_premium = peer_comparison.get('relative_ps_premium_pct')
         quant_count = peer_comparison.get('quantitative_peer_count')
         val_label = valuation.get('valuation_label', '')
         rel_val_label = valuation.get('relative_valuation_label', '')
@@ -417,6 +503,10 @@ class ScoringSystem:
         peer_adj, val_penalty = self._calc_valuation_adjustments(ipo, prospectus_info, reasons)
 
         score = round(raw_final + peer_adj + val_penalty)
+        strategy_scores = self._build_strategy_scores(
+            prospectus_info, trade_score, fundamental_score,
+            valuation_score, theme_score, data_quality_score,
+        )
 
         cornerstone_red_flags = cornerstone_analysis.get('red_flags', [])
         final_score_before_cap = score
@@ -482,6 +572,8 @@ class ScoringSystem:
             'valuation_score': valuation_score,
             'theme_score': theme_score,
             'data_quality_score': data_quality_score,
+            'ipo_trade_score': strategy_scores['ipo_trade_score'],
+            'long_term_score': strategy_scores['long_term_score'],
         }
 
         return {
@@ -492,6 +584,7 @@ class ScoringSystem:
             'valuation_score': valuation_score,
             'theme_score': theme_score,
             'data_quality_score': data_quality_score,
+            **strategy_scores,
             'reasons': reasons,
             'components': components,
             'data_confidence_gate_warning': data_confidence_gate_warning,

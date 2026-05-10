@@ -1,0 +1,24 @@
+{
+  "test_date": "2026-05-09 23:12:02",
+  "app_url": "http://localhost:8501",
+  "issues_found": 0,
+  "issues": [],
+  "console_errors": [],
+  "screenshots": [
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/history_page.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/responsive_laptop_1366x768.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/test_selectbox_1_initial.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/responsive_tablet_768x1024.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/peer_admin_page.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/test_selectbox_2_after_click.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/test_selectbox_keyboard.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/responsive_desktop_1920x1080.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/upload_page.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/dashboard_initial.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/dashboard_full.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/responsive_mobile_375x667.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/upload_full.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/test_selectbox_expanded.png",
+    "/Users/Zhuanz/Documents/trae_projects/打新分析/hkipo_analyzer/dogfood-output/screenshots/verify_fix_1_initial.png"
+  ]
+}

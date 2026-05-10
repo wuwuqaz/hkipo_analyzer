@@ -91,6 +91,14 @@ class ValuationResult:
     valuation_profitability_type: Optional[str] = None
     revenue_hkd_million: Optional[float] = None
     market_cap_hkd_million: Optional[float] = None
+    valuation_price_basis: str = "prospectus_price"
+    indicative_offer_price: Optional[float] = None
+    final_offer_price: Optional[float] = None
+    indicative_market_cap_hkd_million: Optional[float] = None
+    final_market_cap_hkd_million: Optional[float] = None
+    final_ps_ratio: Optional[float] = None
+    final_total_fund: Optional[float] = None
+    final_public_offer: Optional[float] = None
     market_cap_to_rd_ratio: Optional[float] = None
     biotech_valuation_label: Optional[str] = None
     biotech_valuation_reasons: list[str] = field(default_factory=list)
@@ -178,6 +186,17 @@ class CustomerSupplierResult:
     largest_customer_revenue_pct: Optional[float] = None
     top5_supplier_purchase_pct: Optional[float] = None
     largest_supplier_purchase_pct: Optional[float] = None
+    customer_retention_rate_pct: Optional[float] = None
+    net_dollar_retention_rate_pct: Optional[float] = None
+    top_global_service_robotics_customers_count: Optional[int] = None
+    top_global_service_robotics_customers_total: Optional[int] = None
+    top_global_commercial_service_robotics_customers_count: Optional[int] = None
+    top_global_commercial_service_robotics_customers_total: Optional[int] = None
+    head_customer_supply_chain: Optional[bool] = None
+    customer_quality_score: int = 0
+    customer_quality_label: str = "缺失"
+    customer_quality_reasons: list[str] = field(default_factory=list)
+    customer_validation_summary: str = ""
     concentration_risk_label: str = "缺失"
     concentration_score_penalty: int = 0
     confidence: str = "missing"
@@ -194,9 +213,15 @@ class CustomerSupplierResult:
 class CashFlowResult:
     operating_cash_flow: Optional[float] = None
     ocf_to_net_profit: Optional[float] = None
+    ocf_to_revenue: Optional[float] = None
+    cash_and_cash_equivalents: Optional[float] = None
+    cash_runway_years: Optional[float] = None
+    post_ipo_cash_runway_years: Optional[float] = None
     inventory_turnover_days_latest: Optional[float] = None
+    receivables_turnover_days_latest: Optional[float] = None
     receivables_growth_vs_revenue: Optional[float] = None
     cash_quality_label: str = "缺失"
+    financing_dependency_label: str = "缺失"
     working_capital_risks: list[str] = field(default_factory=list)
     confidence: str = "missing"
 
@@ -300,6 +325,11 @@ class PeerComparisonResult:
     peer_ps_count: int = 0
     peer_pe_count: int = 0
     relative_ps_premium_pct: Optional[float] = None
+    weighted_peer_ps: Optional[float] = None
+    relative_weighted_ps_premium_pct: Optional[float] = None
+    weighted_valuation_position: Optional[str] = None
+    business_line_peer_valuation: list[dict[str, Any]] = field(default_factory=list)
+    peer_candidate_filter_warnings: list[str] = field(default_factory=list)
     relative_pe_premium_pct: Optional[float] = None
     valuation_position: str = "缺失"
     scarcity_score: int = 0
@@ -417,6 +447,10 @@ class ProspectusInfo:
 
     # --- 发行信息 ---
     offer_price: Optional[float] = None
+    indicative_offer_price: Optional[float] = None
+    final_offer_price: Optional[float] = None
+    offer_price_source: Optional[str] = None
+    valuation_price_basis: str = "prospectus_price"
     min_price: Optional[float] = None
     max_price: Optional[float] = None
     lot_size: Optional[int] = None
@@ -426,6 +460,11 @@ class ProspectusInfo:
     international_offer_shares: Optional[int] = None
     shares_in_issue_post_listing: Optional[int] = None
     market_cap_hkd_million: Optional[float] = None
+    indicative_market_cap_hkd_million: Optional[float] = None
+    final_market_cap_hkd_million: Optional[float] = None
+    final_ps_ratio: Optional[float] = None
+    final_total_fund: Optional[float] = None
+    final_public_offer: Optional[float] = None
     market_cap_hkd_million_low: Optional[float] = None
     market_cap_hkd_million_high: Optional[float] = None
     market_cap_hkd_million_mid: Optional[float] = None
@@ -462,6 +501,8 @@ class ProspectusInfo:
     financial_currency: str = "RMB"
     financial_currency_unit: str = "unknown"
     financial_currency_source: Optional[str] = None
+    growth_validation_status: Optional[str] = None
+    growth_validation_summary: Optional[str] = None
     financial_extract_confidence: Optional[str] = None
     financial_data_quality_flags: list[str] = field(default_factory=list)
     financial_table: Optional[dict[str, Any]] = None
@@ -557,6 +598,13 @@ class IPOData:
     # 评分
     score: int = 0
     subscription_score: int = 0
+    ipo_trade_score: int = 0
+    ipo_trade_label: str = ""
+    long_term_score: int = 0
+    long_term_label: str = ""
+    valuation_pressure_label: str = ""
+    subscription_recommendation: str = ""
+    recommendation_reasons: list[str] = field(default_factory=list)
     fundamental_score: int = 0
     stock_quality_score: int = 0
     score_reasons: list[str] = field(default_factory=list)

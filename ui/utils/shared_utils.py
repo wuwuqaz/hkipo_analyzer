@@ -44,10 +44,10 @@ def score_class(score: float) -> str:
 def score_color_hex(score: float) -> str:
     score = _num(score)
     if score >= 70:
-        return "#34d399"
+        return "#00ff88"
     elif score >= 55:
         return "#a3e635"
     elif score >= 40:
-        return "#fbbf24"
+        return "#ffaa00"
     else:
-        return "#fb7185"
+        return "#ff3366"

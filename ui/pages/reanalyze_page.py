@@ -105,23 +105,25 @@ class ReanalyzePage:
         if prev_score is None or curr_score is None:
             return
 
-        delta_color = "#34d399" if score_delta and score_delta > 0 else ("#fb7185" if score_delta and score_delta < 0 else "#64748b")
+        delta_color = "#00ff88" if score_delta and score_delta > 0 else ("#ff3366" if score_delta and score_delta < 0 else "#64748b")
         delta_sign = "+" if score_delta and score_delta > 0 else ""
 
         dim_rows = ""
         for dim, delta in version_delta.get("dimension_deltas", {}).items():
             dim_label = {
+                "ipo_trade_score": "打新",
+                "long_term_score": "长期",
                 "trade_score": "交易",
                 "fundamental_score": "基本面",
                 "valuation_score": "估值",
                 "theme_score": "主题",
                 "data_quality_score": "数据质量",
             }.get(dim, dim)
-            dim_color = "#34d399" if delta > 0 else ("#fb7185" if delta < 0 else "#64748b")
+            dim_color = "#00ff88" if delta > 0 else ("#ff3366" if delta < 0 else "#64748b")
             dim_sign = "+" if delta > 0 else ""
             dim_rows += (
                 f'<div style="display:inline-block;margin:2px 4px;padding:4px 10px;border-radius:8px;'
-                f'background:rgba(255,255,255,0.04);border:1px solid rgba(148,163,184,0.1);font-size:12px;color:#94a3b8;">'
+                f'background:rgba(0,245,255,0.04);border:1px solid rgba(148,163,184,0.1);font-size:12px;color:#7dd3fc;">'
                 f'{dim_label}: <b style="color:{dim_color};">{dim_sign}{delta}</b></div>'
             )
 
@@ -131,19 +133,19 @@ class ReanalyzePage:
             <div style="display:flex;gap:20px;align-items:center;margin:12px 0;">
                 <div style="text-align:center;flex:1;">
                     <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">上次评分</div>
-                    <div style="font-size:28px;font-weight:800;color:#94a3b8;font-family:JetBrains Mono,monospace;">{prev_score}</div>
+                    <div style="font-size:28px;font-weight:800;color:#7dd3fc;font-family:JetBrains Mono,monospace;">{prev_score}</div>
                 </div>
-                <div style="font-size:24px;color:#475569;font-weight:300;">→</div>
+                <div style="font-size:24px;color:#64748b;font-weight:300;">→</div>
                 <div style="text-align:center;flex:1;">
                     <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">本次评分</div>
-                    <div style="font-size:28px;font-weight:800;color:#f1f5f9;font-family:JetBrains Mono,monospace;">{curr_score}</div>
+                    <div style="font-size:28px;font-weight:800;color:#e0f2fe;font-family:JetBrains Mono,monospace;">{curr_score}</div>
                 </div>
                 <div style="text-align:center;flex:1;">
                     <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">变化</div>
                     <div style="font-size:28px;font-weight:800;font-family:JetBrains Mono,monospace;color:{delta_color};text-shadow:0 0 12px {delta_color}40;">{delta_sign}{score_delta}</div>
                 </div>
             </div>
-            {f'<div style="font-size:13px;color:#64748b;margin-bottom:8px;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:8px;">{changed_reason}</div>' if changed_reason else ''}
+            {f'<div style="font-size:13px;color:#64748b;margin-bottom:8px;padding:8px 10px;background:rgba(0,245,255,0.03);border-radius:8px;">{changed_reason}</div>' if changed_reason else ''}
             <div style="display:flex;flex-wrap:wrap;gap:4px;">{dim_rows}</div>
         </div>
         """, unsafe_allow_html=True)

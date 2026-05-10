@@ -56,7 +56,18 @@ class DataFormatter:
     @staticmethod
     def is_ended(ipo: dict) -> bool:
         end_date = DataFormatter.parse_date((ipo or {}).get("apply_end_date"))
-        return end_date is not None and end_date < datetime.now().date()
+        if end_date is not None:
+            return end_date < datetime.now().date()
+        # 没有截止日时，从上市日期回退判断
+        # 招股通常在上市前 1-2 天已结束，所以 listing_date <= 明天 即认为已结束
+        from datetime import timedelta
+        listing_date = DataFormatter.parse_date((ipo or {}).get("listing_date"))
+        if listing_date is None:
+            pi = (ipo or {}).get("prospectus_info", {}) or {}
+            listing_date = DataFormatter.parse_date(pi.get("listing_date"))
+        if listing_date is not None:
+            return listing_date <= datetime.now().date() + timedelta(days=1)
+        return False
 
     @staticmethod
     def archive_time_display(ipo: dict) -> str:
@@ -82,14 +93,18 @@ class DataFormatter:
                 "error": "异常",
             }
             score = ipo.get("score", 0)
+            trade_score = ipo.get("ipo_trade_score", ipo.get("trade_score", ipo.get("subscription_score", 0)))
+            long_term_score = ipo.get("long_term_score", ipo.get("fundamental_score", 0))
             row = {
                 "股票代码": ipo.get("hk_code", "--"),
                 "公司名称": ipo.get("company_name", "--"),
-                "总评分": f"{score}/100",
-                "_score_num": _num(score),
-                "申购热度": ipo.get("subscription_score", 0),
-                "基本面": ipo.get("fundamental_score", 0),
-                "风险扣分": f"-{ipo.get('risk_penalty', 0)}",
+                "打新交易分": f"{trade_score}/100",
+                "_score_num": _num(trade_score),
+                "长期投资分": f"{long_term_score}/100",
+                "旧综合分": f"{score}/100",
+                "申购建议": ipo.get("subscription_recommendation", "--"),
+                "估值压力": ipo.get("valuation_pressure_label", "--"),
+                "重大红旗扣分": f"-{ipo.get('risk_penalty', 0)}",
                 "市场热度": ipo.get("market_heat", "--"),
                 "估值": val.get("valuation_label", "--"),
                 "毛利率": DataFormatter.format_percentage(
@@ -109,10 +124,12 @@ class DataFormatter:
 
     @staticmethod
     def sort_ipos(ipos: list[dict], sort_by: str) -> list[dict]:
-        if sort_by == "评分从高到低":
-            return sorted(ipos, key=lambda item: _num(item.get("score")), reverse=True)
-        if sort_by == "评分从低到高":
-            return sorted(ipos, key=lambda item: _num(item.get("score")), reverse=False)
+        if sort_by in ("评分从高到低", "打新分从高到低"):
+            return sorted(ipos, key=lambda item: _num(item.get("ipo_trade_score", item.get("trade_score", item.get("score")))), reverse=True)
+        if sort_by in ("评分从低到高", "打新分从低到高"):
+            return sorted(ipos, key=lambda item: _num(item.get("ipo_trade_score", item.get("trade_score", item.get("score")))), reverse=False)
+        if sort_by == "长期分从高到低":
+            return sorted(ipos, key=lambda item: _num(item.get("long_term_score", item.get("fundamental_score"))), reverse=True)
         with_dates = [item for item in ipos if DataFormatter.parse_date(item.get("apply_end_date")) is not None]
         without_dates = [item for item in ipos if DataFormatter.parse_date(item.get("apply_end_date")) is None]
         if sort_by == "截止日从远到近":
@@ -131,7 +148,7 @@ class DataFormatter:
         if rev and rev_y1 and rev_y1 != 0:
             rev_yoy = (rev - rev_y1) / abs(rev_y1) * 100
             rev_str = f"{rev:.1f} M"
-            color = '#fb7185' if rev_yoy > 0 else '#34d399'
+            color = '#ff3366' if rev_yoy > 0 else '#00ff88'
             arrow = '↑' if rev_yoy > 0 else '↓'
             return SafeHtml(
                 f"{_html(rev_str)} <span style='color:{color};font-size:12px;'>"
@@ -146,7 +163,7 @@ class DataFormatter:
         if np_val is not None and np_y1 is not None and np_y1 != 0:
             np_yoy = (np_val - np_y1) / abs(np_y1) * 100
             np_str = f"{np_val:.1f} M"
-            color = '#fb7185' if np_yoy > 0 else '#34d399'
+            color = '#ff3366' if np_yoy > 0 else '#00ff88'
             arrow = '↑' if np_yoy > 0 else '↓'
             return SafeHtml(
                 f"{_html(np_str)} <span style='color:{color};font-size:12px;'>"
@@ -162,7 +179,7 @@ class DataFormatter:
             gm_cur = _normalize_gm(gm)
             gm_delta = gm_cur - _normalize_gm(gm_y1)
             gm_str = f"{gm_cur:.1f}%"
-            color = '#fb7185' if gm_delta > 0 else '#34d399'
+            color = '#ff3366' if gm_delta > 0 else '#00ff88'
             arrow = '↑' if gm_delta > 0 else '↓'
             return SafeHtml(
                 f"{_html(gm_str)} <span style='color:{color};font-size:12px;'>"

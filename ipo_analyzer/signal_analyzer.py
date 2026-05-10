@@ -434,7 +434,9 @@ class SignalComponentAnalyzer:
         peer_score_val = peer_comparison.get('peer_score', 0)
         peer_valuation_pos = peer_comparison.get('valuation_position', '缺失')
         scarcity = peer_comparison.get('scarcity_score', 0)
-        premium = peer_comparison.get('relative_ps_premium_pct')
+        premium = peer_comparison.get('relative_weighted_ps_premium_pct')
+        if premium is None:
+            premium = peer_comparison.get('relative_ps_premium_pct')
         raw_quant_count = peer_comparison.get('quantitative_peer_count', 0)
         quant_count = int(raw_quant_count) if _is_num(raw_quant_count) else 0
 
@@ -544,6 +546,8 @@ class SignalComponentAnalyzer:
                 detail_parts.append(f"现金runway {valuation['cash_runway_years']:.1f}年")
         if peer_comparison.get('subsector'):
             detail_parts.append(f"同行:{peer_comparison['subsector']}")
+        if peer_comparison.get('weighted_peer_ps'):
+            detail_parts.append(f"加权同行PS {peer_comparison['weighted_peer_ps']:.1f}x")
         if quant_count < 2 and peer_comparison.get('subsector'):
             detail_parts.append("定性参考")
         detail = '；'.join(detail_parts) if detail_parts else 'PE/PS可得口径初筛'
@@ -644,7 +648,7 @@ class SignalComponentAnalyzer:
         sector = prospectus_info.get('sector', 'unknown')
         name = str(prospectus_info.get('extracted_company_name', '') or '').lower()
         extracted_text = str(prospectus_info.get('_extracted_text', '') or prospectus_info.get('prospectus_text', ''))
-        is_biotech = profile.is_biotech if 'profile' in locals() else classify_company(prospectus_info, extracted_text).is_biotech
+        is_biotech = classify_company(prospectus_info, extracted_text).is_biotech
         profitable = prospectus_info.get('profitable')
         # 早期未商业化公司（18A/18C）的爆发增长和巨额亏损属于正常现象
         is_early_stage = _is_num(revenue_y1) and revenue_y1 < 50 and profitable is False
@@ -664,8 +668,27 @@ class SignalComponentAnalyzer:
             growth = (revenue - revenue_y1) / revenue_y1
             # 早期未商业化公司收入爆发增长属于正常现象，豁免异常检测
             if abs(growth) > vsl.growth_extreme and not is_early_stage:
-                red_flags.append(f"收入同比异常({growth*100:.1f}%)，需核对招股书解释")
-                score -= 2
+                business = prospectus_info.get('business_breakdown') or {}
+                segments = business.get('segments') or []
+                positive_segments = [
+                    s for s in segments
+                    if _is_num(s.get('revenue_latest')) and _is_num(s.get('revenue_previous'))
+                    and s.get('revenue_latest') > s.get('revenue_previous')
+                ]
+                has_segment_explanation = bool(
+                    business.get('growth_source') not in (None, '', 'missing', '增长来源待确认')
+                    and positive_segments
+                )
+                if has_segment_explanation:
+                    summary = f"高增长({growth*100:.1f}%)，已由招股书分部数据验证: {business.get('growth_source')}"
+                    reasons.append(summary)
+                    prospectus_info['growth_validation_status'] = 'explained'
+                    prospectus_info['growth_validation_summary'] = summary
+                else:
+                    red_flags.append(f"收入同比异常({growth*100:.1f}%)，需核对招股书解释")
+                    prospectus_info['growth_validation_status'] = 'unexplained'
+                    prospectus_info['growth_validation_summary'] = f"收入同比{growth*100:.1f}%，未找到分部解释"
+                    score -= 2
             ratio = max(revenue, revenue_y1) / max(min(revenue, revenue_y1), 1e-9)
             if ratio > vsl.revenue_ratio_extreme and not is_early_stage:
                 red_flags.append("收入两年口径差异超过10倍，疑似单位或表格错位")

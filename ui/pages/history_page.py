@@ -31,7 +31,9 @@ class HistoryPage:
         )
 
         self._migrate_cache()
-        all_history = self.history_store.load(include_live=True)
+
+        with st.spinner("正在加载历史数据..."):
+            all_history = self.history_store.load(include_live=True)
 
         if not all_history:
             self._render_empty_history()
@@ -61,7 +63,7 @@ class HistoryPage:
             st.markdown('<div class="section-title">📋 选择历史IPO查看详情</div>', unsafe_allow_html=True)
             options = [
                 f"{item.get('hk_code', '--')} - {item.get('company_name', '--')} "
-                f"({item.get('score', 0)}/100 · 截止 {item.get('apply_end_date', '--')})"
+                f"(打新 {item.get('ipo_trade_score', item.get('trade_score', item.get('score', 0)))}/100 · 截止 {item.get('apply_end_date', '--')})"
                 for item in visible
             ]
             selected = st.selectbox("选择历史IPO", options, label_visibility="collapsed")
@@ -260,11 +262,15 @@ class HistoryPage:
     def _merge_display_result(self, current_item: dict, result: dict) -> dict:
         merged = dict(current_item or {})
         for key, value in (result or {}).items():
+            if key == 'post_listing':
+                continue
             if value is None or value == "":
                 continue
             merged[key] = value
-        if current_item.get("post_listing") and not merged.get("post_listing"):
+        if current_item.get("post_listing"):
             merged["post_listing"] = current_item["post_listing"]
+        elif result.get("post_listing"):
+            merged["post_listing"] = result["post_listing"]
         return merged
 
     def _render_version_delta(self, version_delta: dict) -> None:
@@ -276,23 +282,25 @@ class HistoryPage:
         if prev_score is None or curr_score is None:
             return
 
-        delta_color = "#34d399" if score_delta and score_delta > 0 else ("#fb7185" if score_delta and score_delta < 0 else "#64748b")
+        delta_color = "#00ff88" if score_delta and score_delta > 0 else ("#ff3366" if score_delta and score_delta < 0 else "#64748b")
         delta_sign = "+" if score_delta and score_delta > 0 else ""
 
         dim_rows = ""
         for dim, delta in version_delta.get("dimension_deltas", {}).items():
             dim_label = {
+                "ipo_trade_score": "打新",
+                "long_term_score": "长期",
                 "trade_score": "交易",
                 "fundamental_score": "基本面",
                 "valuation_score": "估值",
                 "theme_score": "主题",
                 "data_quality_score": "数据质量",
             }.get(dim, dim)
-            dim_color = "#34d399" if delta > 0 else ("#fb7185" if delta < 0 else "#64748b")
+            dim_color = "#00ff88" if delta > 0 else ("#ff3366" if delta < 0 else "#64748b")
             dim_sign = "+" if delta > 0 else ""
             dim_rows += (
                 f'<div style="display:inline-block;margin:2px 4px;padding:4px 10px;border-radius:8px;'
-                f'background:rgba(255,255,255,0.04);border:1px solid rgba(148,163,184,0.1);font-size:12px;color:#94a3b8;">'
+                f'background:rgba(56,189,248,0.06);border:1px solid rgba(148,163,184,0.1);font-size:12px;color:#94a3b8;">'
                 f'{dim_label}: <b style="color:{dim_color};">{dim_sign}{delta}</b></div>'
             )
 
@@ -301,20 +309,20 @@ class HistoryPage:
             <div class="section-title">📊 版本对比</div>
             <div style="display:flex;gap:20px;align-items:center;margin:12px 0;">
                 <div style="text-align:center;flex:1;">
-                    <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">上次评分</div>
+                    <div style="font-size:11px;color:#64748b;font-weight:600;letter-spacing:0.05em;">上次评分</div>
                     <div style="font-size:28px;font-weight:800;color:#94a3b8;font-family:JetBrains Mono,monospace;">{prev_score}</div>
                 </div>
-                <div style="font-size:24px;color:#475569;font-weight:300;">→</div>
+                <div style="font-size:24px;color:#64748b;font-weight:300;">→</div>
                 <div style="text-align:center;flex:1;">
-                    <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">本次评分</div>
-                    <div style="font-size:28px;font-weight:800;color:#f1f5f9;font-family:JetBrains Mono,monospace;">{curr_score}</div>
+                    <div style="font-size:11px;color:#64748b;font-weight:600;letter-spacing:0.05em;">本次评分</div>
+                    <div style="font-size:28px;font-weight:800;color:#f0f4f8;font-family:JetBrains Mono,monospace;">{curr_score}</div>
                 </div>
                 <div style="text-align:center;flex:1;">
-                    <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">变化</div>
-                    <div style="font-size:28px;font-weight:800;font-family:JetBrains Mono,monospace;color:{delta_color};text-shadow:0 0 12px {delta_color}40;">{delta_sign}{score_delta}</div>
+                    <div style="font-size:11px;color:#64748b;font-weight:600;letter-spacing:0.05em;">变化</div>
+                    <div style="font-size:28px;font-weight:800;font-family:JetBrains Mono,monospace;color:{delta_color};{delta_color}40;">{delta_sign}{score_delta}</div>
                 </div>
             </div>
-            {f'<div style="font-size:13px;color:#64748b;margin-bottom:8px;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:8px;">{changed_reason}</div>' if changed_reason else ''}
+            {f'<div style="font-size:13px;color:#64748b;margin-bottom:8px;padding:8px 10px;background:rgba(56,189,248,0.05);border-radius:8px;">{changed_reason}</div>' if changed_reason else ''}
             <div style="display:flex;flex-wrap:wrap;gap:4px;">{dim_rows}</div>
         </div>
         """, unsafe_allow_html=True)

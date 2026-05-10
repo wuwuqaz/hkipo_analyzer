@@ -62,15 +62,19 @@ def _attach_debug_info(ipo_data, pdf_path, prospectus_info, prospectus_text):
 
 
 _PROSPECTUS_COPY_FIELDS = [
-    'offer_price', 'entry_fee_hkd', 'lot_size', 'global_offer_shares',
+    'offer_price', 'indicative_offer_price', 'final_offer_price', 'offer_price_source',
+    'valuation_price_basis', 'entry_fee_hkd', 'lot_size', 'global_offer_shares',
     'hk_offer_shares', 'international_offer_shares', 'shares_in_issue_post_listing',
-    'market_cap_hkd_million', 'net_proceeds_hkd_million', 'issuance_ratio_pct',
+    'market_cap_hkd_million', 'indicative_market_cap_hkd_million',
+    'final_market_cap_hkd_million', 'final_ps_ratio', 'final_total_fund',
+    'final_public_offer', 'net_proceeds_hkd_million', 'issuance_ratio_pct',
     'public_offer_ratio_pct', 'cornerstone_total_offer_shares',
     'cornerstone_investment_hkd_million', 'cornerstone_investment_usd_million',
     'cornerstone_offer_ratio_pct', 'revenue', 'revenue_y1', 'revenue_year',
     'revenue_y1_year', 'net_profit', 'net_profit_y1', 'net_profit_year',
     'net_profit_y1_year', 'profitable', 'gross_margin', 'gross_margin_year',
     'sector', 'financial_extract_confidence',
+    'growth_validation_status', 'growth_validation_summary',
     # 发行数据（供 scoring 使用）
     'public_offer', 'total_fund', 'cornerstone_pct',
 ]
@@ -307,8 +311,80 @@ def _calculate_risk_penalty(prospectus_info):
     }
 
 
+def _apply_final_price_basis(ipo_data, prospectus_info):
+    """When allotment data contains a final offer price, make valuation use it.
+
+    The prospectus often carries the top-end offer price while the allotment
+    announcement carries the final price. Keep the prospectus values for audit,
+    but make downstream valuation, peer comparison, and display use the final
+    price when it is available.
+    """
+    post_listing = ipo_data.get('post_listing') or {}
+    if post_listing.get('status') == 'ok':
+        post_listing = {k: v for k, v in post_listing.items() if k not in ('message',) and not (k == 'error' and not v)}
+    final_price = post_listing.get('final_offer_price')
+    if not _is_num(final_price) or float(final_price) <= 0:
+        prospectus_info.setdefault('valuation_price_basis', 'prospectus_price')
+        prospectus_info.setdefault('offer_price_source', 'prospectus')
+        return
+
+    final_price = float(final_price)
+    original_offer_price = prospectus_info.get('offer_price')
+    original_market_cap = prospectus_info.get('market_cap_hkd_million')
+
+    if _is_num(original_offer_price):
+        prospectus_info.setdefault('indicative_offer_price', original_offer_price)
+    if _is_num(original_market_cap):
+        prospectus_info.setdefault('indicative_market_cap_hkd_million', original_market_cap)
+
+    shares = prospectus_info.get('shares_in_issue_post_listing')
+    final_market_cap = None
+    if _is_num(shares):
+        final_market_cap = round(float(shares) * final_price / 1_000_000, 2)
+    elif _is_num(original_market_cap) and _is_num(original_offer_price) and float(original_offer_price) > 0:
+        final_market_cap = round(float(original_market_cap) * final_price / float(original_offer_price), 2)
+
+    global_offer_shares = prospectus_info.get('global_offer_shares')
+    hk_offer_shares = prospectus_info.get('hk_offer_shares')
+    final_total_fund = None
+    final_public_offer = None
+    if _is_num(global_offer_shares):
+        final_total_fund = round(final_price * float(global_offer_shares) / 100_000_000, 2)
+    if _is_num(hk_offer_shares):
+        final_public_offer = round(final_price * float(hk_offer_shares) / 100_000_000, 2)
+
+    prospectus_info['final_offer_price'] = final_price
+    prospectus_info['offer_price'] = final_price
+    prospectus_info['offer_price_source'] = 'final_price'
+    prospectus_info['valuation_price_basis'] = 'final_price'
+    if final_market_cap is not None:
+        prospectus_info['final_market_cap_hkd_million'] = final_market_cap
+        prospectus_info['market_cap_hkd_million'] = final_market_cap
+    if final_total_fund is not None:
+        prospectus_info['final_total_fund'] = final_total_fund
+        prospectus_info['total_fund'] = final_total_fund
+        ipo_data['total_fund'] = final_total_fund
+    if final_public_offer is not None:
+        prospectus_info['final_public_offer'] = final_public_offer
+        prospectus_info['public_offer'] = final_public_offer
+        ipo_data['public_offer'] = final_public_offer
+
+    revenue = prospectus_info.get('revenue')
+    fin_currency = prospectus_info.get('financial_currency', 'RMB')
+    fx = SETTINGS.fx.rmb_to_hkd if fin_currency == 'RMB' else (SETTINGS.fx.usd_to_hkd if fin_currency == 'USD' else 1.0)
+    if _is_num(final_market_cap) and _is_num(revenue) and float(revenue) > 0:
+        prospectus_info['final_ps_ratio'] = round(final_market_cap / (float(revenue) * fx), 2)
+
+    board_lot = prospectus_info.get('lot_size')
+    if _is_num(board_lot):
+        fee_rate = 0.01 + 0.000027 + 0.0000565 + 0.0000015
+        prospectus_info['entry_fee_hkd'] = final_price * float(board_lot) * (1 + fee_rate)
+
+
 def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, prospectus_info, prospectus_text):
     text = prospectus_text  # 统一接口别名
+
+    _apply_final_price_basis(ipo_data, prospectus_info)
 
     # 基础分析器（可循环调用）
     analyzers = [
@@ -354,6 +430,20 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
     risk_penalty_breakdown = risk_penalty_result['breakdown']
 
     final_score = max(0, min(100, scoring['score'] - total_risk_penalty))
+    if total_risk_penalty:
+        adjusted_long_term = max(0, scoring.get('long_term_score', 0) - total_risk_penalty * 2)
+        scoring['long_term_score'] = adjusted_long_term
+        if adjusted_long_term >= 70:
+            scoring['long_term_label'] = '强'
+        elif adjusted_long_term >= 55:
+            scoring['long_term_label'] = '中等'
+        elif adjusted_long_term >= 25:
+            scoring['long_term_label'] = '中等偏弱'
+        else:
+            scoring['long_term_label'] = '弱'
+        if adjusted_long_term < 55 and scoring.get('ipo_trade_score', 0) >= 70:
+            scoring['subscription_recommendation'] = '可打新，但不宜当成长线价值股处理'
+            scoring.setdefault('recommendation_reasons', []).append('存在重大红旗扣分，长期持有需降权')
 
     # parse_success=False 时，明确提示仅热度参考
     parse_success = prospectus_info.get('parse_success', False)
@@ -365,6 +455,13 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
 
     ipo_data['score'] = final_score
     ipo_data['subscription_score'] = scoring.get('subscription_score', 0)
+    ipo_data['ipo_trade_score'] = scoring.get('ipo_trade_score', scoring.get('trade_score', 0))
+    ipo_data['ipo_trade_label'] = scoring.get('ipo_trade_label', '')
+    ipo_data['long_term_score'] = scoring.get('long_term_score', scoring.get('fundamental_score', 0))
+    ipo_data['long_term_label'] = scoring.get('long_term_label', '')
+    ipo_data['valuation_pressure_label'] = scoring.get('valuation_pressure_label', '')
+    ipo_data['subscription_recommendation'] = scoring.get('subscription_recommendation', '')
+    ipo_data['recommendation_reasons'] = scoring.get('recommendation_reasons', [])
     ipo_data['fundamental_score'] = scoring.get('fundamental_score', stock_quality.get('score', 0))
     ipo_data['stock_quality_score'] = stock_quality.get('score', 0)
     ipo_data['score_reasons'] = scoring['reasons']
@@ -455,15 +552,13 @@ def main():
     logger.info("  时间: " + datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     logger.info("="*80)
 
-    results = analyze_live_ipos()
+    temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "temp")
+    temp_dir = os.path.abspath(temp_dir)
+    results = analyze_live_ipos(output_dir=temp_dir)
 
     if not results:
         logger.info("\n✗ 没有正在招股的IPO")
         return
-
-    temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "temp")
-    temp_dir = os.path.abspath(temp_dir)
-    results = analyze_live_ipos(output_dir=temp_dir)
 
     logger.info("\n\n" + "="*80)
     logger.info("  申购优先级排名")
@@ -840,6 +935,11 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
     existing_records = history_store.load()
     for record in existing_records:
         if record.get('hk_code') == resolved_stock_code:
+            # 保留招股日期（重新分析时 API 不再提供，需从历史记录继承）
+            if record.get('apply_start_date'):
+                ipo_data['apply_start_date'] = record['apply_start_date']
+            if record.get('apply_end_date'):
+                ipo_data['apply_end_date'] = record['apply_end_date']
             # 加载已保存的 actual_over_sub_ratio
             if 'actual_over_sub_ratio' in record:
                 ipo_data['actual_over_sub_ratio'] = record['actual_over_sub_ratio']
