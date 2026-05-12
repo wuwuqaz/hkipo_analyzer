@@ -813,6 +813,7 @@ class DetailView:
         dimension_html = self._render_cornerstone_dimensions(ca)
         ca_rows_html = self._render_cornerstone_rows(ca)
         ca_signal_html = self._render_cornerstone_signals(ca)
+        source_html = self._render_cornerstone_source(ca)
 
         st.markdown(
             '<div class="section-card">\n'
@@ -822,9 +823,29 @@ class DetailView:
             f'{dimension_html}\n'
             f'{ca_rows_html}\n'
             f'{ca_signal_html}\n'
+            f'{source_html}\n'
             '</div>',
             unsafe_allow_html=True,
         )
+
+    def _render_cornerstone_source(self, ca: dict) -> str:
+        excerpt = ca.get("source_excerpt") or ca.get("raw_pdf_excerpt") or ""
+        if not excerpt:
+            return ""
+        escaped_excerpt = self.html.escape(excerpt)
+        return (
+            '<details style="margin-top:14px;border-top:1px solid rgba(148,163,184,0.14);padding-top:12px;">'
+            '<summary style="cursor:pointer;font-size:13px;font-weight:800;color:#1E40AF;">'
+            '查看基石章节 PDF 原文摘录</summary>'
+            '<div style="font-size:12px;color:#64748B;margin:8px 0 6px;">'
+            '以下为 PDF 文本提取结果中的基石章节附近原文，用于人工核对投资者名称、认购金额和占比。</div>'
+            '<pre style="white-space:pre-wrap;word-break:break-word;max-height:360px;overflow:auto;'
+            'font-size:12px;line-height:1.5;color:#0F172A;background:#F8FAFC;'
+            'border:1px solid rgba(148,163,184,0.18);border-radius:8px;padding:12px;">'
+            f'{escaped_excerpt}</pre>'
+            '</details>'
+        )
+
     def _render_cornerstone_dimensions(self, ca: dict) -> str:
         dims = ca.get("dimension_scores") or {}
         if not dims:

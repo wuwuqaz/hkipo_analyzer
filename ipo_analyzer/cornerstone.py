@@ -597,6 +597,27 @@ class CornerstoneAnalyzer:
         context = text[idx:max(end_idx, idx + 500000)]
         return context, True
 
+    @staticmethod
+    def _source_excerpt(context, max_chars=12000):
+        """Return a compact original-text excerpt for manual verification."""
+        if not context:
+            return ""
+        lines = [line.strip() for line in context.splitlines()]
+        compact_lines = []
+        blank_seen = False
+        for line in lines:
+            if not line:
+                if not blank_seen and compact_lines:
+                    compact_lines.append("")
+                blank_seen = True
+                continue
+            blank_seen = False
+            compact_lines.append(re.sub(r'\s+', ' ', line))
+        excerpt = "\n".join(compact_lines).strip()
+        if len(excerpt) <= max_chars:
+            return excerpt
+        return excerpt[:max_chars].rstrip() + "\n\n...[excerpt truncated for display]"
+
     def _find_section_end(self, text, start_idx):
         """找到章节结束位置。"""
         # 章节结束标记：下一个主要章节标题（通常为大写且较短）
@@ -1691,6 +1712,7 @@ class CornerstoneAnalyzer:
                 'sector_match': None,
                 'has_cornerstone_section': False,
                 'detail': '未发现基石投资者章节，不进行全文投资者匹配',
+                'source_excerpt': '',
                 'model_version': 'cornerstone_v2_2026_05',
             }
 
@@ -1708,6 +1730,7 @@ class CornerstoneAnalyzer:
             cornerstone_rows, cornerstone_matched, cornerstone_pct, sector, sector_match, spv_flags
         )
         result['has_cornerstone_section'] = True
+        result['source_excerpt'] = self._source_excerpt(context)
         # 保留所有 matched_investors（含 pre_ipo_section），但分开标记
         result['all_matched_investors'] = matched
         return result

@@ -112,3 +112,18 @@ class TestScoreUtils:
         from ui.utils.shared_utils import score_class
         classes = [score_class(s) for s in [0, 30, 50, 70, 90, 100]]
         assert all(isinstance(c, str) for c in classes)
+
+
+class TestDetailView:
+    """测试详情页局部渲染辅助。"""
+
+    def test_cornerstone_source_excerpt_is_escaped(self):
+        from ui.components.detail_view import DetailView
+
+        html = DetailView()._render_cornerstone_source({
+            "source_excerpt": "Cornerstone Investors\nA < B & C",
+        })
+
+        assert "查看基石章节 PDF 原文摘录" in html
+        assert "Cornerstone Investors" in html
+        assert "A &lt; B &amp; C" in html

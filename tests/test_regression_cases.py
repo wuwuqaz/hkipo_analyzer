@@ -767,6 +767,23 @@ def test_cornerstone_unknown_investor_does_not_crash():
     assert rows[0].get('role_note') == '未纳入高质量基石词库，按普通基石处理'
 
 
+def test_cornerstone_analysis_keeps_source_excerpt():
+    """基石分析应保留 PDF 文本摘录，方便人工核对。"""
+    from ipo_analyzer.cornerstone import CornerstoneAnalyzer
+
+    text = """
+    Cornerstone Investors
+    The following cornerstone investors have agreed to subscribe for the Offer Shares:
+    BlackRock, Inc. has agreed to subscribe for 5,000,000 Offer Shares.
+    """
+
+    result = CornerstoneAnalyzer().analyze(text)
+
+    assert result.get('has_cornerstone_section') is True
+    assert 'Cornerstone Investors' in result.get('source_excerpt', '')
+    assert 'BlackRock' in result.get('source_excerpt', '')
+
+
 def test_yifei_pre_ipo_investors_not_counted_as_cornerstone():
     """翼菲科技：pre-IPO 投资者即使在全文出现，也不应计入基石评分"""
     from ipo_analyzer.cornerstone import CornerstoneAnalyzer
