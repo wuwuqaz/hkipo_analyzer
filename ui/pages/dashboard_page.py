@@ -1,7 +1,6 @@
 from typing import Any
 
 import streamlit as st
-import pandas as pd
 
 from ipo_analyzer.core import analyze_live_ipos
 from ipo_analyzer.cache import ResultCache
@@ -49,10 +48,8 @@ class DashboardPage:
             st.info("没有匹配的IPO")
             return
 
-        df = pd.DataFrame(rows)
-        df = df.sort_values("_score_num", ascending=False)
-        df = df.drop(columns=["_score_num"])
-        st.dataframe(df, width="stretch", hide_index=True, height=min(400, len(df) * 40 + 50))
+        rows = sorted(rows, key=lambda row: row.get("_score_num", 0), reverse=True)
+        st.markdown(self._render_summary_table(rows), unsafe_allow_html=True)
 
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown('<div class="section-title">📋 选择查看详情</div>', unsafe_allow_html=True)
@@ -79,6 +76,26 @@ class DashboardPage:
                         break
 
         st.markdown('</div>', unsafe_allow_html=True)
+
+    def _render_summary_table(self, rows: list[dict]) -> str:
+        columns = [key for key in rows[0].keys() if key != "_score_num"] if rows else []
+        header = "".join(f"<th>{self.html.escape(column)}</th>" for column in columns)
+        body_rows = []
+        for row in rows:
+            cells = "".join(
+                f"<td>{self.html.escape(row.get(column, '--'))}</td>"
+                for column in columns
+            )
+            body_rows.append(f"<tr>{cells}</tr>")
+
+        return (
+            '<div class="dashboard-table-wrap">'
+            '<table class="dashboard-table">'
+            f'<thead><tr>{header}</tr></thead>'
+            f'<tbody>{"".join(body_rows)}</tbody>'
+            '</table>'
+            '</div>'
+        )
 
     def _render_hero(self) -> None:
         self.html.hero_section(

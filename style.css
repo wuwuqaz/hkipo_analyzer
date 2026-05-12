@@ -638,6 +638,60 @@ section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] {
   padding: 10px 12px !important;
 }
 
+.dashboard-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 10px 0 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card);
+}
+
+.dashboard-table {
+  width: 100%;
+  min-width: 1500px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--font-sans);
+  color: var(--text-secondary);
+}
+
+.dashboard-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 12px;
+  background: #F8FAFC;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.dashboard-table td {
+  padding: 11px 12px;
+  background: #FFFFFF;
+  color: var(--text-secondary);
+  border-bottom: 1px solid #EEF2F7;
+  border-right: 1px solid #EEF2F7;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.dashboard-table tbody tr:nth-child(even) td {
+  background: #FAFBFD;
+}
+
+.dashboard-table tbody tr:hover td {
+  background: rgba(30, 64, 175, 0.04);
+}
+
 /* ===== Buttons ===== */
 .stButton > button[kind="primary"] {
   background: var(--accent-blue) !important;

@@ -140,3 +140,20 @@ class TestDetailView:
         })
 
         assert result == "100,000（可回拨至20%：200,000手）"
+
+
+class TestDashboardPage:
+    """测试首页局部渲染辅助。"""
+
+    def test_summary_table_uses_light_custom_table(self):
+        from ui.pages.dashboard_page import DashboardPage
+
+        page = DashboardPage("/tmp")
+        html = page._render_summary_table([
+            {"股票代码": "07688", "公司名称": "拓璞数控", "打新交易分": "44/100", "_score_num": 44}
+        ])
+
+        assert "dashboard-table-wrap" in html
+        assert "dashboard-table" in html
+        assert "拓璞数控" in html
+        assert "_score_num" not in html
