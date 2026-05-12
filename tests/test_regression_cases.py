@@ -97,6 +97,25 @@ def test_private_low_quality_not_in_quantitative():
     print("✅ test_private_low_quality_not_in_quantitative passed")
 
 
+def test_simplified_short_name_matches_traditional_prospectus_name():
+    """简体短名应能匹配招股书中的繁体完整公司名。"""
+    from ipo_analyzer.identity_validator import build_company_aliases, validate_pdf_identity
+
+    text = """
+    Stock code: 7688
+    Shanghai Top Numerical Control Technology Co., Ltd.
+    (上海拓璞數控科技股份有限公司)
+    """
+
+    aliases = build_company_aliases("拓璞数控")
+    result = validate_pdf_identity(text, stock_code="07688", company_name="拓璞数控")
+
+    assert "拓璞數控" in aliases
+    assert result["name_match"] is True
+    assert result["stock_code_match"] is True
+    assert result["pdf_identity_confidence"] == "high"
+
+
 def test_loss_making_valuation_not_missing():
     """未盈利公司估值标签不应为'缺失'"""
     prospectus_info = {
