@@ -302,6 +302,8 @@ def export_pdf_report(results, output_file):
             mechanism = margin_detail.get('offering_mechanism') or '--'
             if public_offer_ratio_pct is not None:
                 mechanism = f"公开发售{public_offer_ratio_pct:.2f}%"
+                if prospectus_info.get('is_chapter_18c') and prospectus_info.get('public_offer_clawback_max_pct'):
+                    mechanism += f"（可回拨至{prospectus_info['public_offer_clawback_max_pct']:g}%）"
 
             gross_proceeds_million = None
             if _is_num(ipo.get('public_offer')):
@@ -317,6 +319,13 @@ def export_pdf_report(results, output_file):
                 global_offer_lots = global_offer_shares / board_lot
             if _is_num(hk_offer_shares) and _is_num(board_lot) and board_lot > 0:
                 hk_offer_lots = hk_offer_shares / board_lot
+            hk_offer_lots_text = "--"
+            if global_offer_lots is not None and hk_offer_lots is not None:
+                hk_offer_lots_text = f"{global_offer_lots:,.0f}/{hk_offer_lots:,.0f}"
+                clawback_pct = prospectus_info.get('public_offer_clawback_max_pct') if prospectus_info.get('is_chapter_18c') else None
+                if _is_num(clawback_pct) and _is_num(global_offer_shares) and _is_num(board_lot) and board_lot > 0:
+                    max_hk_lots = global_offer_shares * clawback_pct / 100 / board_lot
+                    hk_offer_lots_text += f"（公开可至{max_hk_lots:,.0f}）"
 
             rows = []
             ts = []
@@ -367,7 +376,7 @@ def export_pdf_report(results, output_file):
             add_pair("每手股数", f"{int(board_lot)}" if board_lot else "--", "入场费", _fmt_entry_fee(entry_fee_hkd), _C['green_light'], r_color=_C['red'], r_bold=True)
             add_pair("公开发售比例", f"{public_offer_ratio_pct:.2f}%" if public_offer_ratio_pct is not None else "--", "估值口径", price_basis, _C['green_light'])
             add_pair("全球发售(万股)", _fmt_shares_m(global_offer_shares), "公开发售(万股)", _fmt_shares_m(hk_offer_shares), _C['yellow_bg'])
-            add_pair("国际发售(万股)", _fmt_shares_m(intl_offer_shares), "发售手数(全球/公开)", f"{global_offer_lots:,.0f}/{hk_offer_lots:,.0f}" if global_offer_lots is not None and hk_offer_lots is not None else "--", _C['yellow_bg'])
+            add_pair("国际发售(万股)", _fmt_shares_m(intl_offer_shares), "发售手数(全球/公开)", hk_offer_lots_text, _C['yellow_bg'])
             add_pair("招股日期", f"{format_iso_date(ipo.get('apply_start_date', ''))} ~ {format_iso_date(ipo.get('apply_end_date', ''))}", "预计上市", listing_date or "--", _C['amber_bg2'])
 
             add_section("估值与资金", _C['brown'])

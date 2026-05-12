@@ -145,6 +145,27 @@ def test_market_cap_table_with_header_unit_extracted():
     assert info["market_cap_source"] == "company_shares_table"
 
 
+def test_chapter_18c_public_offer_clawback_flag():
+    """18C/特专科技 IPO 应标注公开发售可回拨至20%。"""
+    from ipo_analyzer.prospectus_basic_extractor import extract_prospectus_basic_info
+
+    info = {}
+    text = """
+    This Company is a specialist technology company under Chapter 18C.
+    Number of Offer Shares under the Global Offering
+    100,000,000 H Shares
+    Number of Hong Kong Offer Shares
+    10,000,000 H Shares
+    Offer Price: HK$10.00
+    """
+
+    extract_prospectus_basic_info(text, info)
+
+    assert info["is_chapter_18c"] is True
+    assert info["public_offer_clawback_max_pct"] == 20.0
+    assert info["public_offer_clawback_note"] == "18C/特专科技：公开发售可回拨至20%"
+
+
 def test_loss_making_valuation_not_missing():
     """未盈利公司估值标签不应为'缺失'"""
     prospectus_info = {

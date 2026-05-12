@@ -129,12 +129,29 @@ def infer_sector_label(text: str) -> str:
     return _infer_sector(text)
 
 
+def is_chapter_18c_ipo(text: str) -> bool:
+    """Detect HKEX Chapter 18C / specialist technology issuers."""
+    patterns = [
+        r'\bChapter\s*18C\b',
+        r'\bCh(?:apter)?\.?\s*18C\b',
+        r'\b18C\s+(?:of\s+the\s+)?(?:Listing\s+Rules|Main\s+Board\s+Listing\s+Rules)\b',
+        r'specialist\s+technology\s+(?:company|companies|issuer)',
+        r'特[專专]科技(?:公司|發行人|发行人)?',
+    ]
+    return any(re.search(pattern, text or '', re.IGNORECASE) for pattern in patterns)
+
+
 # ---------------------------------------------------------------------------
 # 招股书基础信息提取
 # ---------------------------------------------------------------------------
 
 def extract_prospectus_basic_info(text: str, info: dict) -> None:
     """从招股书文本中提取发行基本信息，直接写入 info dict（原地修改）。"""
+    if is_chapter_18c_ipo(text):
+        info['is_chapter_18c'] = True
+        info['public_offer_clawback_max_pct'] = 20.0
+        info['public_offer_clawback_note'] = '18C/特专科技：公开发售可回拨至20%'
+
     offer_shares = extract_int_after_label(text, [
         r'Number of Offer Shares under\s*the Global\s*Offering\s*[:：]?\s*\n?\s*([0-9,]+)',
         r'Number of Offer Shares under\s*the Global\s*Offering\s*([0-9,]+)\s*H Shares',

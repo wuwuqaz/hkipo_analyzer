@@ -127,3 +127,16 @@ class TestDetailView:
         assert "查看基石章节 PDF 原文摘录" in html
         assert "Cornerstone Investors" in html
         assert "A &lt; B &amp; C" in html
+
+    def test_18c_public_offer_lots_shows_clawback_20_pct(self):
+        from ui.components.detail_view import DetailView
+
+        result = DetailView._format_public_offer_lots({
+            "lot_size": 100,
+            "hk_offer_shares": 10_000_000,
+            "global_offer_shares": 100_000_000,
+            "is_chapter_18c": True,
+            "public_offer_clawback_max_pct": 20.0,
+        })
+
+        assert result == "100,000（可回拨至20%：200,000手）"

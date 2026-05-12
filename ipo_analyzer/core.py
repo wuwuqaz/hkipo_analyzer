@@ -74,7 +74,8 @@ _PROSPECTUS_COPY_FIELDS = [
     'cornerstone_offer_ratio_pct', 'revenue', 'revenue_y1', 'revenue_year',
     'revenue_y1_year', 'net_profit', 'net_profit_y1', 'net_profit_year',
     'net_profit_y1_year', 'profitable', 'gross_margin', 'gross_margin_year',
-    'sector', 'financial_extract_confidence',
+    'sector', 'listing_suffix', 'is_chapter_18c', 'public_offer_clawback_max_pct',
+    'public_offer_clawback_note', 'financial_extract_confidence',
     'growth_validation_status', 'growth_validation_summary',
     # 发行数据（供 scoring 使用）
     'public_offer', 'total_fund', 'cornerstone_pct',

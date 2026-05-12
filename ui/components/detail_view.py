@@ -25,7 +25,16 @@ class DetailView:
         hk_offer = pi.get('hk_offer_shares')
         if _is_num(lot_size) and _is_num(hk_offer) and lot_size > 0:
             lots = int(hk_offer / lot_size)
-            return f"{lots:,}"
+            text = f"{lots:,}"
+            clawback_pct = pi.get('public_offer_clawback_max_pct') if pi.get('is_chapter_18c') else None
+            global_offer = pi.get('global_offer_shares')
+            if _is_num(clawback_pct):
+                text += f"（可回拨至{clawback_pct:g}%"
+                if _is_num(global_offer):
+                    max_lots = int(global_offer * clawback_pct / 100 / lot_size)
+                    text += f"：{max_lots:,}手"
+                text += "）"
+            return text
         return "--"
 
     def render(self, ipo: dict) -> None:

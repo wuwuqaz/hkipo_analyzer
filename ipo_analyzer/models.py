@@ -477,6 +477,9 @@ class ProspectusInfo:
     results_date: Optional[str] = None
     sector: str = "unknown"
     listing_suffix: Optional[str] = None
+    is_chapter_18c: bool = False
+    public_offer_clawback_max_pct: Optional[float] = None
+    public_offer_clawback_note: Optional[str] = None
 
     # --- 财务数据 ---
     revenue: Optional[float] = None
