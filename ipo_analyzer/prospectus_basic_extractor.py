@@ -68,6 +68,29 @@ def extract_hkd_amounts_after_label(text: str, label_pattern: str, window_size: 
     return values
 
 
+def extract_market_cap_table_value(text: str, label_pattern: str, window_size: int = 1200) -> Optional[float]:
+    """Extract HK$'million table values where the currency unit is in the header."""
+    match = re.search(label_pattern, text, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+
+    header_window = text[max(0, match.start() - 400):match.start()]
+    if not re.search(r"HK\$[’'‘`]?\s*million|HK\$\s*['’]?\s*000", header_window, re.IGNORECASE):
+        return None
+
+    value_window = text[match.end():match.end() + window_size]
+    value_match = re.search(r'\(?\d+\)?\s*\n\s*([0-9,]+(?:\.[0-9]+)?)', value_window)
+    if not value_match:
+        value_match = re.search(r'^\s*([0-9,]+(?:\.[0-9]+)?)\b', value_window)
+    if not value_match:
+        return None
+
+    try:
+        return float(value_match.group(1).replace(',', ''))
+    except Exception:
+        return None
+
+
 def parse_text_date(date_text: str) -> Optional[str]:
     if not date_text:
         return None
@@ -185,6 +208,16 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
         market_cap_high = cap_company[-1]
         market_cap_million = market_cap_high
         market_cap_source = 'company_shares_table'
+    else:
+        cap_table_value = extract_market_cap_table_value(
+            text,
+            r'Market capitalization of\s*(?:our\s*)?(?:Company|Shares)\b',
+        )
+        if cap_table_value is not None:
+            market_cap_low = cap_table_value
+            market_cap_high = cap_table_value
+            market_cap_million = cap_table_value
+            market_cap_source = 'company_shares_table'
 
     # 2. 发行H股市值（仅当未找到公司总市值时 fallback）
     if market_cap_million is None:

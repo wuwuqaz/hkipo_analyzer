@@ -116,6 +116,35 @@ def test_simplified_short_name_matches_traditional_prospectus_name():
     assert result["pdf_identity_confidence"] == "high"
 
 
+def test_market_cap_table_with_header_unit_extracted():
+    """市值表单位在表头时，应提取裸数值作为 HKD million。"""
+    from ipo_analyzer.prospectus_basic_extractor import extract_prospectus_basic_info
+
+    info = {}
+    text = """
+    OFFERING STATISTICS (1)
+    Based on an
+    Offer Price of
+    HK$26.39 per
+    Share
+    HK$'million
+    Market capitalization of our Domestic Shares(2)
+    997.8
+    Market capitalization of H Shares converted from Domestic Shares(3)
+    8,079.1
+    Market capitalization of our H Shares to be issued(4)
+    1,724.1
+    Market capitalization of our Shares(5)
+    10,800.9
+    HK$
+    """
+
+    extract_prospectus_basic_info(text, info)
+
+    assert info["market_cap_hkd_million"] == 10800.9
+    assert info["market_cap_source"] == "company_shares_table"
+
+
 def test_loss_making_valuation_not_missing():
     """未盈利公司估值标签不应为'缺失'"""
     prospectus_info = {
