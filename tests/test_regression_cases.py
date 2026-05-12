@@ -749,6 +749,24 @@ def test_cornerstone_profiles_fallback_when_yaml_missing():
     print("✅ test_cornerstone_profiles_fallback_when_yaml_missing passed")
 
 
+def test_cornerstone_unknown_investor_does_not_crash():
+    """基石行未命中词库时应按普通基石处理，不能抛 IndexError。"""
+    from ipo_analyzer.cornerstone import CornerstoneAnalyzer
+
+    analyzer = CornerstoneAnalyzer()
+
+    assert analyzer._best_profile("Obscure Capital Holdings Limited") is None
+
+    rows = analyzer._enrich_cornerstone_rows(
+        "Cornerstone Investors\nObscure Capital Holdings Limited has agreed to subscribe.",
+        [{'name': 'Obscure Capital Holdings Limited', 'offer_shares_pct': 5.0}],
+    )
+
+    assert rows
+    assert rows[0].get('tier') is None
+    assert rows[0].get('role_note') == '未纳入高质量基石词库，按普通基石处理'
+
+
 def test_yifei_pre_ipo_investors_not_counted_as_cornerstone():
     """翼菲科技：pre-IPO 投资者即使在全文出现，也不应计入基石评分"""
     from ipo_analyzer.cornerstone import CornerstoneAnalyzer

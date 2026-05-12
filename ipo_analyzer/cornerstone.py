@@ -756,7 +756,9 @@ class CornerstoneAnalyzer:
             seen.add(key)
             matched.append(profile)
         matched.sort(key=lambda item: self.TIER_SORT_ORDER.get(item.get('tier'), 4))
-        return matched[0] if best_only and matched else (matched[0] if best_only else matched)
+        if best_only:
+            return matched[0] if matched else None
+        return matched
 
     def _best_profile(self, text):
         return self._match_profiles(text, best_only=True)
