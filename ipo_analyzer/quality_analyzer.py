@@ -1,6 +1,6 @@
 """招股书基本面质地分析 — ProspectusQualityAnalyzer"""
 
-from .utils import _is_num, _normalize_gm, _contains_any, SECTOR_KEYWORDS
+from .utils import _is_num, _normalize_gm
 from .settings import SETTINGS
 from .industry_router import classify_company
 
@@ -38,7 +38,7 @@ class ProspectusQualityAnalyzer:
         gross_margin = prospectus_info.get('gross_margin')
         gross_margin_pct = None
         revenue = prospectus_info.get('revenue')
-        sector = prospectus_info.get('sector', 'unknown')
+        prospectus_info.get('sector', 'unknown')
         profitable = prospectus_info.get('profitable')
         qt = SETTINGS.prospectus_quality
         if gross_margin is not None:
@@ -120,13 +120,13 @@ class ProspectusQualityAnalyzer:
                 net_margin = net_profit / revenue * 100
             dimensions['profitability'] = {
                 'label': '盈利',
-                'detail': f"已实现盈利" + (f"，净利率{net_margin:.1f}%" if net_margin is not None else ''),
+                'detail': "已实现盈利" + (f"，净利率{net_margin:.1f}%" if net_margin is not None else ''),
             }
         elif profitable is False:
             net_profit = prospectus_info.get('net_profit')
             dimensions['profitability'] = {
                 'label': '亏损',
-                'detail': f"仍处亏损" + (f"，净亏损{abs(net_profit):.1f}（百万口径）" if _is_num(net_profit) else ''),
+                'detail': "仍处亏损" + (f"，净亏损{abs(net_profit):.1f}（百万口径）" if _is_num(net_profit) else ''),
             }
         else:
             dimensions['profitability'] = {

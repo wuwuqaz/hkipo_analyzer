@@ -2,7 +2,7 @@
 
 import re
 
-from .utils import _is_num, _normalize_gm, _contains_any, SECTOR_KEYWORDS
+from .utils import _is_num, _contains_any, SECTOR_KEYWORDS
 from .settings import SETTINGS
 from .cornerstone import get_sovereign_capital, get_top_tier_capital, get_weak_signal_capital
 from .industry_router import classify_company
@@ -283,7 +283,8 @@ class SignalComponentAnalyzer:
             " ".join(str(row.get(key, '')) for key in ('name', 'short_name', 'match_names'))
             for row in rows
         )
-        context = f"{context} {text[:60000] if text else ''}"
+        fallback_text = str(prospectus_info.get('_extracted_text', '') or text or '')
+        context = f"{context} {fallback_text[:80000]}"
         sovereign_hits = self._match_capital_names(context, self.SOVEREIGN_CAPITAL)
         top_hits = self._match_capital_names(context, self.TOP_TIER_CAPITAL)
         weak_hits = self._match_capital_names(context, self.WEAK_SIGNAL_CAPITAL)
@@ -361,7 +362,6 @@ class SignalComponentAnalyzer:
 
         profile = classify_company(prospectus_info, text)
         is_biotech = profile.is_biotech
-        is_unprofitable = profile.is_unprofitable
         is_low_rev_biotech = profile.is_low_revenue_biotech
 
         abs_score = 0
@@ -628,11 +628,51 @@ class SignalComponentAnalyzer:
             score = max(0, score - 2)
             reasons.append("-W公司需满足额外上市时间、市值和成交额条件")
 
-        detail = f"市值HK${market_cap/100:.1f}亿" if _is_num(market_cap) else "市值缺失"
+        # --- 构建详细港股通路径说明 ---
+        detail_parts = []
+        if _is_num(market_cap):
+            # 阈值列表：(百万港元, 中文描述, 简称)
+            thresholds = [
+                (sc.large_cap, '大型快速纳入', '大型'),
+                (sc.fast_track, '季度快速纳入', '快速'),
+                (sc.regular, '常规观察', '常规'),
+                (sc.small_cap, '小型股观察', '小型股'),
+            ]
+            # 找到当前达到的最高门槛和下一个更高门槛
+            reached = None
+            next_level = None
+            for th, desc, short in thresholds:
+                if market_cap >= th:
+                    reached = (th, desc, short)
+                    break
+                next_level = (th, desc, short)
+
+            cap_hkd = market_cap / 100  # 转为亿港元
+            detail_parts.append(f"市值HK${cap_hkd:.1f}亿")
+
+            if is_ah:
+                detail_parts.append("AH直通候选")
+            elif reached:
+                detail_parts.append(f"已达{reached[1]}门槛（{reached[0]/100:.0f}亿）")
+                if next_level:
+                    gap = next_level[0] - market_cap
+                    gap_pct = gap / market_cap * 100
+                    detail_parts.append(f"距{next_level[1]}（{next_level[0]/100:.0f}亿）还需涨{gap/100:.1f}亿（+{gap_pct:.1f}%）")
+                else:
+                    detail_parts.append("已达最高港股通门槛")
+            elif next_level:
+                gap = next_level[0] - market_cap
+                gap_pct = gap / market_cap * 100
+                detail_parts.append(f"距入通（{next_level[1]}，{next_level[0]/100:.0f}亿）还需涨{gap/100:.1f}亿（+{gap_pct:.1f}%）")
+        else:
+            detail_parts.append("市值缺失")
+
         if is_w:
-            detail += "；-W额外门槛"
+            detail_parts.append("-W额外门槛")
         if is_ah:
-            detail += "；AH候选"
+            detail_parts.append("AH候选")
+
+        detail = "；".join(detail_parts)
         return self._component(score, 10, label, detail, confidence='rule_based_without_index_data', reasons=reasons)
 
     def _analyze_data_quality(self, prospectus_info):
@@ -645,8 +685,8 @@ class SignalComponentAnalyzer:
         market_cap = prospectus_info.get('market_cap_hkd_million')
         extraction_confidence = prospectus_info.get('financial_extract_confidence')
         parser_flags = prospectus_info.get('financial_data_quality_flags') or []
-        sector = prospectus_info.get('sector', 'unknown')
-        name = str(prospectus_info.get('extracted_company_name', '') or '').lower()
+        prospectus_info.get('sector', 'unknown')
+        str(prospectus_info.get('extracted_company_name', '') or '').lower()
         extracted_text = str(prospectus_info.get('_extracted_text', '') or prospectus_info.get('prospectus_text', ''))
         is_biotech = classify_company(prospectus_info, extracted_text).is_biotech
         profitable = prospectus_info.get('profitable')

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field, asdict
-from datetime import date
 from typing import Any, Optional
 
 

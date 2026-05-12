@@ -28,7 +28,7 @@ except Exception:  # pragma: no cover - yfinance is optional at import time
     yf = None
 
 from .downloader import ProspectusDownloader, _retry_request
-from .utils import _is_num, _normalize_company_name, _normalize_stock_code
+from .utils import _normalize_company_name, _normalize_stock_code
 
 logger = logging.getLogger(__name__)
 

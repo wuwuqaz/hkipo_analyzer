@@ -193,7 +193,7 @@ def classify_company(prospectus_info: dict, text: str = "") -> CompanyProfile:
     subsector = prospectus_info.get('peer_comparison', {}).get('subsector')
     revenue = prospectus_info.get('revenue')
     net_profit = prospectus_info.get('net_profit')
-    name = str(prospectus_info.get('extracted_company_name', '') or '').lower()
+    str(prospectus_info.get('extracted_company_name', '') or '').lower()
 
     # 文本回退：若未传入 text，尝试从 prospectus_info 获取
     if not text:

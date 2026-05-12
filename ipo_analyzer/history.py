@@ -5,7 +5,7 @@ import os
 import tempfile
 from datetime import date, datetime
 
-from .utils import strip_runtime_fields
+from .utils import strip_runtime_fields, classify_market_heat
 from .settings import SETTINGS
 
 logger = logging.getLogger(__name__)
@@ -186,10 +186,10 @@ class HistoryStore:
         }
         
         # 4. 保存时间戳版本
-        timestamp_path = self._save_reanalysis_record(stock_code, record, timestamp)
+        self._save_reanalysis_record(stock_code, record, timestamp)
         
         # 5. 覆盖latest
-        latest_path = self._save_reanalysis_latest(stock_code, record)
+        self._save_reanalysis_latest(stock_code, record)
         self.merge_analysis_result(result, source='reanalysis')
         
         logger.info(f"重新分析记录已保存: {stock_code}")
@@ -221,6 +221,11 @@ class HistoryStore:
                 'total_fund', 'public_offer', 'margin_total',
                 'actual_over_sub_ratio', 'forecast_over_sub_ratio',
                 'estimated_subscription_ratio', 'over_sub_ratio_estimated',
+                # 策略引擎字段（申购建议相关）
+                'ipo_trade_score', 'ipo_trade_label',
+                'long_term_score', 'long_term_label',
+                'valuation_pressure_label', 'subscription_recommendation',
+                'recommendation_reasons',
             )
             for key in score_fields:
                 if key in result:
@@ -232,7 +237,6 @@ class HistoryStore:
     def load_reanalysis_history(self, stock_code):
         """加载某股票的所有重新分析历史记录"""
         records = []
-        pattern = f"{stock_code}_*.json"
         for filename in os.listdir(self.reanalysis_dir):
             if filename.startswith(f"{stock_code}_") and filename != f"{stock_code}_latest.json":
                 filepath = os.path.join(self.reanalysis_dir, filename)
@@ -455,14 +459,7 @@ class HistoryStore:
             record['actual_over_sub_ratio'] = public_sub
             record['over_sub_ratio'] = public_sub
             record['over_sub_ratio_source'] = 'post_listing_actual'
-            if public_sub >= SETTINGS.market_heat.extreme:
-                record['market_heat'] = "极热"
-            elif public_sub >= SETTINGS.market_heat.hot:
-                record['market_heat'] = "热门"
-            elif public_sub >= SETTINGS.market_heat.warm:
-                record['market_heat'] = "温和"
-            else:
-                record['market_heat'] = "冷清"
+            record['market_heat'] = classify_market_heat(public_sub)
             self._recalculate_scores(record)
         
         existing[code] = record

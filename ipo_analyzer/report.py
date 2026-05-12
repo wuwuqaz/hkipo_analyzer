@@ -16,10 +16,8 @@ from reportlab.platypus import (
     Spacer,
     Table,
     TableStyle,
-    PageBreak,
-    KeepTogether,
 )
-from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER
 
 from .utils import _is_num, format_iso_date, _format_cornerstone_amount
 from .settings import SETTINGS
@@ -163,14 +161,19 @@ def export_pdf_report(results, output_file):
     pdf_cfg = SETTINGS.pdf_report
 
     def _score_color(score):
-        if score >= pdf_cfg.score_excellent: return _C['green']
-        if score >= pdf_cfg.score_good: return _C['amber']
+        if score >= pdf_cfg.score_excellent:
+            return _C['green']
+        if score >= pdf_cfg.score_good:
+            return _C['amber']
         return _C['red']
 
     def _score_label(score):
-        if score >= pdf_cfg.recommend_active: return "积极申购"
-        if score >= pdf_cfg.recommend_neutral: return "中性试水"
-        if score >= pdf_cfg.recommend_cautious: return "谨慎试水"
+        if score >= pdf_cfg.recommend_active:
+            return "积极申购"
+        if score >= pdf_cfg.recommend_neutral:
+            return "中性试水"
+        if score >= pdf_cfg.recommend_cautious:
+            return "谨慎试水"
         return "建议跳过"
 
     def _progress_bar(score, width=80, height=6, bar_color=None):
@@ -256,15 +259,18 @@ def export_pdf_report(results, output_file):
 
     if results:
         def _fmt_shares_m(share_count):
-            if share_count is None: return "--"
+            if share_count is None:
+                return "--"
             return f"{share_count / 10000:.2f}"
 
         def _fmt_hkd_billion(value_million):
-            if value_million is None: return "--"
+            if value_million is None:
+                return "--"
             return f"HK${value_million / 100:.2f}亿"
 
         def _fmt_entry_fee(value_hkd):
-            if value_hkd is None: return "--"
+            if value_hkd is None:
+                return "--"
             return f"HK${value_hkd:,.2f}"
 
         def build_prospectus_basic_info_table(ipo):
@@ -285,7 +291,7 @@ def export_pdf_report(results, output_file):
             issuance_ratio_pct = prospectus_info.get('issuance_ratio_pct')
             public_offer_ratio_pct = prospectus_info.get('public_offer_ratio_pct')
             listing_date = prospectus_info.get('listing_date')
-            results_date = prospectus_info.get('results_date')
+            prospectus_info.get('results_date')
             cornerstone_total_hkd = prospectus_info.get('cornerstone_investment_hkd_million')
             cornerstone_total_usd = prospectus_info.get('cornerstone_investment_usd_million')
             cornerstone_offer_ratio_pct = prospectus_info.get('cornerstone_offer_ratio_pct') or cornerstone_analysis.get('cornerstone_pct')
@@ -330,7 +336,8 @@ def export_pdf_report(results, output_file):
 
             def vp(value, color=_C['navy'], bold=False):
                 t = value if isinstance(value, str) else str(value)
-                if bold: t = f"<b>{t}</b>"
+                if bold:
+                    t = f"<b>{t}</b>"
                 return Paragraph(f"<font color='{color}'>{t}</font>", styles["Value"])
 
             def add_pair(l_label, l_value, r_label, r_value, val_bg="#ffffff", l_color=_C['navy'], r_color=_C['navy'], l_bold=False, r_bold=False):
@@ -368,7 +375,7 @@ def export_pdf_report(results, output_file):
             if cornerstone_total_hkd is not None and cornerstone_offer_ratio_pct is not None:
                 cornerstone_value = f"HK${cornerstone_total_hkd/100:.2f}亿({cornerstone_offer_ratio_pct:.2f}%)"
             elif cornerstone_total_usd is not None and cornerstone_offer_ratio_pct is not None:
-                cornerstone_hkd = cornerstone_total_usd * 7.8344
+                cornerstone_hkd = cornerstone_total_usd * SETTINGS.fx.usd_to_hkd_precise
                 cornerstone_value = f"HK${cornerstone_hkd/100:.2f}亿({cornerstone_offer_ratio_pct:.2f}%)"
             add_pair("IPO前估值", _fmt_hkd_billion(ipo_pre_valuation_million), "总市值", _fmt_hkd_billion(market_cap_million), "#ffffff", l_color=_C['red'], r_color=_C['red'], l_bold=True, r_bold=True)
             add_pair("募集(公开)", _fmt_hkd_billion(gross_proceeds_million), "净募集", _fmt_hkd_billion(net_proceeds_million), _C['green_light'])
@@ -755,13 +762,14 @@ def export_pdf_report(results, output_file):
             dim_labels = {'growth': '成长性', 'profitability': '盈利质量', 'valuation': '估值压力', 'risk': '风险点'}
             dim_colors = {'growth': _C['green'], 'profitability': _C['blue'], 'valuation': _C['amber'], 'risk': _C['red']}
             dim_data = [[
-                Paragraph(f"<b>维度</b>", styles["Label"]),
-                Paragraph(f"<b>结论</b>", styles["Label"]),
-                Paragraph(f"<b>说明</b>", styles["Label"]),
+                Paragraph("<b>维度</b>", styles["Label"]),
+                Paragraph("<b>结论</b>", styles["Label"]),
+                Paragraph("<b>说明</b>", styles["Label"]),
             ]]
             for key in ['growth', 'profitability', 'valuation', 'risk']:
                 item = dimensions.get(key)
-                if not item: continue
+                if not item:
+                    continue
                 label_text = item.get('label', '--')
                 label_color = dim_colors.get(key, _C['navy'])
                 dim_data.append([
@@ -943,10 +951,10 @@ def export_pdf_report(results, output_file):
 
             if cornerstone_rows:
                 cs_data = [[
-                    Paragraph(f"<b>投资者</b>", styles["TableHeader"]),
-                    Paragraph(f"<b>分级/类别</b>", styles["TableHeader"]),
-                    Paragraph(f"<b>占比/金额</b>", styles["TableHeader"]),
-                    Paragraph(f"<b>作用与判断</b>", styles["TableHeader"]),
+                    Paragraph("<b>投资者</b>", styles["TableHeader"]),
+                    Paragraph("<b>分级/类别</b>", styles["TableHeader"]),
+                    Paragraph("<b>占比/金额</b>", styles["TableHeader"]),
+                    Paragraph("<b>作用与判断</b>", styles["TableHeader"]),
                 ]]
                 row_styles = []
                 tier_order = {'S': 0, 'A': 1, 'B': 2, '弱': 3, None: 4}
@@ -1007,7 +1015,7 @@ def export_pdf_report(results, output_file):
 
         reasons = ipo.get('score_reasons', [])
         if reasons:
-            reason_data = [[Paragraph(f"<b>评分理由</b>", styles["Label"])]]
+            reason_data = [[Paragraph("<b>评分理由</b>", styles["Label"])]]
             for reason in reasons:
                 reason_data.append([Paragraph(f"  {reason}", styles["BulletPoint"])])
             reason_tbl = Table(reason_data, colWidths=[500], hAlign="LEFT")

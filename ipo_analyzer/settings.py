@@ -19,6 +19,8 @@ class FXConfig:
     rmb_to_hkd: float = 1.08
     usd_to_hkd: float = 7.8
     usd_to_hkd_precise: float = 7.8344  # 基石投资等场景使用
+    # 入场费 = 经纪佣金(1%) + 证监会交易征费(0.0027%) + 联交所交易费(0.00565%) + 印花税(0.00015%)
+    entry_fee_rate: float = 0.01 + 0.000027 + 0.0000565 + 0.0000015
 
 
 @dataclass
@@ -66,6 +68,36 @@ class ScoringWeights:
     scale_max: int = 10
     market_max: int = 5
     cornerstone_max: int = 20
+    # 长期评分组合权重
+    long_fundamental_w: float = 0.50
+    long_valuation_w: float = 0.22
+    long_data_quality_w: float = 0.13
+    long_customer_quality_w: float = 0.12
+    long_theme_w: float = 0.03
+    long_cash_weak_penalty: int = 4
+    long_cash_runway_penalty: int = 2
+    long_risk_penalty_max: int = 8
+    # 权重配置文件
+    live_heat_trade: float = 0.35
+    live_heat_fundamental: float = 0.30
+    live_heat_valuation: float = 0.20
+    live_heat_theme: float = 0.10
+    live_heat_dq: float = 0.05
+    prospectus_trade: float = 0.20
+    prospectus_fundamental: float = 0.35
+    prospectus_valuation: float = 0.20
+    prospectus_theme: float = 0.15
+    prospectus_dq: float = 0.10
+
+    # 客户质量评分阈值
+    customer_supply_chain_high: int = 25
+    customer_supply_chain_mid: int = 15
+    customer_commercial_high: int = 20
+    customer_commercial_mid: int = 12
+    customer_retention_high: int = 20
+    customer_retention_mid: int = 12
+    customer_ndr_high: int = 20
+    customer_ndr_mid: int = 12
 
 
 @dataclass
@@ -294,7 +326,7 @@ class HistoryConfig:
 
 @dataclass
 class FileConfig:
-    max_upload_size_mb: int = 80
+    max_upload_size_mb: int = 50  # 与 .streamlit/config.toml server.maxUploadSize 保持一致
     temp_file_ttl_days: int = 7
 
 
@@ -325,6 +357,7 @@ class NetworkConfig:
     playwright_timeout: int = 60000
     head_timeout: int = 10
     margin_page_size: int = 100
+    max_pdf_size_mb: int = 100  # PDF 文件大小上限（MB），防止磁盘耗尽
 
 
 @dataclass

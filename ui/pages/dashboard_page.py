@@ -52,7 +52,7 @@ class DashboardPage:
         df = pd.DataFrame(rows)
         df = df.sort_values("_score_num", ascending=False)
         df = df.drop(columns=["_score_num"])
-        st.dataframe(df, use_container_width=True, hide_index=True, height=min(400, len(df) * 40 + 50))
+        st.dataframe(df, width="stretch", hide_index=True, height=min(400, len(df) * 40 + 50))
 
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown('<div class="section-title">📋 选择查看详情</div>', unsafe_allow_html=True)
@@ -97,11 +97,11 @@ class DashboardPage:
 
         col1, col2, col3 = st.columns([2, 2, 3])
         with col1:
-            if st.button("🔄 更新IPO（使用缓存）", type="primary", use_container_width=True):
+            if st.button("🔄 更新IPO（使用缓存）", type="primary", width="stretch"):
                 with st.spinner("正在获取和分析IPO数据..."):
                     self._execute_ipo_update(force_refresh=False)
         with col2:
-            if st.button("⚡ 强制刷新（重新下载）", use_container_width=True):
+            if st.button("⚡ 强制刷新（重新下载）", width="stretch"):
                 with st.spinner("正在重新下载和分析..."):
                     self._execute_ipo_update(force_refresh=True)
         with col3:

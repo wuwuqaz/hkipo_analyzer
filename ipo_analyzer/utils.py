@@ -5,6 +5,9 @@ def _is_num(x):
     return isinstance(x, (int, float))
 
 
+is_num = _is_num  # public alias
+
+
 def format_iso_date(value):
     if not value:
         return ""
@@ -165,3 +168,18 @@ def strip_runtime_fields(value):
     if isinstance(value, list):
         return [strip_runtime_fields(item) for item in value]
     return value
+
+
+def classify_market_heat(over_sub_ratio):
+    """根据超购倍数返回市场热度标签，消除多处重复的 if/elif 分类逻辑。"""
+    from .settings import SETTINGS
+    if over_sub_ratio is None:
+        return None
+    mh = SETTINGS.market_heat
+    if over_sub_ratio >= mh.extreme:
+        return "极热"
+    elif over_sub_ratio >= mh.hot:
+        return "热门"
+    elif over_sub_ratio >= mh.warm:
+        return "温和"
+    return "冷清"

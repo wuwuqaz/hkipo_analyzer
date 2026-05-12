@@ -1,10 +1,6 @@
-import os
-
 import streamlit as st
 
-from datetime import datetime
 from ipo_analyzer.core import reanalyze_ipo
-from ipo_analyzer.history import HistoryStore
 from ui.renderers.html_renderer import HtmlRenderer
 from ui.renderers.data_formatter import DataFormatter
 from ui.components.detail_view import DetailView
@@ -45,7 +41,7 @@ class ReanalyzePage:
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-        if st.button("🔍 开始重新分析", type="primary", use_container_width=True):
+        if st.button("🔍 开始重新分析", type="primary", width="stretch"):
             historical_market_data = None
             if any(v is not None for v in [margin_total, public_offer, actual_over_sub_ratio, forecast_over_sub_ratio]) or market_heat:
                 historical_market_data = {}
@@ -105,7 +101,7 @@ class ReanalyzePage:
         if prev_score is None or curr_score is None:
             return
 
-        delta_color = "#00ff88" if score_delta and score_delta > 0 else ("#ff3366" if score_delta and score_delta < 0 else "#64748b")
+        delta_color = "#059669" if score_delta and score_delta > 0 else ("#DC2626" if score_delta and score_delta < 0 else "#64748b")
         delta_sign = "+" if score_delta and score_delta > 0 else ""
 
         dim_rows = ""
@@ -119,11 +115,11 @@ class ReanalyzePage:
                 "theme_score": "主题",
                 "data_quality_score": "数据质量",
             }.get(dim, dim)
-            dim_color = "#00ff88" if delta > 0 else ("#ff3366" if delta < 0 else "#64748b")
+            dim_color = "#059669" if delta > 0 else ("#DC2626" if delta < 0 else "#64748b")
             dim_sign = "+" if delta > 0 else ""
             dim_rows += (
                 f'<div style="display:inline-block;margin:2px 4px;padding:4px 10px;border-radius:8px;'
-                f'background:rgba(0,245,255,0.04);border:1px solid rgba(148,163,184,0.1);font-size:12px;color:#7dd3fc;">'
+                f'background:rgba(30,64,175,0.04);border:1px solid rgba(148,163,184,0.12);font-size:12px;color:#475569;">'
                 f'{dim_label}: <b style="color:{dim_color};">{dim_sign}{delta}</b></div>'
             )
 
@@ -133,19 +129,19 @@ class ReanalyzePage:
             <div style="display:flex;gap:20px;align-items:center;margin:12px 0;">
                 <div style="text-align:center;flex:1;">
                     <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">上次评分</div>
-                    <div style="font-size:28px;font-weight:800;color:#7dd3fc;font-family:JetBrains Mono,monospace;">{prev_score}</div>
+                    <div style="font-size:28px;font-weight:800;color:#475569;font-family:JetBrains Mono,monospace;">{prev_score}</div>
                 </div>
                 <div style="font-size:24px;color:#64748b;font-weight:300;">→</div>
                 <div style="text-align:center;flex:1;">
                     <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">本次评分</div>
-                    <div style="font-size:28px;font-weight:800;color:#e0f2fe;font-family:JetBrains Mono,monospace;">{curr_score}</div>
+                    <div style="font-size:28px;font-weight:800;color:#0F172A;font-family:JetBrains Mono,monospace;">{curr_score}</div>
                 </div>
                 <div style="text-align:center;flex:1;">
                     <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;">变化</div>
                     <div style="font-size:28px;font-weight:800;font-family:JetBrains Mono,monospace;color:{delta_color};text-shadow:0 0 12px {delta_color}40;">{delta_sign}{score_delta}</div>
                 </div>
             </div>
-            {f'<div style="font-size:13px;color:#64748b;margin-bottom:8px;padding:8px 10px;background:rgba(0,245,255,0.03);border-radius:8px;">{changed_reason}</div>' if changed_reason else ''}
+            {f'<div style="font-size:13px;color:#475569;margin-bottom:8px;padding:8px 10px;background:rgba(30,64,175,0.04);border-radius:8px;">{changed_reason}</div>' if changed_reason else ''}
             <div style="display:flex;flex-wrap:wrap;gap:4px;">{dim_rows}</div>
         </div>
         """, unsafe_allow_html=True)

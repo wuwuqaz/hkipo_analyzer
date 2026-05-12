@@ -36,12 +36,15 @@ class UploadPage:
             stock_code = st.text_input("股票代码（可选）", "", placeholder="如 01236")
             company_name = st.text_input("公司名称（可选）", "", placeholder="如 乐动机器人")
 
-        if uploaded_file and st.button("🔍 开始分析", type="primary", use_container_width=True):
+        if uploaded_file and st.button("🔍 开始分析", type="primary", width="stretch"):
             from ui.utils.file_utils import MAX_UPLOAD_SIZE_MB
 
             if uploaded_file.size > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
                 st.error(f"上传文件过大，请控制在 {MAX_UPLOAD_SIZE_MB} MB 以内。")
+            elif uploaded_file.read(5) != b'%PDF-':
+                st.error("文件不是有效的 PDF，请上传正确的招股书文件。")
             else:
+                uploaded_file.seek(0)
                 temp_path = os.path.join(
                     self.temp_dir,
                     f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex}.pdf"

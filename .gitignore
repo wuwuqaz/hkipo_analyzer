@@ -4,6 +4,7 @@ __pycache__/
 __MACOSX/
 temp/*.pdf
 temp/allotment/
+temp/reanalysis/
 temp/results_cache.json
 temp/ipo_history.json
 data/backups/
@@ -12,6 +13,11 @@ data/backups/
 dist/
 build/
 .trae/
+.agents/
+.claude/
 output/
 .pytest_cache/
 .ruff_cache/
+screenshots/
+dogfood-output/
+tmp_*.png

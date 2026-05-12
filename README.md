@@ -2,13 +2,15 @@
 
 **当前版本：0.4.1-alpha；状态：开发中，仅供研究参考**
 
+> 🤖 本项目由 AI（Claude Code + deepseek）全流程驱动完成，从需求分析、架构设计、代码实现到测试和部署，均为 AI 自主生成。
+
 自动获取港股招股IPO列表，下载招股书PDF，解析财务数据，运行多维度评分，通过Streamlit Web UI 展示或导出 PDF/JSON 报告。
 
 ## 快速开始
 
 ```bash
 cd hkipo_analyzer
-python3 -m pip install -r requirements.txt
+python3 -m pip install -e ".[dev]"
 
 # 启动 Web UI
 streamlit run app.py
@@ -23,7 +25,7 @@ python3 -c "from ipo_analyzer.core import main; main()"
 hkipo_analyzer/
 ├── app.py                          # Streamlit Web UI 入口
 ├── style.css                       # 前端样式
-├── requirements.txt                # 依赖
+├── pyproject.toml                  # 依赖与构建配置
 ├── data/
 │   ├── peer_comps.yaml             # 同行对比数据库（半动态：可手动更新或通过行情刷新）
 │   └── backups/                    # 更新前自动备份（自动生成）
@@ -46,7 +48,7 @@ hkipo_analyzer/
 │   ├── text_extractor.py           # 文本提取与预处理
 │   ├── identity_validator.py       # PDF 身份校验（公司名/股票代码匹配）
 │   ├── prospectus_basic_extractor.py # 招股书基础信息提取
-│   ├── analyzers.py                # 8 个分析器（估值/业务/地理/客户/现金流/产能/研发/风险）
+│   ├── analyzers/                  # 8 个分析器（估值/业务/地理/客户/现金流/产能/研发/风险）
 │   ├── scoring.py                  # 评分系统（基本面/进阶框架/综合评分）
 │   ├── cornerstone.py              # 基石投资者分析
 │   ├── cache.py                    # 结果缓存（7天 TTL）
@@ -57,6 +59,7 @@ hkipo_analyzer/
 ├── scripts/
 │   ├── test_peer_comps.py          # 同行对比单元测试
 │   └── update_peer_comps.py        # 同行库更新 CLI 工具
+├── tests/                          # pytest 回归与 UI 测试
 └── temp/                           # 临时文件 / 缓存 / 输出
 ```
 

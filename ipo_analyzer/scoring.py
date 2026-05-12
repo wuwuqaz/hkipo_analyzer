@@ -1,8 +1,8 @@
 """评分系统 — ScoringSystem + 向后兼容的 re-export"""
 
-from .quality_analyzer import ProspectusQualityAnalyzer
-from .signal_analyzer import SignalComponentAnalyzer
-from .utils import _is_num, _normalize_gm
+from .quality_analyzer import ProspectusQualityAnalyzer  # noqa: F401
+from .signal_analyzer import SignalComponentAnalyzer  # noqa: F401
+from .utils import _is_num
 from .settings import SETTINGS
 
 
@@ -39,19 +39,19 @@ class ScoringSystem:
         risk_factors = prospectus_info.get('risk_factors') or {}
 
         customer_quality = customer.get('customer_quality_score', 0)
+        sw = SETTINGS.scoring
         long_raw = (
-            fundamental_score * 0.50
-            + valuation_score * 0.22
-            + data_quality_score * 0.13
-            + min(100, customer_quality) * 0.12
-            + theme_score * 0.03
+            fundamental_score * sw.long_fundamental_w
+            + valuation_score * sw.long_valuation_w
+            + data_quality_score * sw.long_data_quality_w
+            + min(100, customer_quality) * sw.long_customer_quality_w
+            + theme_score * sw.long_theme_w
         )
         if cashflow.get('cash_quality_label') == '弱':
-            long_raw -= 4
-        if _is_num(cashflow.get('cash_runway_years')) and cashflow.get('cash_runway_years') < 1:
-            long_raw -= 2
+            long_raw -= sw.long_cash_weak_penalty
+        # 现金 runway < 1 年的极端情况由 _calculate_risk_penalty 统一处理，避免双重扣减
         if _is_num(risk_factors.get('total_penalty')):
-            long_raw -= min(8, risk_factors.get('total_penalty'))
+            long_raw -= min(sw.long_risk_penalty_max, risk_factors.get('total_penalty'))
 
         ipo_trade_score = int(min(100, max(0, round(trade_score))))
         long_term_score = int(min(100, max(0, round(long_raw))))
@@ -93,40 +93,18 @@ class ScoringSystem:
             'recommendation_reasons': reasons[:5],
         }
 
-    @staticmethod
-    def _component_label(score, score_type):
-        if score_type == "heat":
-            if score >= 35:
-                return "极热"
-            if score >= 25:
-                return "热门"
-            if score >= 15:
-                return "温和"
-            return "冷清"
-        if score_type == "quality":
-            if score >= 35:
-                return "强"
-            if score >= 20:
-                return "中"
-            if score > 0:
-                return "弱"
-            return "缺失"
-        if score_type == "scale":
-            if score >= 8:
-                return "大"
-            if score >= 5:
-                return "中"
-            if score > 0:
-                return "小"
-            return "缺失"
-        if score_type == "market":
-            if score >= 5:
-                return "加分"
-            if score >= 3:
-                return "一般"
-            if score > 0:
-                return "微弱"
-            return "缺失"
+    COMPONENT_LABELS = {
+        "heat": [(35, "极热"), (25, "热门"), (15, "温和"), (0, "冷清")],
+        "quality": [(35, "强"), (20, "中"), (1, "弱"), (0, "缺失")],
+        "scale": [(8, "大"), (5, "中"), (1, "小"), (0, "缺失")],
+        "market": [(5, "加分"), (3, "一般"), (1, "微弱"), (0, "缺失")],
+    }
+
+    @classmethod
+    def _component_label(cls, score, score_type):
+        for threshold, label in cls.COMPONENT_LABELS.get(score_type, []):
+            if score >= threshold:
+                return label
         return "N/A"
 
     @staticmethod
@@ -140,15 +118,16 @@ class ScoringSystem:
         has_heat = _is_num(over_sub_ratio) and over_sub_ratio_source in ("actual", "forecast", "estimated", "historical_actual", "historical_forecast", "post_listing_actual")
         has_market = _is_num(forecast_over_sub_ratio) or market_heat in ("温和", "热门", "极热")
 
+        sw = SETTINGS.scoring
         if has_heat or has_market:
             return {
                 'name': 'live_heat',
                 'weights': {
-                    'trade': 0.35,
-                    'fundamental': 0.30,
-                    'valuation': 0.20,
-                    'theme': 0.10,
-                    'data_quality': 0.05,
+                    'trade': sw.live_heat_trade,
+                    'fundamental': sw.live_heat_fundamental,
+                    'valuation': sw.live_heat_valuation,
+                    'theme': sw.live_heat_theme,
+                    'data_quality': sw.live_heat_dq,
                 },
                 'reason': '检测到有效超购/孖展数据',
             }
@@ -156,11 +135,11 @@ class ScoringSystem:
             return {
                 'name': 'prospectus_only',
                 'weights': {
-                    'trade': 0.20,
-                    'fundamental': 0.35,
-                    'valuation': 0.20,
-                    'theme': 0.15,
-                    'data_quality': 0.10,
+                    'trade': sw.prospectus_trade,
+                    'fundamental': sw.prospectus_fundamental,
+                    'valuation': sw.prospectus_valuation,
+                    'theme': sw.prospectus_theme,
+                    'data_quality': sw.prospectus_dq,
                 },
                 'reason': '未检测到有效热度数据，使用招股书阶段权重',
             }
@@ -183,7 +162,7 @@ class ScoringSystem:
         is_license_driven = revenue_quality == 'license_upfront_driven'
 
         # 判断 valuation_framework 是否已经包含相对估值（避免重复扣分）
-        valuation_framework_type = valuation.get('valuation_framework_type', '')
+        valuation.get('valuation_framework_type', '')
         has_relative_valuation_in_framework = bool(rel_val_label and rel_val_label != '缺失')
 
         insufficient_peer_sample = bool(peer_comparison.get('peer_sample_warning')) or '样本不足' in str(peer_valuation_pos)
@@ -266,7 +245,7 @@ class ScoringSystem:
                         val_penalty = -3
             if scarcity >= 7 and val_label in ('很贵', '偏贵', '明显偏贵'):
                 val_penalty += 2
-                reasons.append(f"稀缺赛道高估值容忍(+2)")
+                reasons.append("稀缺赛道高估值容忍(+2)")
 
         return peer_adj, val_penalty
 
@@ -347,7 +326,7 @@ class ScoringSystem:
 
         cornerstone_analysis = prospectus_info.get('cornerstone_analysis') or {}
         cornerstone_score = cornerstone_analysis.get('score')
-        cornerstone_label = cornerstone_analysis.get('label')
+        cornerstone_analysis.get('label')
         has_cornerstone_section = cornerstone_analysis.get('has_cornerstone_section', False)
         
         if _is_num(cornerstone_score) and has_cornerstone_section:

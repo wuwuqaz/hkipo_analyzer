@@ -18,6 +18,16 @@ class DetailView:
         self.html = html_renderer or HtmlRenderer()
         self.fmt = data_formatter or DataFormatter()
 
+    @staticmethod
+    def _format_public_offer_lots(pi: dict) -> str:
+        """计算公开发售手数 = hk_offer_shares / lot_size"""
+        lot_size = pi.get('lot_size')
+        hk_offer = pi.get('hk_offer_shares')
+        if _is_num(lot_size) and _is_num(hk_offer) and lot_size > 0:
+            lots = int(hk_offer / lot_size)
+            return f"{lots:,}"
+        return "--"
+
     def render(self, ipo: dict) -> None:
         pi = ipo.get("prospectus_info", {}) or {}
         has_prospectus = bool(pi) and ipo.get("parse_success", False)
@@ -57,8 +67,8 @@ class DetailView:
         <div class="glass-card glass-card-glow" style="padding:24px 28px;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
                 <div>
-                    <div style="font-size:26px;font-weight:700;color:#f0f4f8;font-family:var(--font-sans);letter-spacing:0.01em;">{self.html.escape(company_name)}</div>
-                    <div style="font-size:15px;color:#94a3b8;margin-top:4px;font-weight:500;">
+                    <div style="font-size:26px;font-weight:700;color:#0F172A;font-family:var(--font-sans);letter-spacing:0.01em;">{self.html.escape(company_name)}</div>
+                    <div style="font-size:15px;color:#475569;margin-top:4px;font-weight:500;">
                         {self.html.escape(stock_code)} ·
                         {self.html.escape(pi.get('sector', '--'))} ·
                         {self.html.escape(val.get('valuation_label', '--'))}
@@ -68,11 +78,11 @@ class DetailView:
                     <div style="font-size:44px;font-weight:800;font-family:var(--font-mono);color:{score_color_hex(score)};">
                         {self.html.escape(str(score))}
                     </div>
-                    <div style="font-size:13px;color:#94a3b8;letter-spacing:0.05em;font-weight:600;">打新交易分</div>
-                    <div style="font-size:13px;color:#94a3b8;margin-top:4px;font-weight:500;">长期 {self.html.escape(str(long_score))}/100</div>
+                    <div style="font-size:13px;color:#64748B;letter-spacing:0.05em;font-weight:600;">打新交易分</div>
+                    <div style="font-size:13px;color:#64748B;margin-top:4px;font-weight:500;">长期 {self.html.escape(str(long_score))}/100</div>
                 </div>
             </div>
-            <div style="font-size:15px;color:#f0f4f8;margin-top:12px;font-weight:500;line-height:1.5;">{self.html.escape(recommendation)}</div>
+            <div style="font-size:15px;color:#475569;margin-top:12px;font-weight:500;line-height:1.5;">{self.html.escape(recommendation)}</div>
             {self.html.progress_bar(score, score_color_hex(score))}
         </div>
         """, unsafe_allow_html=True)
@@ -95,6 +105,8 @@ class DetailView:
             ("重大红旗扣分", f"-{ipo.get('risk_penalty', 0)}", "", "score-poor" if ipo.get('risk_penalty', 0) > 5 else ""),
         ]
         self.html.metric_card_st(cols, metrics)
+
+
 
     def _render_post_listing(self, ipo: dict) -> None:
         post = ipo.get("post_listing") or {}
@@ -134,7 +146,7 @@ class DetailView:
         pdf_link = ""
         if source_url:
             pdf_link = (
-                f'<div style="font-size:12px;color:#94a3b8;margin-top:8px;">'
+                f'<div style="font-size:12px;color:#475569;margin-top:8px;">'
                 f'配发公告：<a href="{self.html.escape(source_url)}" target="_blank">HKEX PDF</a>'
                 f'</div>'
             )
@@ -142,7 +154,7 @@ class DetailView:
         message_html = ""
         if message:
             message_html = (
-                f'<div style="font-size:12px;color:#ffaa00;margin-top:8px;">'
+                f'<div style="font-size:12px;color:#D97706;margin-top:8px;">'
                 f'{self.html.escape(message)}</div>'
             )
 
@@ -170,18 +182,18 @@ class DetailView:
     def _format_price_perf(self, payload) -> SafeHtml:
         payload = payload or {}
         if payload.get("status") == "missing":
-            return SafeHtml('<span style="color:#94a3b8;">缺失</span>')
+            return SafeHtml('<span style="color:#475569;">缺失</span>')
         price = payload.get("price")
         change = payload.get("change_pct")
         date = payload.get("date")
         if price is None and change is None:
-            return SafeHtml('<span style="color:#94a3b8;">--</span>')
+            return SafeHtml('<span style="color:#475569;">--</span>')
         change_html = ""
         if _is_num(change):
-            color = "#ff3366" if change > 0 else ("#00ff88" if change < 0 else "#64748b")
+            color = "#DC2626" if change > 0 else ("#059669" if change < 0 else "#475569")
             sign = "+" if change > 0 else ""
             change_html = f' <span style="color:{color};font-size:12px;">({sign}{change:.1f}%)</span>'
-        date_html = f'<div style="font-size:11px;color:#94a3b8;">{self.html.escape(date)}</div>' if date else ""
+        date_html = f'<div style="font-size:11px;color:#475569;">{self.html.escape(date)}</div>' if date else ""
         price_html = self.html.escape(self.fmt.format_number(price, " HKD")) if price is not None else "--"
         return SafeHtml(f'{price_html}{change_html}{date_html}')
 
@@ -237,17 +249,17 @@ class DetailView:
         )
         return (
             '<div style="border:1px solid rgba(148,163,184,0.18);border-radius:12px;overflow:hidden;'
-            'background:rgba(15,23,42,0.24);">'
+            'background:rgba(241,245,249,0.6);">'
             '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;'
             'border-bottom:1px solid rgba(148,163,184,0.14);">'
             '<span style="display:inline-flex;align-items:center;justify-content:center;min-width:44px;'
-            'padding:5px 10px;border-radius:8px;background:#161922;color:#f0f4f8;font-weight:800;">'
+            'padding:5px 10px;border-radius:8px;background:#F1F5F9;color:#475569;font-weight:800;">'
             f'{self.html.escape(label)}</span>'
-            f'<span style="font-size:12px;color:#94a3b8;">{self.html.escape(summary)}</span>'
+            f'<span style="font-size:12px;color:#475569;">{self.html.escape(summary)}</span>'
             '</div>'
             '<div style="max-height:360px;overflow:auto;">'
-            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#f0f4f8;">'
-            '<thead style="position:sticky;top:0;background:#161922;color:#94a3b8;">'
+            '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#475569;">'
+            '<thead style="position:sticky;top:0;background:#F1F5F9;color:#64748B;">'
             '<tr>'
             '<th style="padding:8px;text-align:right;">申请股数</th>'
             '<th style="padding:8px;text-align:right;">有效申请人</th>'
@@ -297,7 +309,7 @@ class DetailView:
             if idx == 0 or idx == len(trend_rows) - 1 or idx % 3 == 0:
                 labels.append(
                     f'<text x="{x:.1f}" y="{height - 12}" text-anchor="middle" '
-                    f'font-size="9" fill="#94a3b8">{self._compact_shares(row.get("applied_shares"))}</text>'
+                    f'font-size="9" fill="#64748B">{self._compact_shares(row.get("applied_shares"))}</text>'
                 )
 
         grid = ""
@@ -306,7 +318,7 @@ class DetailView:
             grid += (
                 f'<line x1="{left}" y1="{y:.1f}" x2="{width - right}" y2="{y:.1f}" '
                 'stroke="rgba(148,163,184,0.18)" stroke-dasharray="4 4"/>'
-                f'<text x="{left - 10}" y="{y + 4:.1f}" text-anchor="end" font-size="10" fill="#94a3b8">{pct}%</text>'
+                f'<text x="{left - 10}" y="{y + 4:.1f}" text-anchor="end" font-size="10" fill="#64748B">{pct}%</text>'
             )
 
         split_idx = next((idx for idx, row in enumerate(trend_rows) if row.get("pool") == "B"), None)
@@ -316,19 +328,19 @@ class DetailView:
             split_html = (
                 f'<line x1="{x:.1f}" y1="{top}" x2="{x:.1f}" y2="{top + plot_h}" '
                 'stroke="rgba(148,163,184,0.35)" stroke-dasharray="5 5"/>'
-                f'<rect x="{x - 58:.1f}" y="{top + 6}" width="116" height="22" rx="6" fill="#161922" '
+                f'<rect x="{x - 58:.1f}" y="{top + 6}" width="116" height="22" rx="6" fill="#F1F5F9" '
                 'stroke="rgba(148,163,184,0.35)"/>'
-                f'<text x="{x:.1f}" y="{top + 21}" text-anchor="middle" font-size="11" fill="#f0f4f8">甲组结束 / 乙组开始</text>'
+                f'<text x="{x:.1f}" y="{top + 21}" text-anchor="middle" font-size="11" fill="#475569">甲组结束 / 乙组开始</text>'
             )
 
-        color_a = "#00f5ff"
-        color_b = "#ffaa00"
+        color_a = "#3B82F6"
+        color_b = "#D97706"
         dots = ""
         for point, row in zip(points, trend_rows):
             x, y = point.split(",")
             fill = color_b if row.get("pool") == "B" else color_a
             dots += (
-                f'<circle cx="{x}" cy="{y}" r="3.2" fill="{fill}" stroke="#161922" stroke-width="1.5">'
+                f'<circle cx="{x}" cy="{y}" r="3.2" fill="{fill}" stroke="#F1F5F9" stroke-width="1.5">'
                 f'<title>{self._format_int(row.get("applied_shares"))}股: {self._format_pct(row.get("success_rate_pct"))}</title>'
                 '</circle>'
             )
@@ -346,16 +358,16 @@ class DetailView:
         legend = (
             f'<g transform="translate({width - right - 120}, 10)">'
             f'<circle cx="0" cy="0" r="3" fill="{color_a}"/>'
-            f'<text x="8" y="3" font-size="10" fill="#94a3b8">甲组</text>'
+            f'<text x="8" y="3" font-size="10" fill="#64748B">甲组</text>'
             f'<circle cx="50" cy="0" r="3" fill="{color_b}"/>'
-            f'<text x="58" y="3" font-size="10" fill="#94a3b8">乙组</text>'
+            f'<text x="58" y="3" font-size="10" fill="#64748B">乙组</text>'
             '</g>'
         )
 
         return (
             '<div style="margin-top:14px;border:1px solid rgba(148,163,184,0.18);border-radius:12px;'
-            'padding:12px;background:rgba(15,23,42,0.22);overflow-x:auto;">'
-            '<div style="font-size:13px;font-weight:800;color:#f0f4f8;text-align:center;margin-bottom:6px;">'
+            'padding:12px;background:rgba(241,245,249,0.5);overflow-x:auto;">'
+            '<div style="font-size:13px;font-weight:800;color:#0F172A;text-align:center;margin-bottom:6px;">'
             '甲乙组中签率趋势</div>'
             f'<svg viewBox="0 0 {width} {height}" width="100%" style="min-width:720px;display:block;">'
             f'{legend}'
@@ -364,7 +376,7 @@ class DetailView:
             f'{polylines}'
             f'{dots}'
             f'{"".join(labels)}'
-            f'<text x="{width / 2:.1f}" y="{height - 2}" text-anchor="middle" font-size="11" fill="#94a3b8">申请股数</text>'
+            f'<text x="{width / 2:.1f}" y="{height - 2}" text-anchor="middle" font-size="11" fill="#64748B">申请股数</text>'
             '</svg>'
             '</div>'
         )
@@ -414,10 +426,10 @@ class DetailView:
                 'align-items:center;padding:7px 0;border-bottom:1px solid rgba(148,163,184,0.08);">'
                 '<div style="display:flex;align-items:center;gap:8px;flex:1;">'
                 '<div style="width:4px;height:24px;border-radius:2px;background:rgba(6,182,212,0.3);"></div>'
-                '<div><div style="font-size:14px;color:#f0f4f8;">' + str(title) +
-                ' <span style="color:#94a3b8;">(' + str(round(weight * 100)) + '%)</span></div>'
-                '<div style="font-size:12px;color:#94a3b8;margin-top:2px;">贡献 ' + str(contribution) + ' 分</div></div></div>'
-                '<div style="font-size:13px;font-weight:600;color:#f0f4f8;font-family:JetBrains Mono,monospace;">'
+                '<div><div style="font-size:14px;color:#0F172A;">' + str(title) +
+                ' <span style="color:#64748B;">(' + str(round(weight * 100)) + '%)</span></div>'
+                '<div style="font-size:12px;color:#475569;margin-top:2px;">贡献 ' + str(contribution) + ' 分</div></div></div>'
+                '<div style="font-size:13px;font-weight:600;color:#0F172A;font-family:JetBrains Mono,monospace;">'
                 + str(score) + ' &times; ' + str(round(weight * 100)) + '% = ' + str(contribution) + '</div>'
                 '</div>'
             )
@@ -428,14 +440,14 @@ class DetailView:
             penalty_html = (
                 '<div style="display:flex;justify-content:space-between;'
                 'align-items:center;padding:7px 0;border-bottom:1px solid rgba(148,163,184,0.08);">'
-                '<div style="font-size:13px;color:#ff3366;">风险惩罚</div>'
-                '<div style="font-size:13px;font-weight:600;color:#ff3366;">&minus;' + str(penalty) + '</div>'
+                '<div style="font-size:13px;color:#DC2626;">风险惩罚</div>'
+                '<div style="font-size:13px;font-weight:600;color:#DC2626;">&minus;' + str(penalty) + '</div>'
                 '</div>'
             )
 
         final = ipo.get('score', 0)
         cap_reason = ipo.get('debug_info', {}).get('cap_reason', '')
-        cap_html = ('<div style="font-size:11px;color:#94a3b8;margin-top:4px;">'
+        cap_html = ('<div style="font-size:11px;color:#475569;margin-top:4px;">'
                     + self.html.escape(str(cap_reason)) + '</div>') if cap_reason else ""
 
         html = (
@@ -445,12 +457,12 @@ class DetailView:
             + penalty_html
             + '<div style="display:flex;justify-content:space-between;'
                'align-items:center;padding:8px 0;margin-top:4px;">'
-               '<div style="font-size:14px;font-weight:700;color:#94a3b8;">加权原始分</div>'
-               '<div style="font-size:14px;font-weight:700;color:#94a3b8;font-family:JetBrains Mono,monospace;">' + str(raw_total) + '</div>'
+               '<div style="font-size:14px;font-weight:700;color:#64748B;">加权原始分</div>'
+               '<div style="font-size:14px;font-weight:700;color:#64748B;font-family:JetBrains Mono,monospace;">' + str(raw_total) + '</div>'
                '</div>'
             + '<div style="display:flex;justify-content:space-between;'
                'align-items:center;padding:8px 0;border-top:2px solid rgba(148,163,184,0.2);">'
-               '<div style="font-size:16px;font-weight:800;color:#f0f4f8;">旧综合分</div>'
+               '<div style="font-size:16px;font-weight:800;color:#0F172A;">旧综合分</div>'
                '<div style="font-size:16px;font-weight:800;font-family:JetBrains Mono,monospace;color:'
                + score_color_hex(final) + ';">' + str(final) + '/100</div>'
                '</div>'
@@ -503,22 +515,22 @@ class DetailView:
             item = sb.get(key, {})
             strength = item.get("strength", "缺失")
             detail = item.get("detail", "")
-            color = "#64748b"
+            color = "#475569"
             if strength in ("强", "高"):
-                color = "#00ff88"
+                color = "#059669"
             elif strength == "中":
-                color = "#ffaa00"
+                color = "#D97706"
             elif strength in ("弱", "低"):
-                color = "#ff3366"
-            signal_dot = {'强': '#00ff88', '高': '#00ff88', '中': '#ffaa00', '弱': '#ff3366', '低': '#ff3366'}.get(strength, '#64748b')
+                color = "#DC2626"
+            signal_dot = {'强': '#059669', '高': '#059669', '中': '#D97706', '弱': '#DC2626', '低': '#DC2626'}.get(strength, '#475569')
             rows_html += (
                 f'<div style="display:flex;justify-content:space-between;align-items:center;'
                 f'padding:8px 0;border-bottom:1px solid rgba(148,163,184,0.08);">'
                 f'<div style="display:flex;align-items:center;gap:8px;">'
                 f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{signal_dot};'
                 f'box-shadow:0 0 6px {signal_dot}60;"></span>'
-                f'<div><div style="font-size:14px;color:#f0f4f8;">{emoji} {title}</div>'
-                f'<div style="font-size:13px;color:#94a3b8;max-width:320px;overflow:hidden;text-overflow:ellipsis;">'
+                f'<div><div style="font-size:14px;color:#0F172A;">{emoji} {title}</div>'
+                f'<div style="font-size:13px;color:#475569;max-width:320px;overflow:hidden;text-overflow:ellipsis;">'
                 f'{self.html.escape(detail)}</div></div></div>'
                 f'<div style="font-size:14px;font-weight:700;color:{color};">{strength}</div>'
                 f'</div>'
@@ -598,6 +610,7 @@ class DetailView:
             ("发行价", self.fmt.format_number(pi.get('offer_price'), ' HKD')),
             ("原招股价", self.fmt.format_number(pi.get('indicative_offer_price'), ' HKD') if pi.get('indicative_offer_price') else "--"),
             ("每手股数", str(pi.get('lot_size', '--'))),
+            ("公开发售手数", self._format_public_offer_lots(pi)),
             ("入场费", self.fmt.format_number(pi.get('entry_fee_hkd'), ' HKD')),
             ("市值", self.fmt.format_number(pi.get('market_cap_hkd_million'), ' M HKD')),
             ("发行比例", self.fmt.format_percentage(pi.get('issuance_ratio_pct'))),
@@ -723,7 +736,7 @@ class DetailView:
             seg_items += (
                 f'<div class="kpi-item"><div class="kpi-label">{self.html.escape(name)}</div>'
                 f'<div class="kpi-value">{self.html.escape(share_str)}</div>'
-                f'<div style="font-size:12px;color:#94a3b8;">{self.html.escape(growth_str)}</div></div>'
+                f'<div style="font-size:12px;color:#475569;">{self.html.escape(growth_str)}</div></div>'
             )
         return SafeHtml(
             f'<div style="border-top:1px solid rgba(148,163,184,0.1);margin:12px 0;"></div>'
@@ -740,7 +753,7 @@ class DetailView:
             level = data.get('risk_level', '--')
             penalty = data.get('score_penalty', 0)
             if penalty > 0:
-                color = '#ff3366' if level == '高' else ('#ffaa00' if level == '中' else '#64748b')
+                color = '#DC2626' if level == '高' else ('#D97706' if level == '中' else '#475569')
                 cat_label = cat.replace('_risk', '').replace('_', ' ')
                 risk_chips.append(
                     f'<span style="display:inline-block;padding:3px 8px;margin:2px;border-radius:12px;'
@@ -793,9 +806,9 @@ class DetailView:
         )
 
         summary_html = SafeHtml(
-            f'<div style="font-size:15px;color:#f0f4f8;margin:12px 0 10px;padding:14px 16px;'
-                f'background:rgba(56,189,248,0.05);border:1px solid rgba(148,163,184,0.12);border-radius:12px;line-height:1.5;">'
-            f'<b style="color:#38bdf8;">组合画像：</b>{self.html.escape(combo)}</div>'
+            f'<div style="font-size:15px;color:#475569;margin:12px 0 10px;padding:14px 16px;'
+                f'background:rgba(30,64,175,0.04);border:1px solid rgba(148,163,184,0.12);border-radius:12px;line-height:1.5;">'
+            f'<b style="color:#1E40AF;">组合画像：</b>{self.html.escape(combo)}</div>'
         )
         dimension_html = self._render_cornerstone_dimensions(ca)
         ca_rows_html = self._render_cornerstone_rows(ca)
@@ -812,7 +825,6 @@ class DetailView:
             '</div>',
             unsafe_allow_html=True,
         )
-
     def _render_cornerstone_dimensions(self, ca: dict) -> str:
         dims = ca.get("dimension_scores") or {}
         if not dims:
@@ -829,12 +841,12 @@ class DetailView:
                 pct = 0
             rows += (
                 f'<div style="margin:8px 0;">'
-                f'<div style="display:flex;justify-content:space-between;font-size:13px;color:#94a3b8;">'
+                f'<div style="display:flex;justify-content:space-between;font-size:13px;color:#64748B;">'
                 f'<span>{self.html.escape(label)} · {self.html.escape(detail)}</span>'
-                f'<b style="color:#f0f4f8;">{self.html.escape(str(score))}/{self.html.escape(str(max_score))}</b>'
+                f'<b style="color:#0F172A;">{self.html.escape(str(score))}/{self.html.escape(str(max_score))}</b>'
                 f'</div>'
                 f'<div class="progress-bar" style="height:7px;margin-top:4px;">'
-                f'<div class="fill" style="width:{pct:.0f}%;background:#ffaa00;"></div>'
+                f'<div class="fill" style="width:{pct:.0f}%;background:#D97706;"></div>'
                 f'</div>'
                 f'</div>'
             )
@@ -858,13 +870,13 @@ class DetailView:
             tier_tag = self.html.tag(tier or "未知", tier_color)
             full_name_html = ""
             if full_name and full_name != name:
-                full_name_html = f'<div style="font-size:11px;color:#94a3b8;margin-top:2px;">{self.html.escape(full_name)}</div>'
+                full_name_html = f'<div style="font-size:11px;color:#475569;margin-top:2px;">{self.html.escape(full_name)}</div>'
             ca_rows_html += (
                 f'<div class="cornerstone-row" style="grid-template-columns:1.25fr 1.75fr;">'
                 f'<div><b>{self.html.escape(name)}</b> {tier_tag}{full_name_html}'
-                f'<div style="font-size:12px;color:#94a3b8;margin-top:4px;">{self.html.escape(category)} · {self.html.escape(str(tier_score))}分 · {self.html.escape(amount_text)} · 占全球发售 {self.html.escape(offer_pct)}</div></div>'
-                f'<div style="color:#94a3b8;font-size:13px;">{self.html.escape(role_note or match_note)}'
-                f'<div style="font-size:12px;color:#94a3b8;margin-top:4px;">{self.html.escape(match_note)} · {self.html.escape(fit_label)}</div></div>'
+                f'<div style="font-size:12px;color:#475569;margin-top:4px;">{self.html.escape(category)} · {self.html.escape(str(tier_score))}分 · {self.html.escape(amount_text)} · 占全球发售 {self.html.escape(offer_pct)}</div></div>'
+                f'<div style="color:#475569;font-size:13px;">{self.html.escape(role_note or match_note)}'
+                f'<div style="font-size:12px;color:#475569;margin-top:4px;">{self.html.escape(match_note)} · {self.html.escape(fit_label)}</div></div>'
                 f'</div>'
             )
 
@@ -877,11 +889,11 @@ class DetailView:
                     tier_tag = self.html.tag(tier, "blue" if tier == "S" else "gray")
                     ca_rows_html += (
                         f'<div class="cornerstone-row"><div><b>{self.html.escape(name)}</b> {tier_tag}</div>'
-                        f'<div style="color:#94a3b8;font-size:14px;">V2重点基石 · 明细表未完整提取</div></div>'
+                        f'<div style="color:#475569;font-size:14px;">V2重点基石 · 明细表未完整提取</div></div>'
                     )
             else:
                 ca_rows_html = (
-                    '<div style="font-size:13px;color:#94a3b8;padding:8px 2px;">'
+                    '<div style="font-size:13px;color:#475569;padding:8px 2px;">'
                     '基石投资者明细表未完整提取，以下评级基于已识别到的基石占比、赛道匹配和风险信号。</div>'
                 )
         return ca_rows_html
@@ -895,13 +907,13 @@ class DetailView:
         blocks = []
         if strengths:
             chips = " ".join(f'<span class="reason-chip">{self.html.escape(item)}</span>' for item in strengths[:5])
-            blocks.append(f'<div style="margin-top:10px;"><b style="font-size:13px;color:#00ff88;">亮点</b><div style="margin-top:6px;">{chips}</div></div>')
+            blocks.append(f'<div style="margin-top:10px;"><b style="font-size:13px;color:#059669;">亮点</b><div style="margin-top:6px;">{chips}</div></div>')
         if concerns:
-            chips = " ".join(f'<span class="reason-chip" style="background:rgba(255,170,0,0.1);color:#ffaa00;border-color:rgba(255,170,0,0.2);">{self.html.escape(item)}</span>' for item in concerns[:5])
-            blocks.append(f'<div style="margin-top:10px;"><b style="font-size:13px;color:#ffaa00;">隐忧</b><div style="margin-top:6px;">{chips}</div></div>')
+            chips = " ".join(f'<span class="reason-chip" style="background:rgba(217,119,6,0.08);color:#D97706;border-color:rgba(217,119,6,0.16);">{self.html.escape(item)}</span>' for item in concerns[:5])
+            blocks.append(f'<div style="margin-top:10px;"><b style="font-size:13px;color:#D97706;">隐忧</b><div style="margin-top:6px;">{chips}</div></div>')
         if red_flags:
-            chips = " ".join(f'<span class="reason-chip" style="background:rgba(255,51,102,0.1);color:#ff3366;border-color:rgba(255,51,102,0.2);">{self.html.escape(item)}</span>' for item in red_flags[:5])
-            blocks.append(f'<div style="margin-top:10px;"><b style="font-size:13px;color:#ff3366;">红旗</b><div style="margin-top:6px;">{chips}</div></div>')
+            chips = " ".join(f'<span class="reason-chip" style="background:rgba(220,38,38,0.08);color:#DC2626;border-color:rgba(220,38,38,0.16);">{self.html.escape(item)}</span>' for item in red_flags[:5])
+            blocks.append(f'<div style="margin-top:10px;"><b style="font-size:13px;color:#DC2626;">红旗</b><div style="margin-top:6px;">{chips}</div></div>')
         return "".join(blocks)
 
     def _render_peer_comparison(self, ipo: dict) -> None:
@@ -931,12 +943,12 @@ class DetailView:
         qualitative_peers = pc.get("qualitative_peers", [])
 
         pc_html_parts = [
-            f'<div style="margin-bottom:10px;font-size:15px;color:#f0f4f8;"><b>细分赛道:</b> {self.html.escape(str(pc_subsector).replace("_", " / "))}</div>'
+            f'<div style="margin-bottom:10px;font-size:15px;color:#0F172A;"><b>细分赛道:</b> {self.html.escape(str(pc_subsector).replace("_", " / "))}</div>'
         ]
 
         if pc_summary:
             pc_html_parts.append(
-                f'<div style="font-size:14px;color:#94a3b8;margin-bottom:12px;line-height:1.6;">{self.html.escape(pc_summary)}</div>'
+                f'<div style="font-size:14px;color:#475569;margin-bottom:12px;line-height:1.6;">{self.html.escape(pc_summary)}</div>'
             )
 
         if _is_num(pc_company_ps) and _is_num(pc_peer_median_ps):
@@ -952,7 +964,7 @@ class DetailView:
             )
             if _is_num(weighted_peer_ps) and _is_num(weighted_premium_ps):
                 pc_html_parts.append(
-                    f'<div style="font-size:12px;color:#94a3b8;margin:-2px 0 8px;">'
+                    f'<div style="font-size:12px;color:#475569;margin:-2px 0 8px;">'
                     f'混合业务按分部收入占比重估：加权同行PS {weighted_peer_ps:.1f}x，相对溢价 {weighted_premium_ps:+.1f}%'
                     f'</div>'
                 )
@@ -996,7 +1008,7 @@ class DetailView:
 
         if pc.get("peer_sample_warning"):
             pc_html_parts.append(
-                f'<div style="font-size:12px;color:#94a3b8;margin:6px 0;padding:6px 10px;background:rgba(56,189,248,0.05);border-radius:8px;">'
+                f'<div style="font-size:12px;color:#475569;margin:6px 0;padding:6px 10px;background:rgba(30,64,175,0.04);border-radius:8px;">'
                 f'ℹ️ {self.html.escape(pc["peer_sample_warning"])}'
                 f'</div>'
             )
@@ -1019,9 +1031,9 @@ class DetailView:
                     f'<div class="cornerstone-row" style="grid-template-columns:auto;">'
                     f'<div style="display:flex;justify-content:space-between;width:100%;align-items:center;">'
                     f'<div><b>{p_name}</b> {p_ticker} {type_tag}</div>'
-                    f'<div style="font-size:12px;color:#94a3b8;">PS {p_ps} | PE {p_pe} | 毛利率 {p_gm} | 收入增 {p_growth}</div>'
+                    f'<div style="font-size:12px;color:#475569;">PS {p_ps} | PE {p_pe} | 毛利率 {p_gm} | 收入增 {p_growth}</div>'
                     f'</div>'
-                    f'<div style="font-size:12px;color:#94a3b8;width:100%;">{p_match}{(" | " + p_note) if p_note else ""}</div>'
+                    f'<div style="font-size:12px;color:#475569;width:100%;">{p_match}{(" | " + p_note) if p_note else ""}</div>'
                     f'</div>'
                 )
             pc_html_parts.append(
@@ -1032,35 +1044,35 @@ class DetailView:
         if quantitative_peers or qualitative_peers:
             q_rows = ""
             for p in quantitative_peers[:6]:
-                q_rows += f'<div style="font-size:12px;color:#94a3b8;">• {self.html.escape(p.get("name", ""))} (quantitative)</div>'
+                q_rows += f'<div style="font-size:12px;color:#475569;">• {self.html.escape(p.get("name", ""))} (quantitative)</div>'
             for p in qualitative_peers[:4]:
-                q_rows += f'<div style="font-size:12px;color:#94a3b8;">• {self.html.escape(p.get("name", ""))} (qualitative)</div>'
+                q_rows += f'<div style="font-size:12px;color:#475569;">• {self.html.escape(p.get("name", ""))} (qualitative)</div>'
             if q_rows:
                 pc_html_parts.append(
-                    f'<div style="margin-top:8px;font-size:12px;color:#94a3b8;">'
+                    f'<div style="margin-top:8px;font-size:12px;color:#475569;">'
                     f'<b>quantitative peers:</b> 参与估值中位数计算；<b>qualitative peers:</b> 仅作定性参考'
                     f'</div>{q_rows}'
                 )
 
         for w in pc_warnings:
             pc_html_parts.append(
-                f'<div style="font-size:12px;color:#ff3366;margin-top:4px;">⚠️ {self.html.escape(w)}</div>'
+                f'<div style="font-size:12px;color:#DC2626;margin-top:4px;">⚠️ {self.html.escape(w)}</div>'
             )
 
         # 招股书提及的同行候选
         if extracted_comps:
             names = "、".join(self.html.escape(n) for n in extracted_comps[:10])
             pc_html_parts.append(
-                f'<div style="font-size:12px;color:#94a3b8;margin-top:8px;">'
+                f'<div style="font-size:12px;color:#475569;margin-top:8px;">'
                 f'📖 招股书明确提及的已收录同行: {names}'
                 f'</div>'
             )
         if unmatched_candidates:
             names = "、".join(self.html.escape(n) for n in unmatched_candidates[:8])
             pc_html_parts.append(
-                f'<div style="font-size:12px;color:#ffaa00;margin-top:4px;">'
+                f'<div style="font-size:12px;color:#D97706;margin-top:4px;">'
                 f'🔍 招股书提及但本地同行库未收录: {names}'
-                f'<div style="font-size:11px;color:#94a3b8;margin-top:2px;">'
+                f'<div style="font-size:11px;color:#475569;margin-top:2px;">'
                 f'（不参与估值中位数，仅供人工维护同行库）'
                 f'</div></div>'
             )
@@ -1078,21 +1090,21 @@ class DetailView:
 
         dl_col1, dl_col2 = st.columns(2)
         with dl_col1:
-            if st.button("📄 下载PDF报告", key=f"pdf_{ipo.get('hk_code', 'x')}", use_container_width=True):
+            if st.button("📄 下载PDF报告", key=f"pdf_{ipo.get('hk_code', 'x')}", width="stretch"):
                 try:
                     pdf_path = generate_pdf_report([ipo], TEMP_DIR)
                     pdf_name = os.path.basename(pdf_path)
                     pdf_data = read_file_bytes_and_remove(pdf_path)
-                    st.download_button("⬇️ 点击下载PDF", pdf_data, pdf_name, "application/pdf", use_container_width=True)
+                    st.download_button("⬇️ 点击下载PDF", pdf_data, pdf_name, "application/pdf", width="stretch")
                 except Exception as e:
                     st.error(f"PDF生成失败: {e}")
         with dl_col2:
-            if st.button("📋 下载JSON数据", key=f"json_{ipo.get('hk_code', 'x')}", use_container_width=True):
+            if st.button("📋 下载JSON数据", key=f"json_{ipo.get('hk_code', 'x')}", width="stretch"):
                 try:
                     json_path = save_json_report([ipo], TEMP_DIR)
                     json_name = os.path.basename(json_path)
                     json_data = read_file_bytes_and_remove(json_path)
-                    st.download_button("⬇️ 点击下载JSON", json_data, json_name, "application/json", use_container_width=True)
+                    st.download_button("⬇️ 点击下载JSON", json_data, json_name, "application/json", width="stretch")
                 except Exception as e:
                     st.error(f"JSON保存失败: {e}")
 

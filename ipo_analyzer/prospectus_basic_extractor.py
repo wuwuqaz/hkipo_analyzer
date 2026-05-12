@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+from .settings import SETTINGS
 from .utils import _is_num, _infer_sector
 
 logger = logging.getLogger(__name__)
@@ -52,9 +53,16 @@ def extract_hkd_amounts_after_label(text: str, label_pattern: str, window_size: 
         return []
     window = text[match.end():match.end() + window_size]
     values = []
+    # million
     for amount in re.findall(r'HK\$\s*([0-9,]+(?:\.[0-9]+)?)\s*million', window, re.IGNORECASE):
         try:
             values.append(float(amount.replace(',', '')))
+        except Exception:
+            continue
+    # billion → 转为 million
+    for amount in re.findall(r'HK\$\s*([0-9,]+(?:\.[0-9]+)?)\s*billion', window, re.IGNORECASE):
+        try:
+            values.append(float(amount.replace(',', '')) * 1000)
         except Exception:
             continue
     return values
@@ -107,25 +115,41 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
     offer_shares = extract_int_after_label(text, [
         r'Number of Offer Shares under\s*the Global\s*Offering\s*[:：]?\s*\n?\s*([0-9,]+)',
         r'Number of Offer Shares under\s*the Global\s*Offering\s*([0-9,]+)\s*H Shares',
+        # 中文招股书全球发售股份（冒号可能在下一行）
+        r'全球發售.*?發售股份數目\s*[：:]\s*([0-9,]+)',
+        r'全球發售.*?發售股份總數\s*[：:]\s*([0-9,]+)',
     ])
     hk_offer_shares = extract_int_after_label(text, [
         r'Number of Hong Kong Offer Shares\s*[:：]?\s*\n?\s*([0-9,]+)',
         r'Number of Hong Kong Offer Shares\s*([0-9,]+)\s*H Shares',
+        # 中文香港发售股份（冒号可能在下一行）
+        r'香港發售股份數目\s*[：:]\s*([0-9,]+)',
+        r'香港公開發售.*?股份數目\s*[：:]\s*([0-9,]+)',
     ])
     intl_offer_shares = extract_int_after_label(text, [
         r'Number of International Offer Shares\s*[:：]?\s*\n?\s*([0-9,]+)',
         r'Number of International Offer Shares\s*([0-9,]+)\s*H Shares',
+        # 中文国际发售股份（冒号可能在下一行）
+        r'國際發售股份數目\s*[：:]\s*([0-9,]+)',
+        r'國際發售.*?股份數目\s*[：:]\s*([0-9,]+)',
     ])
     offer_price = extract_float_after_label(text, [
         r'Offer Price\s*:\s*HK\$([0-9,]+(?:\.[0-9]+)?)',
         r'Maximum Offer Price\s*HK\$([0-9,]+(?:\.[0-9]+)?)',
         r'Offer Price\s*HK\$([0-9,]+(?:\.[0-9]+)?)',
+        # 中文发售價（冒号可能在下一行）
+        r'發售價\s*[：:]\s*(?:每股H股)?\s*(?:HK\$|港元)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:港元|HKD)',
+        r'發售價[^0-9\n]*(?:每股.*?)?(?:HK\$|港元)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:港元|HKD)',
     ])
     board_lot = info.get('lot_size')
     if board_lot is None:
         board_lot = extract_int_after_label(text, [
             r'board lot size[^0-9]*?([0-9,]+)',
             r'each board lot[^0-9]*?([0-9,]+)',
+            # 中文每手股数
+            r'每手[^0-9]*?([0-9,]+)\s*股',
+            r'每手買賣單位[^0-9]*?([0-9,]+)\s*股',
+            r'買賣單位每手\s*([0-9,]+)\s*股',
         ])
         if board_lot is not None:
             info['lot_size'] = board_lot
@@ -136,43 +160,63 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
         r'([0-9,]+)\s*(?:Offer\s*)?Shares(?:\s*are)?\s*issued and outstanding\s+(?:following|after)\s+(?:the\s+)?completion of the Global Offering',
         r'([0-9,]+)\s*(?:H\s*)?Shares will be in issue and outstanding immediately\s+(?:following|after)\s+(?:the\s+)?completion of the Global Offering',
         r'([0-9,]+)\s*(?:H\s*)?Shares in issue immediately upon completion of the Global Offering',
+        # 中文：紧随全球发售完成后已发行股份
+        r'緊隨全球發售完成後.*?已發行.*?([0-9,]+)\s*股',
+        r'全球發售完成後.*?已發行股份[^0-9]*?([0-9,]+)\s*股',
+        r'已發行及發行在外.*?([0-9,]+)\s*股',
     ])
 
     # --- 多口径市值提取 ---
+    # 优先级：公司总市值 > 发行H股市值 > 预期表述 > 股数×股价计算
     market_cap_million = None
     market_cap_low = None
     market_cap_high = None
     market_cap_mid = None
     market_cap_source = None
 
-    mc_h_shares = extract_hkd_amounts_after_label(
+    # 1. 公司总市值（our Company / our Shares）— 最准确
+    cap_company = extract_hkd_amounts_after_label(
         text,
-        r'Market capitalization of\s+(?:the\s+)?H Shares',
+        r'Market capitalization of\s*(?:our\s*)?(?:Company|Shares)',
     )
-    if mc_h_shares and len(mc_h_shares) > 0:
-        mc_h_shares = sorted(mc_h_shares)
-        market_cap_low = mc_h_shares[0]
-        market_cap_high = mc_h_shares[-1]
+    if cap_company and len(cap_company) > 0:
+        cap_company = sorted(cap_company)
+        market_cap_low = cap_company[0]
+        market_cap_high = cap_company[-1]
         market_cap_million = market_cap_high
-        market_cap_source = 'h_shares_table'
+        market_cap_source = 'company_shares_table'
 
+    # 2. 发行H股市值（仅当未找到公司总市值时 fallback）
     if market_cap_million is None:
-        cap_our = extract_hkd_amounts_after_label(text, r'Market capitalization of\s*(?:our\s*)?Shares')
-        if cap_our:
-            market_cap_million = max(cap_our)
-            market_cap_source = 'our_shares_table'
+        mc_h_shares = extract_hkd_amounts_after_label(
+            text,
+            r'Market capitalization of\s+(?:the\s+)?H Shares',
+        )
+        if mc_h_shares and len(mc_h_shares) > 0:
+            mc_h_shares = sorted(mc_h_shares)
+            market_cap_low = mc_h_shares[0]
+            market_cap_high = mc_h_shares[-1]
+            market_cap_million = market_cap_high
+            market_cap_source = 'h_shares_table'
 
+    # 3. 预期市值表述
     if market_cap_million is None:
         mc_expected = re.findall(
-            r'(?:expected\s+)?market\s+capitalization[^.]*?approximately\s+HK\$([0-9,]+(?:\.[0-9]+)?)\s*million',
+            r'(?:expected\s+)?market\s+capitalization[^.]*?approximately\s+HK\$([0-9,]+(?:\.[0-9]+)?)\s*(million|billion)',
             text, re.IGNORECASE,
         )
         if mc_expected:
-            vals = [float(v.replace(',', '')) for v in mc_expected]
+            vals = []
+            for v, unit in mc_expected:
+                val = float(v.replace(',', ''))
+                if unit.lower() == 'billion':
+                    val *= 1000
+                vals.append(val)
             market_cap_million = max(vals)
             market_cap_mid = vals[len(vals) // 2] if len(vals) > 2 else max(vals)
             market_cap_source = 'expected_market_cap'
 
+    # 4. 股数 × 股价 计算（兜底）
     if market_cap_million is None and post_listing_shares is not None:
         prices = []
         for pm in re.finditer(r'HK\$([0-9]+(?:\.[0-9]+)?)\s*per\s*(?:Offer\s*)?(?:H\s*)?Share', text, re.IGNORECASE):
@@ -184,6 +228,21 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
         if max_price and max_price > 0:
             market_cap_million = round(post_listing_shares * max_price / 1_000_000, 2)
             market_cap_source = 'shares_x_offer_price'
+
+    # 5. 交叉校验：如果提取到的市值与 股数×股价 差异超过2倍，优先相信股数×股价
+    if market_cap_million is not None and post_listing_shares is not None:
+        prices = []
+        for pm in re.finditer(r'HK\$([0-9]+(?:\.[0-9]+)?)\s*per\s*(?:Offer\s*)?(?:H\s*)?Share', text, re.IGNORECASE):
+            try:
+                prices.append(float(pm.group(1)))
+            except ValueError:
+                continue
+        calc_price = max(prices) if prices else (offer_price or info.get('max_price'))
+        if calc_price and calc_price > 0:
+            implied_mc = round(post_listing_shares * calc_price / 1_000_000, 2)
+            if market_cap_million > 0 and (implied_mc / market_cap_million > 2 or market_cap_million / implied_mc > 2):
+                market_cap_million = implied_mc
+                market_cap_source = 'shares_x_offer_price(cross_check)'
 
     if market_cap_low is not None:
         info['market_cap_hkd_million_low'] = market_cap_low
@@ -228,8 +287,7 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
         info['net_proceeds_hkd_million'] = net_proceeds_million
 
     if offer_price is not None and board_lot is not None:
-        fee_rate = 0.01 + 0.000027 + 0.0000565 + 0.0000015
-        info['entry_fee_hkd'] = offer_price * board_lot * (1 + fee_rate)
+        info['entry_fee_hkd'] = offer_price * board_lot * (1 + SETTINGS.fx.entry_fee_rate)
 
     if offer_shares and post_listing_shares:
         info['issuance_ratio_pct'] = offer_shares / post_listing_shares * 100

@@ -8,9 +8,8 @@ import re
 import logging
 from datetime import date, datetime
 from statistics import median
-from typing import Optional
 
-from .utils import _is_num, _contains_any, _infer_sector
+from .utils import _is_num
 from .settings import SETTINGS
 
 logger = logging.getLogger(__name__)

@@ -11,7 +11,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-import copy
+from unittest.mock import patch
 from ipo_analyzer.peer_comps import (
     _filter_peer_candidates,
     _build_issuer_aliases,
@@ -21,7 +21,7 @@ from ipo_analyzer.peer_comps import (
 )
 from ipo_analyzer.analyzers import ValuationAnalyzer
 from ipo_analyzer.scoring import SignalComponentAnalyzer, ScoringSystem
-from ipo_analyzer.models import IPOData, ValuationResult, PeerComparisonResult, ProspectusInfo
+from ipo_analyzer.models import IPOData
 from ipo_analyzer.parser import ProspectusParser
 from ipo_analyzer.core import _calculate_final_score
 
@@ -161,16 +161,16 @@ def test_new_fields_persist_through_from_dict():
     val = pi.valuation
     assert val is not None
     assert val.net_profit_hkd_million == 10.8, f"net_profit_hkd_million 丢失: {val.net_profit_hkd_million}"
-    assert val.adjusted_profit_hkd_million == 12.0, f"adjusted_profit_hkd_million 丢失"
-    assert val.financial_currency == "RMB", f"financial_currency 丢失"
+    assert val.adjusted_profit_hkd_million == 12.0, "adjusted_profit_hkd_million 丢失"
+    assert val.financial_currency == "RMB", "financial_currency 丢失"
 
     pc = pi.peer_comparison
     assert pc is not None
-    assert pc.quantitative_peer_count == 1, f"quantitative_peer_count 丢失"
-    assert pc.qualitative_peer_count == 1, f"qualitative_peer_count 丢失"
-    assert pc.peer_sample_warning == "样本不足", f"peer_sample_warning 丢失"
-    assert len(pc.quantitative_peers) == 1, f"quantitative_peers 丢失"
-    assert len(pc.qualitative_peers) == 1, f"qualitative_peers 丢失"
+    assert pc.quantitative_peer_count == 1, "quantitative_peer_count 丢失"
+    assert pc.qualitative_peer_count == 1, "qualitative_peer_count 丢失"
+    assert pc.peer_sample_warning == "样本不足", "peer_sample_warning 丢失"
+    assert len(pc.quantitative_peers) == 1, "quantitative_peers 丢失"
+    assert len(pc.qualitative_peers) == 1, "qualitative_peers 丢失"
 
     # 反向 to_dict 也应保留
     d = obj.to_dict()
@@ -738,6 +738,17 @@ def test_jitai_cornerstone_detected_correctly():
     print("✅ test_jitai_cornerstone_detected_correctly passed")
 
 
+def test_cornerstone_profiles_fallback_when_yaml_missing():
+    """YAML 缺失时应回退到内置基石投资者档案。"""
+    from ipo_analyzer.cornerstone import CornerstoneAnalyzer, _load_investor_profiles
+
+    with patch("builtins.open", side_effect=FileNotFoundError("missing")):
+        profiles = _load_investor_profiles()
+
+    assert profiles == CornerstoneAnalyzer._BUILTIN_INVESTOR_PROFILES
+    print("✅ test_cornerstone_profiles_fallback_when_yaml_missing passed")
+
+
 def test_yifei_pre_ipo_investors_not_counted_as_cornerstone():
     """翼菲科技：pre-IPO 投资者即使在全文出现，也不应计入基石评分"""
     from ipo_analyzer.cornerstone import CornerstoneAnalyzer
@@ -913,21 +924,27 @@ def test_risk_penalty_only_for_major_red_flags():
     from ipo_analyzer.core import _calculate_risk_penalty
 
     prospectus_info = {
+        '_extracted_text': (
+            '公司面临持续经营重大不确定性，且存在多项重大诉讼风险。'
+            '审计师出具了标准无保留意见。'
+        ),
         'risk_factors': {
-            'flags': [
-                '持续经营重大不确定性',
-                '重大诉讼风险',
-            ]
+            'risks': {
+                'customer_concentration_risk': {
+                    'risk_level': '中',  # 普通偏高，不应触发 penalty
+                }
+            },
+            'total_penalty': 3,
         },
         'customer_supplier': {
-            'largest_customer_pct': 40,  # 普通偏高，不应触发 penalty
-            'top5_customer_pct': 75,      # 普通偏高，不应触发 penalty
+            'largest_customer_revenue_pct': 40,  # 普通偏高（<50%），不应触发 penalty
+            'top5_customer_revenue_pct': 75,      # 普通偏高（<80%），不应触发 penalty
         },
         'valuation': {
             'cash_runway_years': 1.5,  # > 1 年，不应触发 penalty
         },
-        'cornerstone_analysis': {
-            'red_flags': ['基石占比低于30%']  # 普通红旗，不应触发 penalty
+        'stock_quality': {
+            'reasons': [],
         },
     }
 
@@ -1005,7 +1022,7 @@ def test_historical_actual_over_sub_ratio_source():
 
     wp = result.get('weight_profile', {})
     assert wp.get('name') == 'live_heat', f"期望 live_heat，实际: {wp.get('name')}"
-    assert wp.get('weights', {}).get('trade') == 0.35, f"trade 权重应为 0.35"
+    assert wp.get('weights', {}).get('trade') == 0.35, "trade 权重应为 0.35"
     print("✅ test_historical_actual_over_sub_ratio_source passed")
 
 
@@ -1028,7 +1045,7 @@ def test_historical_forecast_over_sub_ratio_source():
 
     wp = result.get('weight_profile', {})
     assert wp.get('name') == 'live_heat', f"期望 live_heat，实际: {wp.get('name')}"
-    assert wp.get('weights', {}).get('trade') == 0.35, f"trade 权重应为 0.35"
+    assert wp.get('weights', {}).get('trade') == 0.35, "trade 权重应为 0.35"
     print("✅ test_historical_forecast_over_sub_ratio_source passed")
 
 

@@ -7,7 +7,6 @@ from datetime import datetime
 from typing import Any, Optional
 
 from .utils import _is_num
-from .settings import SETTINGS
 
 
 def _parse_date(date_str: str) -> Optional[datetime]:
@@ -127,7 +126,7 @@ class ProspectusValidator:
 
     def _check_cross_field_consistency(self, info: dict) -> None:
         """跨字段一致性校验。"""
-        revenue = info.get('revenue')
+        info.get('revenue')
         net_profit = info.get('net_profit')
         market_cap = info.get('market_cap_hkd_million')
         offer_price = info.get('offer_price')
@@ -138,8 +137,10 @@ class ProspectusValidator:
             implied_mc = offer_price * shares / 1_000_000  # 转为百万港元
             if market_cap > 0 and (implied_mc / market_cap > 2 or market_cap / implied_mc > 2):
                 self._add_warning(
-                    f"市值({market_cap:.0f}M) 与 股价×股数({implied_mc:.0f}M) 差异超过 2 倍，请核实"
+                    f"市值({market_cap:.0f}M) 与 股价×股数({implied_mc:.0f}M) 差异超过 2 倍，已自动修正"
                 )
+                info['market_cap_hkd_million'] = round(implied_mc, 2)
+                info['market_cap_source'] = info.get('market_cap_source', '') + '_corrected'
 
         # PE 合理性检查
         if _is_num(market_cap) and _is_num(net_profit) and net_profit > 0:

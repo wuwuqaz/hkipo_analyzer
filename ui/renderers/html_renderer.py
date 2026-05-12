@@ -1,14 +1,14 @@
 from html import escape as html_escape
-from typing import Any, Optional
+from typing import Any
 
-from ui.utils.shared_utils import SafeHtml, _num
+from ui.utils.shared_utils import SafeHtml
 
 
 class HtmlRenderer:
     """HTML 渲染器，负责生成安全的 HTML 片段"""
 
     allowed_score_classes = {"score-excellent", "score-good", "score-medium", "score-poor", ""}
-    allowed_colors = {"#00ff88", "#a3e635", "#ffaa00", "#ff3366"}
+    allowed_colors = {"#059669", "#65A30D", "#D97706", "#DC2626"}
     allowed_tag_colors = {"green", "yellow", "red", "blue", "gray"}
 
     @staticmethod
@@ -75,19 +75,19 @@ class HtmlRenderer:
         st.sidebar.markdown(f"""
         <div style="text-align:center;padding:20px 0 16px;">
             <div style="font-size:28px;">{HtmlRenderer.escape(icon)}</div>
-            <div style="font-size:18px;font-weight:700;color:#e0f2fe;">{HtmlRenderer.escape(title)}</div>
-            <div style="font-size:12px;color:#64748b;margin-top:4px;">{HtmlRenderer.escape(subtitle)}</div>
+            <div style="font-size:18px;font-weight:700;color:#1E40AF;">{HtmlRenderer.escape(title)}</div>
+            <div style="font-size:12px;color:#64748B;margin-top:4px;">{HtmlRenderer.escape(subtitle)}</div>
         </div>
         """, unsafe_allow_html=True)
 
     @staticmethod
     def empty_state(icon: str, title: str, description: str, extra: str = "") -> None:
         import streamlit as st
-        extra_html = f"<div style='font-size:14px;color:#7dd3fc;margin-top:8px;'>{extra}</div>" if extra else ""
+        extra_html = f"<div style='font-size:14px;color:#475569;margin-top:8px;'>{extra}</div>" if extra else ""
         st.markdown(f"""
         <div class="section-card" style="text-align:center;padding:60px 24px;">
             <div style="font-size:48px;margin-bottom:16px;">{icon}</div>
-            <div style="font-size:18px;color:#64748b;font-weight:500;">{HtmlRenderer.escape(title)}</div>
+            <div style="font-size:18px;color:#475569;font-weight:500;">{HtmlRenderer.escape(title)}</div>
             {extra_html}
         </div>
         """, unsafe_allow_html=True)
