@@ -26,6 +26,15 @@ hardtech:
       - intelligent driving
       - lawn mower
       - robotic
+    business_line_groups:
+      visual_perception:
+        label: 视觉感知业务
+        segment_keywords: [visual perception, sensor, algorithm module]
+        peer_tags: [lidar, perception, sensor]
+      robot_lawn_mower:
+        label: 割草机器人业务
+        segment_keywords: [robot lawn mower, lawn mower, mower]
+        peer_tags: [mower, cleaning robot, smart home]
     peers:
       - name: 速腾聚创
         ticker: "2498.HK"
@@ -80,6 +89,147 @@ hardtech:
         type: private
         tags: [robotics, cleaning robot, mower, smart home]
         notes: "未上市，高速增长的扫地机器人独角兽"
+      - name: 科沃斯
+        ticker: "603486.SH"
+        type: listed
+        tags: [robotics, cleaning robot, smart home]
+        market_cap_hkd_million: 26000
+        revenue_million: 15500
+        net_profit_million: 600
+        ps: 1.7
+        pe: 43.3
+        gross_margin_pct: 45.0
+        revenue_growth_pct: 8.0
+        notes: "服务机器人与智能家居清洁设备龙头"
+      - name: iRobot
+        ticker: "IRBT"
+        type: listed
+        tags: [robotics, cleaning robot, smart home]
+        market_cap_hkd_million: 1800
+        revenue_million: 6800
+        net_profit_million: -1200
+        ps: 0.3
+        pe: null
+        gross_margin_pct: 22.0
+        revenue_growth_pct: -15.0
+        notes: "海外扫地机器人品牌，经营承压，仅作智能家居机器人参考"
+
+  robotics_factory_automation:
+    keywords:
+      - industrial robot
+      - industrial robotics
+      - robot body
+      - robotic solution
+      - robotics automation
+      - automation system
+      - scara
+      - six-axis robot
+      - parallel robot
+      - agv
+      - amr
+      - controller
+      - vision system
+      - wafer handling
+      - factory automation
+      - 机器人本体
+      - 机器人解决方案
+      - 工业机器人
+      - 自动化系统
+      - 并联机器人
+      - 移动机器人
+      - 控制器
+      - 视觉系统
+    business_line_groups:
+      robot_body:
+        label: 机器人本体
+        segment_keywords: [robot body, industrial robot, scara, six-axis, parallel robot, wafer handling, 机器人本体, 工业机器人]
+        peer_tags: [industrial robot, robot, automation, robot body]
+      robot_solution:
+        label: 机器人解决方案
+        segment_keywords: [robotic solution, automation system, agv, amr, factory automation, 机器人解决方案, 自动化系统, 移动机器人]
+        peer_tags: [automation, system integration, agv, amr, robotics]
+      robot_component:
+        label: 关键部件
+        segment_keywords: [controller, vision system, 控制器, 视觉系统]
+        peer_tags: [controller, vision, sensing, robotics]
+    peers:
+      - name: 汇川技术
+        ticker: "300124.SZ"
+        type: listed
+        tags: [industrial automation, servo, controller, robotics]
+        market_cap_hkd_million: 210000
+        revenue_million: 34000
+        net_profit_million: 7500
+        ps: 6.2
+        pe: 28.0
+        gross_margin_pct: 36.0
+        revenue_growth_pct: 18.0
+        notes: "工业自动化平台龙头，伺服/控制器/机器人相关业务强"
+      - name: 埃斯顿
+        ticker: "002747.SZ"
+        type: listed
+        tags: [industrial robot, robotics, automation, controller]
+        market_cap_hkd_million: 17000
+        revenue_million: 3200
+        net_profit_million: -650
+        ps: 5.3
+        pe: null
+        gross_margin_pct: 32.0
+        revenue_growth_pct: 22.0
+        notes: "国产工业机器人代表，持续投入、仍在爬坡"
+      - name: 新松机器人
+        ticker: "300024.SZ"
+        type: listed
+        tags: [industrial robot, automation, agv, amr]
+        market_cap_hkd_million: 12000
+        revenue_million: 2800
+        net_profit_million: -900
+        ps: 4.3
+        pe: null
+        gross_margin_pct: 29.0
+        revenue_growth_pct: 10.0
+        notes: "机器人系统集成与自动化，行业认知度高"
+      - name: 埃夫特
+        ticker: "688165.SH"
+        type: listed
+        tags: [industrial robot, robotics, automation, robot body]
+        market_cap_hkd_million: 9000
+        revenue_million: 1800
+        net_profit_million: -500
+        ps: 5.0
+        pe: null
+        gross_margin_pct: 27.0
+        revenue_growth_pct: 16.0
+        notes: "工业机器人本体与系统业务，亏损但赛道相近"
+      - name: 优必选
+        ticker: "9880.HK"
+        type: listed
+        tags: [robotics, humanoid, robot body, controller]
+        market_cap_hkd_million: 26000
+        revenue_million: 1100
+        net_profit_million: -2500
+        ps: 23.6
+        pe: null
+        gross_margin_pct: 32.0
+        revenue_growth_pct: 40.0
+        notes: "人形机器人/通用机器人标的，估值弹性高"
+      - name: 越疆机器人
+        ticker: "2432.HK"
+        type: listed
+        tags: [robotics, cobot, robot body, automation]
+        market_cap_hkd_million: 30000
+        revenue_million: 1200
+        net_profit_million: -1200
+        ps: 25.0
+        pe: null
+        gross_margin_pct: 60.0
+        revenue_growth_pct: 58.0
+        notes: "协作机器人龙头，港股机器人估值参照"
+      - name: 极智嘉
+        ticker: "private"
+        type: private
+        tags: [agv, amr, logistics robotics, automation]
+        notes: "仓储/物流机器人独角兽，适合作为系统集成/AMR参考"
 
   ai_chip_semiconductor:
     keywords:

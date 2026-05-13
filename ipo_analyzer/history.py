@@ -5,7 +5,7 @@ import os
 import tempfile
 from datetime import date, datetime
 
-from .utils import strip_runtime_fields
+from .utils import strip_runtime_fields, classify_market_heat
 from .settings import SETTINGS
 
 logger = logging.getLogger(__name__)
@@ -112,10 +112,14 @@ class HistoryStore:
             delta['score_delta'] = curr_score - prev_score
         
         # 计算各维度delta（支持从顶层或score_breakdown中获取）
-        dimensions = ['trade_score', 'fundamental_score', 'valuation_score', 'theme_score', 'data_quality_score']
+        dimensions = ['ipo_trade_score', 'long_term_score', 'trade_score', 'fundamental_score', 'valuation_score', 'theme_score']
         for dim in dimensions:
-            prev_val = previous_result.get(dim) or previous_result.get('score_breakdown', {}).get(dim)
-            curr_val = current_result.get(dim) or current_result.get('score_breakdown', {}).get(dim)
+            prev_val = previous_result.get(dim)
+            if prev_val is None:
+                prev_val = (previous_result.get('score_breakdown') or {}).get(dim)
+            curr_val = current_result.get(dim)
+            if curr_val is None:
+                curr_val = (current_result.get('score_breakdown') or {}).get(dim)
             if prev_val is not None and curr_val is not None:
                 delta['dimension_deltas'][dim] = curr_val - prev_val
         
@@ -164,11 +168,12 @@ class HistoryStore:
             'weight_profile': result.get('weight_profile'),
             'score': result.get('score'),
             'score_breakdown': {
+                'ipo_trade_score': result.get('ipo_trade_score'),
+                'long_term_score': result.get('long_term_score'),
                 'trade_score': result.get('trade_score'),
                 'fundamental_score': result.get('fundamental_score'),
                 'valuation_score': result.get('valuation_score'),
                 'theme_score': result.get('theme_score'),
-                'data_quality_score': result.get('data_quality_score'),
             },
             'risk_penalty': result.get('risk_penalty'),
             'risk_penalty_breakdown': result.get('risk_penalty_breakdown'),
@@ -182,21 +187,89 @@ class HistoryStore:
             'version_delta': version_delta,
             '_full_result': result,  # 保存完整结果供后续对比
         }
-        
+
+        # 将 prospectus_info 中的关键日期提升到顶层，确保 _is_ended_record 等函数可访问
+        pi = result.get('prospectus_info') or {}
+        if not record.get('apply_end_date') and result.get('apply_end_date'):
+            record['apply_end_date'] = result.get('apply_end_date')
+        if not record.get('listing_date') and pi.get('listing_date'):
+            record['listing_date'] = pi.get('listing_date')
+
         # 4. 保存时间戳版本
-        timestamp_path = self._save_reanalysis_record(stock_code, record, timestamp)
+        self._save_reanalysis_record(stock_code, record, timestamp)
         
         # 5. 覆盖latest
-        latest_path = self._save_reanalysis_latest(stock_code, record)
+        self._save_reanalysis_latest(stock_code, record)
         self.merge_analysis_result(result, source='reanalysis')
         
         logger.info(f"重新分析记录已保存: {stock_code}")
         return record, version_delta
 
+    def _recalculate_scores(self, record):
+        """当 post_listing 数据更新后，使用已有的招股书数据重新计算评分。"""
+        prospectus_info = record.get('prospectus_info')
+        if not prospectus_info or not prospectus_info.get('parse_success'):
+            return
+        prospectus_text = prospectus_info.get('_extracted_text', '') or ''
+        if not prospectus_text:
+            pdf_path = record.get('pdf_path')
+            if pdf_path and os.path.exists(pdf_path):
+                try:
+                    import fitz
+                    doc = fitz.open(pdf_path)
+                    prospectus_text = "\n".join(page.get_text() for page in doc)
+                    doc.close()
+                except Exception as e:
+                    logger.warning("PDF回退读取失败 %s: %s", pdf_path, e)
+                    return
+            else:
+                logger.warning("评分重算跳过: 无招股书文本且PDF不存在 (%s)", record.get('hk_code'))
+                return
+        try:
+            from .core import _run_scoring_pipeline
+            ipo_data = {k: v for k, v in record.items()
+                        if k not in ('prospectus_info', 'post_listing', '_full_result')}
+            result = _run_scoring_pipeline(ipo_data, prospectus_info, prospectus_text)
+            score_fields = (
+                'score', 'subscription_score', 'fundamental_score',
+                'stock_quality_score', 'score_reasons', 'score_breakdown',
+                'risk_penalty', 'risk_penalty_breakdown',
+                'trade_score', 'valuation_score', 'theme_score',
+                'weight_profile', 'debug_info', 'score_trace', 'penalty_reason',
+                'analysis_mode', 'over_sub_ratio', 'over_sub_ratio_source',
+                'market_heat', 'stock_quality', 'signal_breakdown',
+                'advanced_framework_score', 'advanced_score_adjustment',
+                'data_confidence_gate_warning', 'score_weights_note',
+                'total_fund', 'public_offer', 'margin_total',
+                'actual_over_sub_ratio', 'forecast_over_sub_ratio',
+                'estimated_subscription_ratio', 'over_sub_ratio_estimated',
+                # 策略引擎字段（申购建议相关）
+                'ipo_trade_score', 'ipo_trade_label',
+                'long_term_score', 'long_term_label',
+                'fisher_label', 'lynch_label',
+                'valuation_pressure_label', 'subscription_recommendation',
+                'recommendation_reasons',
+                # 新增的硬科技/估值字段
+                'business_model_label', 'business_model_reasons',
+                'segment_concentration_label', 'segment_moat_label',
+                'ev_sales_ratio', 'net_cash_hkd_million',
+                'pre_ipo_valuation_million', 'ipo_valuation_premium_pct',
+                'inventory_amount', 'receivables_amount', 'monthly_cash_burn',
+                'patent_count', 'software_copyright_count',
+                'rd_staff_count', 'rd_staff_ratio',
+                'backlog_amount', 'industry_rank', 'market_size_notes',
+                'hardtech_moat_label', 'hardtech_moat_reasons', 'hardtech_moat_score',
+            )
+            for key in score_fields:
+                if key in result:
+                    record[key] = result[key]
+            logger.info("评分重算完成: %s score=%s", record.get('hk_code'), record.get('score'))
+        except Exception as e:
+            logger.warning("评分重算失败 %s: %s", record.get('hk_code'), e)
+
     def load_reanalysis_history(self, stock_code):
         """加载某股票的所有重新分析历史记录"""
         records = []
-        pattern = f"{stock_code}_*.json"
         for filename in os.listdir(self.reanalysis_dir):
             if filename.startswith(f"{stock_code}_") and filename != f"{stock_code}_latest.json":
                 filepath = os.path.join(self.reanalysis_dir, filename)
@@ -286,9 +359,90 @@ class HistoryStore:
 
     def load(self, include_live=True):
         records = self._read_all()
+        records = self._deduplicate_stocks(records)
         if include_live:
             return records
         return [item for item in records if not self._is_live_or_future(item)]
+
+    @staticmethod
+    def _deduplicate_stocks(records):
+        """合并同一股票的多条记录：reanalysis 的市场数据覆盖原始记录。
+
+        原始记录保留财务数据（revenue, gross_margin 等），
+        reanalysis 记录的市场热度数据（over_sub_ratio, market_heat 等）覆盖原始。
+        同时从 _full_result 中提取缺失的顶层字段。
+        """
+        if not records:
+            return records
+
+        # 先补全每条记录：从 _full_result 提取市场数据到顶层
+        _MARKET_FIELDS = ('over_sub_ratio', 'over_sub_ratio_source',
+                          'actual_over_sub_ratio', 'forecast_over_sub_ratio',
+                          'market_heat', 'margin_total', 'public_offer')
+        for item in records:
+            fr = item.get('_full_result') or {}
+            for field in _MARKET_FIELDS:
+                cur = item.get(field)
+                if (cur is None or cur == '' or cur == 'missing') and fr.get(field) is not None and fr.get(field) != '' and fr.get(field) != 'missing':
+                    item[field] = fr.get(field)
+            if not item.get('post_listing') and fr.get('post_listing'):
+                item['post_listing'] = copy.deepcopy(fr['post_listing'])
+
+        groups = {}
+        for item in records:
+            code = (item.get('hk_code') or item.get('stock_code') or '').strip()
+            if not code:
+                continue
+            groups.setdefault(code, []).append(item)
+
+        merged = []
+        seen_codes = set()
+        for item in records:
+            code = (item.get('hk_code') or item.get('stock_code') or '').strip()
+            if not code:
+                merged.append(item)
+                continue
+            if code in seen_codes:
+                continue
+            seen_codes.add(code)
+
+            group = groups.get(code, [item])
+            if len(group) == 1:
+                merged.append(group[0])
+                continue
+
+            reanalysis_items = [r for r in group if r.get('analysis_mode') == 'reanalysis']
+            original_items = [r for r in group if r.get('analysis_mode') != 'reanalysis']
+
+            base = copy.deepcopy(original_items[0]) if original_items else copy.deepcopy(group[0])
+
+            if reanalysis_items:
+                ra = reanalysis_items[0]
+                # 总是合并市场数据
+                for field in _MARKET_FIELDS:
+                    ra_val = ra.get(field)
+                    if ra_val is not None and ra_val != '' and ra_val != 'missing':
+                        base[field] = ra_val
+                if ra.get('post_listing'):
+                    base['post_listing'] = copy.deepcopy(ra['post_listing'])
+                if ra.get('historical_market_data'):
+                    base['historical_market_data'] = copy.deepcopy(ra['historical_market_data'])
+                # 质量检查: 只有当重分析成功解析了招股书时才覆盖评分
+                ra_full = ra.get('_full_result', {})
+                ra_prospectus = ra_full.get('prospectus_info', {})
+                ra_parse_ok = ra_prospectus.get('parse_success', False) or ra.get('score') is not None
+                if ra_parse_ok:
+                    for field in ('score', 'trade_score', 'valuation_score', 'theme_score',
+                                  'ipo_trade_score', 'ipo_trade_label', 'long_term_score',
+                                  'long_term_label', 'subscription_recommendation',
+                                  'recommendation_reasons', 'subscription_score',
+                                  'weight_profile', 'score_trace'):
+                        if ra.get(field) is not None:
+                            base[field] = ra.get(field)
+
+            merged.append(base)
+
+        return merged
 
     def archive_many(self, results, source='live'):
         if not results:
@@ -312,6 +466,15 @@ class HistoryStore:
                 record['hk_code'] = str(record.get('hk_code')).zfill(5)
             if existing.get(code, {}).get('post_listing') and not record.get('post_listing'):
                 record['post_listing'] = copy.deepcopy(existing[code]['post_listing'])
+            # 保护重新分析产生的数据不被缓存覆盖
+            existing_record = existing.get(code, {})
+            if existing_record.get('_reanalysis'):
+                for re_field in ('score', 'ipo_trade_score', 'long_term_score', 'trade_score',
+                                 'fundamental_score', 'valuation_score', 'theme_score',
+                                 'subscription_recommendation', 'recommendation_reasons',
+                                 'score_reasons', 'actual_over_sub_ratio', 'over_sub_ratio_source'):
+                    if existing_record.get(re_field) is not None and record.get(re_field) is None:
+                        record[re_field] = copy.deepcopy(existing_record[re_field])
             record['_archived_at'] = archived_at
             record['_archive_source'] = source
             record['_history_version'] = self.HISTORY_VERSION
@@ -373,12 +536,19 @@ class HistoryStore:
         if str(record.get('hk_code') or '').isdigit():
             record['hk_code'] = str(record.get('hk_code')).zfill(5)
 
+        # 保护来自 post_listing_actual 的真实配发数据不被重分析估算值覆盖
+        protected_oversub = False
+        if merged.get('over_sub_ratio_source') == 'post_listing_actual':
+            protected_oversub = True
+
         for key, value in record.items():
             if key == 'post_listing' and not value:
                 continue
             if value is None or value == "":
                 continue
             if key == 'prospectus_info' and isinstance(value, dict) and _is_dict_effectively_empty(value):
+                continue
+            if protected_oversub and key in ('actual_over_sub_ratio', 'over_sub_ratio', 'over_sub_ratio_source', 'market_heat'):
                 continue
             merged[key] = value
 
@@ -402,17 +572,42 @@ class HistoryStore:
             if self._stock_code(item)
         }
         record = copy.deepcopy(existing.get(code, {'hk_code': code}))
+
+        # _read_all 已剥离 _extracted_text，重读原始 JSON 恢复它以便评分重算
+        saved_text = ''
+        try:
+            with open(self.history_file, 'r', encoding='utf-8') as f:
+                raw_data = json.load(f)
+            for item in raw_data if isinstance(raw_data, list) else []:
+                if isinstance(item, dict) and item.get('hk_code') == stock_code:
+                    pi = item.get('prospectus_info', {})
+                    if isinstance(pi, dict):
+                        saved_text = pi.get('_extracted_text', '') or ''
+                    break
+        except Exception:
+            pass
+        if saved_text and isinstance(record.get('prospectus_info'), dict):
+            record['prospectus_info']['_extracted_text'] = saved_text
+
         current_post_listing = copy.deepcopy(record.get('post_listing') or {})
         current_post_listing.update(strip_runtime_fields(copy.deepcopy(post_listing or {})))
+        if current_post_listing.get('status') == 'ok':
+            current_post_listing.pop('message', None)
+            if not current_post_listing.get('error'):
+                current_post_listing.pop('error', None)
         record['post_listing'] = current_post_listing
         record['_post_listing_updated_at'] = datetime.now().isoformat()
         record['_history_version'] = self.HISTORY_VERSION
         
         # 从 post_listing 数据中提取真实公配倍数，填充到 actual_over_sub_ratio
+        # 始终用配发公告的真实值覆盖旧的估算值
         public_sub = post_listing.get('public_subscription_level') if post_listing else None
-        if public_sub and not record.get('actual_over_sub_ratio'):
+        if public_sub:
             record['actual_over_sub_ratio'] = public_sub
+            record['over_sub_ratio'] = public_sub
             record['over_sub_ratio_source'] = 'post_listing_actual'
+            record['market_heat'] = classify_market_heat(public_sub)
+            self._recalculate_scores(record)
         
         existing[code] = record
         self._write_all(self._sort_records(existing.values()))

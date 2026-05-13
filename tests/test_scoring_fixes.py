@@ -11,11 +11,10 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from ipo_analyzer.peer_comps import _split_peer_samples, PeerComparableAnalyzer
+from ipo_analyzer.peer_comps import _split_peer_samples
 from ipo_analyzer.scoring import ScoringSystem
-from ipo_analyzer.industry_router import classify_company, _is_biotech
+from ipo_analyzer.industry_router import classify_company
 from ipo_analyzer.analyzers import ValuationAnalyzer
-from ipo_analyzer.core import _calculate_risk_penalty
 
 
 def test_peer_fallback_when_only_one_hk_peer():
@@ -104,7 +103,7 @@ def test_low_revenue_biotech_ps_not_hard_penalty():
     assert "同行估值明显偏贵" not in reasons_text, "低收入biotech不应因PS硬扣peer_adj"
     # 应出现提示
     assert "PS失真" in reasons_text or "低收入biotech PS失真" in reasons_text, "应提示PS失真"
-    print(f"✅ test_low_revenue_biotech_ps_not_hard_penalty passed")
+    print("✅ test_low_revenue_biotech_ps_not_hard_penalty passed")
 
 
 def test_currency_growth_uses_same_fx_basis():
@@ -126,7 +125,7 @@ def test_currency_growth_uses_same_fx_basis():
     assert revenue_hkd is not None, "应输出 revenue_hkd_million"
     assert revenue_prev_hkd is not None, "应输出 revenue_previous_hkd_million"
     # 增长率计算基于 HKD 口径
-    expected_growth = (revenue_hkd - revenue_prev_hkd) / revenue_prev_hkd
+    (revenue_hkd - revenue_prev_hkd) / revenue_prev_hkd
     reasons = val.get("valuation_reasons", [])
     growth_reason = [r for r in reasons if "收入增速" in r]
     assert growth_reason, f"应包含收入增速说明，实际 reasons={reasons}"
@@ -155,7 +154,7 @@ def test_score_trace_contains_all_adjustments():
     assert "cap_reason" in score_trace, "score_trace 应包含 cap_reason"
     assert "final_score_before_cap" in score_trace, "score_trace 应包含 final_score_before_cap"
     assert "final_score_after_cap" in score_trace, "score_trace 应包含 final_score_after_cap"
-    print(f"✅ test_score_trace_contains_all_adjustments passed")
+    print("✅ test_score_trace_contains_all_adjustments passed")
 
 
 def test_no_prospectus_market_only_mode():

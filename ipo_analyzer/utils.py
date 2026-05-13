@@ -5,6 +5,9 @@ def _is_num(x):
     return isinstance(x, (int, float))
 
 
+is_num = _is_num  # public alias
+
+
 def format_iso_date(value):
     if not value:
         return ""
@@ -60,9 +63,19 @@ def _contains_any(text, aliases):
 def _find_year_headers(lines, max_scan=8):
     found_years = []
     table_start = None
+
+    # 英文 + 中文财报表头关键词
+    _HEADER_PATTERNS = [
+        'year ended december 31', '31 december', 'for the years ended',
+        'fiscal year ended', 'for the year ended',
+        # 中文招股书财年表头
+        '止年度', '止十二个月', '止六個月', '止六个月',
+        '止三個月', '止三个月', '12月31日',
+    ]
+
     for i, line in enumerate(lines):
         ll = line.strip().lower()
-        if any(p in ll for p in ('year ended december 31', '31 december', 'for the years ended', 'fiscal year ended')):
+        if any(p in ll for p in _HEADER_PATTERNS):
             table_start = i
             found_years = []
             for j in range(i, min(i + max_scan, len(lines))):
@@ -72,6 +85,17 @@ def _find_year_headers(lines, max_scan=8):
                         found_years.append(y)
             if len(found_years) >= 2:
                 break
+            found_years = []
+
+    # 回退：未找到表头时，扫描全文寻找连续两年份的行
+    if table_start is None:
+        for i, line in enumerate(lines):
+            years_in_line = [int(m.group(1)) for m in re.finditer(r'\b(20\d{2})\b', line)]
+            if len(set(years_in_line)) >= 2:
+                table_start = i
+                found_years = sorted(set(years_in_line))
+                break
+
     return found_years, table_start
 
 
@@ -92,6 +116,36 @@ def _extract_table_nums(text_block, n_years, min_val=500):
             continue
     filtered = [v for v in nums if abs(v) >= min_val]
     return filtered if len(filtered) >= n_years else nums
+
+
+def extract_text_excerpts(text, patterns, *, window=220, max_chars=800, limit=3):
+    """Extract compact original-text snippets around the first few pattern hits."""
+    if not text:
+        return []
+    snippets = []
+    seen = set()
+    for pattern in patterns or []:
+        if not pattern:
+            continue
+        try:
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+        except re.error:
+            continue
+        if not match:
+            continue
+        start = max(0, match.start() - window)
+        end = min(len(text), match.end() + window)
+        snippet = re.sub(r'\s+', ' ', text[start:end]).strip()
+        if not snippet:
+            continue
+        key = snippet[:160].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        snippets.append(snippet[:max_chars])
+        if len(snippets) >= limit:
+            break
+    return snippets
 
 
 SECTOR_KEYWORDS = {
@@ -165,3 +219,18 @@ def strip_runtime_fields(value):
     if isinstance(value, list):
         return [strip_runtime_fields(item) for item in value]
     return value
+
+
+def classify_market_heat(over_sub_ratio):
+    """根据超购倍数返回市场热度标签，消除多处重复的 if/elif 分类逻辑。"""
+    from .settings import SETTINGS
+    if over_sub_ratio is None:
+        return None
+    mh = SETTINGS.market_heat
+    if over_sub_ratio >= mh.extreme:
+        return "极热"
+    elif over_sub_ratio >= mh.hot:
+        return "热门"
+    elif over_sub_ratio >= mh.warm:
+        return "温和"
+    return "冷清"

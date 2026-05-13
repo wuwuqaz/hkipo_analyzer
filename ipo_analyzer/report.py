@@ -16,10 +16,8 @@ from reportlab.platypus import (
     Spacer,
     Table,
     TableStyle,
-    PageBreak,
-    KeepTogether,
 )
-from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER
 
 from .utils import _is_num, format_iso_date, _format_cornerstone_amount
 from .settings import SETTINGS
@@ -163,14 +161,19 @@ def export_pdf_report(results, output_file):
     pdf_cfg = SETTINGS.pdf_report
 
     def _score_color(score):
-        if score >= pdf_cfg.score_excellent: return _C['green']
-        if score >= pdf_cfg.score_good: return _C['amber']
+        if score >= pdf_cfg.score_excellent:
+            return _C['green']
+        if score >= pdf_cfg.score_good:
+            return _C['amber']
         return _C['red']
 
     def _score_label(score):
-        if score >= pdf_cfg.recommend_active: return "积极申购"
-        if score >= pdf_cfg.recommend_neutral: return "中性试水"
-        if score >= pdf_cfg.recommend_cautious: return "谨慎试水"
+        if score >= pdf_cfg.recommend_active:
+            return "积极申购"
+        if score >= pdf_cfg.recommend_neutral:
+            return "中性试水"
+        if score >= pdf_cfg.recommend_cautious:
+            return "谨慎试水"
         return "建议跳过"
 
     def _progress_bar(score, width=80, height=6, bar_color=None):
@@ -256,15 +259,18 @@ def export_pdf_report(results, output_file):
 
     if results:
         def _fmt_shares_m(share_count):
-            if share_count is None: return "--"
+            if share_count is None:
+                return "--"
             return f"{share_count / 10000:.2f}"
 
         def _fmt_hkd_billion(value_million):
-            if value_million is None: return "--"
+            if value_million is None:
+                return "--"
             return f"HK${value_million / 100:.2f}亿"
 
         def _fmt_entry_fee(value_hkd):
-            if value_hkd is None: return "--"
+            if value_hkd is None:
+                return "--"
             return f"HK${value_hkd:,.2f}"
 
         def build_prospectus_basic_info_table(ipo):
@@ -276,6 +282,8 @@ def export_pdf_report(results, output_file):
             sector_label = sector_map.get(prospectus_info.get('sector', 'unknown'), '未明确')
 
             offer_price = prospectus_info.get('offer_price') or prospectus_info.get('max_price') or ipo.get('max_price')
+            indicative_offer_price = prospectus_info.get('indicative_offer_price')
+            price_basis = "最终价" if prospectus_info.get('valuation_price_basis') == 'final_price' else "招股价"
             board_lot = prospectus_info.get('lot_size') or ipo.get('lot_size')
             entry_fee_hkd = prospectus_info.get('entry_fee_hkd')
             market_cap_million = prospectus_info.get('market_cap_hkd_million')
@@ -283,17 +291,20 @@ def export_pdf_report(results, output_file):
             issuance_ratio_pct = prospectus_info.get('issuance_ratio_pct')
             public_offer_ratio_pct = prospectus_info.get('public_offer_ratio_pct')
             listing_date = prospectus_info.get('listing_date')
-            results_date = prospectus_info.get('results_date')
+            prospectus_info.get('results_date')
             cornerstone_total_hkd = prospectus_info.get('cornerstone_investment_hkd_million')
             cornerstone_total_usd = prospectus_info.get('cornerstone_investment_usd_million')
             cornerstone_offer_ratio_pct = prospectus_info.get('cornerstone_offer_ratio_pct') or cornerstone_analysis.get('cornerstone_pct')
             valuation = prospectus_info.get('valuation', {}) or {}
+            cashflow = prospectus_info.get('cashflow', {}) or {}
             global_offer_shares = prospectus_info.get('global_offer_shares')
             hk_offer_shares = prospectus_info.get('hk_offer_shares')
             intl_offer_shares = prospectus_info.get('international_offer_shares')
             mechanism = margin_detail.get('offering_mechanism') or '--'
             if public_offer_ratio_pct is not None:
                 mechanism = f"公开发售{public_offer_ratio_pct:.2f}%"
+                if prospectus_info.get('is_chapter_18c') and prospectus_info.get('public_offer_clawback_max_pct'):
+                    mechanism += f"（可回拨至{prospectus_info['public_offer_clawback_max_pct']:g}%）"
 
             gross_proceeds_million = None
             if _is_num(ipo.get('public_offer')):
@@ -302,6 +313,8 @@ def export_pdf_report(results, output_file):
             if market_cap_million is not None and gross_proceeds_million is not None:
                 ipo_pre_valuation_million = max(0, market_cap_million - gross_proceeds_million)
             pe_ratio = valuation.get('adjusted_pe_ratio') or valuation.get('pe_ratio')
+            ev_sales_ratio = valuation.get('ev_sales_ratio')
+            ipo_valuation_premium_pct = valuation.get('ipo_valuation_premium_pct')
 
             global_offer_lots = None
             hk_offer_lots = None
@@ -309,6 +322,13 @@ def export_pdf_report(results, output_file):
                 global_offer_lots = global_offer_shares / board_lot
             if _is_num(hk_offer_shares) and _is_num(board_lot) and board_lot > 0:
                 hk_offer_lots = hk_offer_shares / board_lot
+            hk_offer_lots_text = "--"
+            if global_offer_lots is not None and hk_offer_lots is not None:
+                hk_offer_lots_text = f"{global_offer_lots:,.0f}/{hk_offer_lots:,.0f}"
+                clawback_pct = prospectus_info.get('public_offer_clawback_max_pct') if prospectus_info.get('is_chapter_18c') else None
+                if _is_num(clawback_pct) and _is_num(global_offer_shares) and _is_num(board_lot) and board_lot > 0:
+                    max_hk_lots = global_offer_shares * clawback_pct / 100 / board_lot
+                    hk_offer_lots_text += f"（公开可至{max_hk_lots:,.0f}）"
 
             rows = []
             ts = []
@@ -328,7 +348,8 @@ def export_pdf_report(results, output_file):
 
             def vp(value, color=_C['navy'], bold=False):
                 t = value if isinstance(value, str) else str(value)
-                if bold: t = f"<b>{t}</b>"
+                if bold:
+                    t = f"<b>{t}</b>"
                 return Paragraph(f"<font color='{color}'>{t}</font>", styles["Value"])
 
             def add_pair(l_label, l_value, r_label, r_value, val_bg="#ffffff", l_color=_C['navy'], r_color=_C['navy'], l_bold=False, r_bold=False):
@@ -354,10 +375,11 @@ def export_pdf_report(results, output_file):
             add_section("发行信息", _C['brand'])
             add_pair("公司名称", ipo.get('company_name', '--'), "股票代码", f"{ipo.get('hk_code', '--')}.HK", _C['blue_bg'], l_bold=True)
             add_pair("所属行业", sector_label, "发行机制", mechanism, _C['blue_bg'])
-            add_pair("招股价", f"HK${offer_price:.2f}" if _is_num(offer_price) else "--", "每手股数", f"{int(board_lot)}" if board_lot else "--", _C['green_light'], l_color=_C['red'], l_bold=True)
-            add_pair("入场费", _fmt_entry_fee(entry_fee_hkd), "公开发售比例", f"{public_offer_ratio_pct:.2f}%" if public_offer_ratio_pct is not None else "--", _C['green_light'], l_color=_C['red'], l_bold=True)
+            add_pair(price_basis, f"HK${offer_price:.2f}" if _is_num(offer_price) else "--", "原招股价", f"HK${indicative_offer_price:.2f}" if _is_num(indicative_offer_price) else "--", _C['green_light'], l_color=_C['red'], l_bold=True)
+            add_pair("每手股数", f"{int(board_lot)}" if board_lot else "--", "入场费", _fmt_entry_fee(entry_fee_hkd), _C['green_light'], r_color=_C['red'], r_bold=True)
+            add_pair("公开发售比例", f"{public_offer_ratio_pct:.2f}%" if public_offer_ratio_pct is not None else "--", "估值口径", price_basis, _C['green_light'])
             add_pair("全球发售(万股)", _fmt_shares_m(global_offer_shares), "公开发售(万股)", _fmt_shares_m(hk_offer_shares), _C['yellow_bg'])
-            add_pair("国际发售(万股)", _fmt_shares_m(intl_offer_shares), "发售手数(全球/公开)", f"{global_offer_lots:,.0f}/{hk_offer_lots:,.0f}" if global_offer_lots is not None and hk_offer_lots is not None else "--", _C['yellow_bg'])
+            add_pair("国际发售(万股)", _fmt_shares_m(intl_offer_shares), "发售手数(全球/公开)", hk_offer_lots_text, _C['yellow_bg'])
             add_pair("招股日期", f"{format_iso_date(ipo.get('apply_start_date', ''))} ~ {format_iso_date(ipo.get('apply_end_date', ''))}", "预计上市", listing_date or "--", _C['amber_bg2'])
 
             add_section("估值与资金", _C['brown'])
@@ -365,11 +387,13 @@ def export_pdf_report(results, output_file):
             if cornerstone_total_hkd is not None and cornerstone_offer_ratio_pct is not None:
                 cornerstone_value = f"HK${cornerstone_total_hkd/100:.2f}亿({cornerstone_offer_ratio_pct:.2f}%)"
             elif cornerstone_total_usd is not None and cornerstone_offer_ratio_pct is not None:
-                cornerstone_hkd = cornerstone_total_usd * 7.8344
+                cornerstone_hkd = cornerstone_total_usd * SETTINGS.fx.usd_to_hkd_precise
                 cornerstone_value = f"HK${cornerstone_hkd/100:.2f}亿({cornerstone_offer_ratio_pct:.2f}%)"
             add_pair("IPO前估值", _fmt_hkd_billion(ipo_pre_valuation_million), "总市值", _fmt_hkd_billion(market_cap_million), "#ffffff", l_color=_C['red'], r_color=_C['red'], l_bold=True, r_bold=True)
             add_pair("募集(公开)", _fmt_hkd_billion(gross_proceeds_million), "净募集", _fmt_hkd_billion(net_proceeds_million), _C['green_light'])
             add_pair("发行比例", f"{issuance_ratio_pct:.2f}%" if issuance_ratio_pct is not None else "--", "市盈率", f"{pe_ratio:.2f}x" if pe_ratio is not None else "--", "#ffffff")
+            add_pair("EV/Sales", f"{ev_sales_ratio:.2f}x" if ev_sales_ratio is not None else "--", "IPO溢价", f"{ipo_valuation_premium_pct:.1f}%" if ipo_valuation_premium_pct is not None else "--", _C['blue_bg'])
+            add_pair("营运资本趋势", cashflow.get("working_capital_trend_label") or "--", "现金流质量", cashflow.get("cash_quality_label") or "--", _C['blue_bg'])
             add_pair("基石投资", cornerstone_value, "基石占比", f"{cornerstone_offer_ratio_pct:.2f}%" if cornerstone_offer_ratio_pct is not None else "--", _C['blue_bg'])
 
             tbl = Table(rows, colWidths=[100, 150, 100, 150], hAlign="LEFT")
@@ -407,6 +431,10 @@ def export_pdf_report(results, output_file):
                 ('float_structure', '筹码弹性', _C['blue']),
                 ('cornerstone_quality', '基石质量', _C['gold']),
                 ('valuation_reading', '估值解释', _C['amber']),
+                ('market_heat', '实时热度', _C['teal']),
+                ('sector_flow', '板块资金流', _C['green']),
+                ('sector_momentum', '板块动能', _C['blue']),
+                ('sector_board', '板块指数', _C['navy']),
                 ('theme_bonus', '主题催化', _C['purple']),
                 ('liquidity_bonus', '港股通路径', _C['teal']),
                 ('data_confidence', '数据置信度', _C['green']),
@@ -459,8 +487,133 @@ def export_pdf_report(results, output_file):
             ]))
             return tbl
 
-        avg_score = sum(item.get('score', 0) for item in results) / len(results)
-        best_item = max(results, key=lambda item: item.get('score', 0))
+        def build_overview_table(ipo):
+            prospectus_info = ipo.get('prospectus_info', {}) or {}
+            valuation = prospectus_info.get('valuation', {}) or {}
+            cashflow = prospectus_info.get('cashflow', {}) or {}
+            business_breakdown = prospectus_info.get('business_breakdown', {}) or {}
+            rnd_pipeline = prospectus_info.get('rnd_pipeline', {}) or {}
+            cornerstone_analysis = prospectus_info.get('cornerstone_analysis', {}) or {}
+            live_heat = ipo.get('live_market_heat') or (ipo.get('signal_breakdown') or {}).get('market_heat') or {}
+
+            def _text(value, limit=42):
+                text = str(value if value is not None else '--')
+                text = text if len(text) <= limit else text[:limit - 3] + '...'
+                return xml_escape(text)
+
+            rows = [
+                [
+                    Paragraph("<b>总览判断</b>", styles["TableHeader"]),
+                    Paragraph("<b>关键标签</b>", styles["TableHeader"]),
+                    Paragraph("<b>补充说明</b>", styles["TableHeader"]),
+                ]
+            ]
+            key_labels = [
+                valuation.get("valuation_label", "--"),
+                cornerstone_analysis.get("label", "--"),
+                cashflow.get("working_capital_trend_label", "--"),
+                cashflow.get("working_capital_pressure_label", "--"),
+                live_heat.get("sector_heat_label", "--"),
+                live_heat.get("sector_board_label", "--"),
+                live_heat.get("sector_momentum_label", "--"),
+            ]
+            notes = []
+            if prospectus_info.get("is_chapter_18c") and _is_num(prospectus_info.get("public_offer_clawback_max_pct")):
+                notes.append(f"18C可回拨至{prospectus_info['public_offer_clawback_max_pct']:g}%")
+            elif prospectus_info.get("public_offer_ratio_pct") is not None:
+                notes.append(f"公开发售{prospectus_info['public_offer_ratio_pct']:.1f}%")
+            if business_breakdown.get("business_model_label"):
+                notes.append(str(business_breakdown.get("business_model_label")))
+            if rnd_pipeline.get("hardtech_moat_label"):
+                notes.append(f"护城河{rnd_pipeline.get('hardtech_moat_label')}")
+            if cashflow.get("working_capital_trend_reasons"):
+                notes.append("；".join(cashflow.get("working_capital_trend_reasons", [])[:2]))
+            if cashflow.get("working_capital_pressure_reasons"):
+                notes.append("；".join(cashflow.get("working_capital_pressure_reasons", [])[:2]))
+            if live_heat.get("sector_flow_label") and live_heat.get("sector_flow_label") != "缺失":
+                notes.append(f"资金流{live_heat.get('sector_flow_label')}")
+            if live_heat.get("sector_board_label") and live_heat.get("sector_board_label") != "缺失":
+                notes.append(f"板块指数{live_heat.get('sector_board_label')}")
+
+            rows.append([
+                Paragraph(_text(ipo.get("subscription_recommendation") or "--", 18), styles["Value"]),
+                Paragraph(_text(" · ".join(str(item) for item in key_labels if item and item != "缺失"), 80), styles["MutedValue"]),
+                Paragraph(_text("；".join(notes) if notes else "--", 120), styles["MutedValue"]),
+            ])
+
+            tbl = Table(rows, colWidths=[84, 170, 266], hAlign="LEFT")
+            tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_C['slate_100'])),
+                ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor(_C['slate_200'])),
+                ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor(_C['slate_200'])),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ]))
+            return tbl
+
+        def build_evidence_section(ipo):
+            prospectus_info = ipo.get('prospectus_info', {}) or {}
+            cornerstone_analysis = prospectus_info.get('cornerstone_analysis', {}) or {}
+            sections = []
+
+            def _compact_text(value, limit):
+                text = re.sub(r'\s+', ' ', str(value or '')).strip()
+                if len(text) > limit:
+                    text = text[:limit - 3] + '...'
+                return xml_escape(text)
+
+            cornerstone_excerpt = cornerstone_analysis.get('source_excerpt') or cornerstone_analysis.get('raw_pdf_excerpt') or ''
+            if cornerstone_excerpt:
+                sections.append(('基石原文', cornerstone_excerpt))
+
+            business_excerpt = (prospectus_info.get('business_breakdown', {}) or {}).get('evidence_excerpt') or ''
+            if business_excerpt:
+                sections.append(('业务分部', business_excerpt))
+
+            cashflow_excerpt = (prospectus_info.get('cashflow', {}) or {}).get('evidence_excerpt') or ''
+            if cashflow_excerpt:
+                sections.append(('营运资本', cashflow_excerpt))
+
+            rnd_excerpt = (prospectus_info.get('rnd_pipeline', {}) or {}).get('evidence_excerpt') or ''
+            if rnd_excerpt:
+                sections.append(('研发护城河', rnd_excerpt))
+
+            valuation_excerpt = (prospectus_info.get('valuation', {}) or {}).get('evidence_excerpt') or ''
+            if valuation_excerpt:
+                sections.append(('估值口径', valuation_excerpt))
+
+            if not sections:
+                return None
+
+            rows = [
+                [Paragraph("<b>证据来源</b>", styles["TableHeader"]), Paragraph("<b>原文摘录</b>", styles["TableHeader"])],
+            ]
+            for title, excerpt in sections[:5]:
+                rows.append([
+                    Paragraph(_compact_text(title, 24), styles["Value"]),
+                    Paragraph(_compact_text(excerpt, 220), styles["MutedValue"]),
+                ])
+
+            tbl = Table(rows, colWidths=[88, 422], hAlign="LEFT", repeatRows=1)
+            tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_C['brand'])),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor(_C['slate_200'])),
+                ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor(_C['slate_200'])),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(_C['slate_50'])]),
+            ]))
+            return tbl
+
+        avg_score = sum(item.get('ipo_trade_score', item.get('trade_score', item.get('score', 0))) for item in results) / len(results)
+        best_item = max(results, key=lambda item: item.get('ipo_trade_score', item.get('trade_score', item.get('score', 0))))
         prospectus_count = sum(1 for item in results if item.get('prospectus_info'))
         quality_count = sum(1 for item in results if item.get('stock_quality', {}).get('score', 0) >= 45)
         def _has_effective_cornerstone_v2(item):
@@ -488,9 +641,10 @@ def export_pdf_report(results, output_file):
             ]))
             return card
 
+        best_trade_score = best_item.get('ipo_trade_score', best_item.get('trade_score', best_item.get('score', 0)))
         summary = Table([[
-            metric_card("平均总分", f"{avg_score:.0f}", _score_color(avg_score)),
-            metric_card("最高总分", f"{best_item.get('score', 0)}", _score_color(best_item.get('score', 0))),
+            metric_card("平均打新分", f"{avg_score:.0f}", _score_color(avg_score)),
+            metric_card("最高打新分", f"{best_trade_score}", _score_color(best_trade_score)),
             metric_card("招股书解析", f"{prospectus_count}", _C['teal']),
             metric_card("质地达标", f"{quality_count}", _C['blue']),
             metric_card("基石V2", f"{cornerstone_count}", _C['gold']),
@@ -510,16 +664,17 @@ def export_pdf_report(results, output_file):
             Paragraph(f"<b>{'排名'}</b>", styles["Label"]),
             Paragraph(f"<b>{'公司'}</b>", styles["Label"]),
             Paragraph(f"<b>{'代码'}</b>", styles["Label"]),
-            Paragraph(f"<b>{'总分'}</b>", styles["Label"]),
+            Paragraph(f"<b>{'打新/长期'}</b>", styles["Label"]),
             Paragraph(f"<b>{'申购判断'}</b>", styles["Label"]),
             Paragraph(f"<b>{'超购倍数'}</b>", styles["Label"]),
             Paragraph(f"<b>{'基石/质地'}</b>", styles["Label"]),
         ]]
 
         for idx, ipo in enumerate(results, 1):
-            total_score = ipo.get('score', 0)
+            total_score = ipo.get('ipo_trade_score', ipo.get('trade_score', ipo.get('score', 0)))
+            long_score = ipo.get('long_term_score', ipo.get('fundamental_score', 0))
             cornerstone_analysis = ipo.get('prospectus_info', {}).get('cornerstone_analysis', {}) or {}
-            recommendation = cornerstone_analysis.get('recommendation')
+            recommendation = ipo.get('subscription_recommendation') or cornerstone_analysis.get('recommendation')
             if not recommendation:
                 recommendation = _score_label(total_score)
             over_sub = ipo.get('actual_over_sub_ratio') or ipo.get('forecast_over_sub_ratio') or ipo.get('over_sub_ratio')
@@ -539,7 +694,7 @@ def export_pdf_report(results, output_file):
                 Paragraph(str(idx), styles["Value"]),
                 Paragraph(ipo.get('company_name', ''), styles["Value"]),
                 Paragraph(ipo.get('hk_code', ''), styles["Value"]),
-                Paragraph(f"<font color='{sc}'><b>{total_score}</b></font>", styles["Value"]),
+                Paragraph(f"<font color='{sc}'><b>{total_score}</b></font><br/><font size='7' color='{_C['slate_400']}'>长 {long_score}</font>", styles["Value"]),
                 _recommend_tag(recommendation, total_score),
                 Paragraph(over_text, styles["Value"]),
                 Paragraph(f"{cornerstone_text}<br/><font size='7' color='{_C['slate_400']}'>质地{quality_label} {quality_score}分</font>", styles["Value"]),
@@ -568,21 +723,23 @@ def export_pdf_report(results, output_file):
 
         company_name = ipo.get('company_name', 'N/A')
         hk_code = ipo.get('hk_code', 'N/A')
-        total_score = ipo.get('score', 0)
+        total_score = ipo.get('ipo_trade_score', ipo.get('trade_score', ipo.get('score', 0)))
+        long_score = ipo.get('long_term_score', ipo.get('fundamental_score', 0))
+        recommendation = ipo.get('subscription_recommendation') or _score_label(total_score)
         sc = _score_color(total_score)
 
         header_data = [
             [
                 Paragraph(f"<b>{company_name}</b><br/><font size=9 color='{_C['slate_500']}'>HKEX {hk_code}</font>", styles["IPOTitle"]),
-                Paragraph(f"<font size='32' color='{sc}'><b>{total_score}</b></font>", styles["Score"]),
+                Paragraph(f"<font size='32' color='{sc}'><b>{total_score}</b></font><br/><font size='8' color='{_C['slate_500']}'>长期 {long_score}/100</font>", styles["Score"]),
             ],
             [
                 Paragraph("", styles["Value"]),
                 _progress_bar(total_score, width=120, height=5, bar_color=sc),
             ],
             [
-                _recommend_tag(_score_label(total_score), total_score),
-                Paragraph(f"<font size=7.5 color='{_C['slate_400']}'>综合评分</font>", styles["MutedValue"]),
+                _recommend_tag(recommendation, total_score),
+                Paragraph(f"<font size=7.5 color='{_C['slate_400']}'>打新交易分</font>", styles["MutedValue"]),
             ],
         ]
         header = Table(header_data, colWidths=[340, 160])
@@ -611,6 +768,18 @@ def export_pdf_report(results, output_file):
             ipo_elements.append(signal_breakdown_table)
             ipo_elements.append(Spacer(1, 10))
 
+        overview_table = build_overview_table(ipo)
+        if overview_table:
+            ipo_elements.append(overview_table)
+            ipo_elements.append(Spacer(1, 10))
+
+        evidence_section = build_evidence_section(ipo)
+        if evidence_section:
+            ipo_elements.append(Paragraph("<b>原文证据</b>", styles["Label"]))
+            ipo_elements.append(Spacer(1, 4))
+            ipo_elements.append(evidence_section)
+            ipo_elements.append(Spacer(1, 10))
+
         # --- waterfall 得分拆解 ---
         wp = ipo.get('weight_profile', {}) or {}
         weights = wp.get('weights', {})
@@ -626,7 +795,6 @@ def export_pdf_report(results, output_file):
                 ("基本面", ipo.get('fundamental_score', 0), weights.get('fundamental', 0)),
                 ("估值面", ipo.get('valuation_score', 0), weights.get('valuation', 0)),
                 ("主题面", ipo.get('theme_score', 0), weights.get('theme', 0)),
-                ("数据质量", ipo.get('data_quality_score', 0), weights.get('data_quality', 0)),
             ]
             raw_total = 0
             for title, score, weight in wf_items:
@@ -648,7 +816,7 @@ def export_pdf_report(results, output_file):
                 ])
             final_score = ipo.get('score', 0)
             waterfall_rows.append([
-                Paragraph("<b>最终评分</b>", styles["Label"]),
+                Paragraph("<b>旧综合分</b>", styles["Label"]),
                 Paragraph("", styles["Label"]),
                 Paragraph("", styles["Label"]),
                 Paragraph(f"<font color='{_score_color(final_score)}'><b>{final_score}</b></font>", styles["Label"]),
@@ -748,13 +916,14 @@ def export_pdf_report(results, output_file):
             dim_labels = {'growth': '成长性', 'profitability': '盈利质量', 'valuation': '估值压力', 'risk': '风险点'}
             dim_colors = {'growth': _C['green'], 'profitability': _C['blue'], 'valuation': _C['amber'], 'risk': _C['red']}
             dim_data = [[
-                Paragraph(f"<b>维度</b>", styles["Label"]),
-                Paragraph(f"<b>结论</b>", styles["Label"]),
-                Paragraph(f"<b>说明</b>", styles["Label"]),
+                Paragraph("<b>维度</b>", styles["Label"]),
+                Paragraph("<b>结论</b>", styles["Label"]),
+                Paragraph("<b>说明</b>", styles["Label"]),
             ]]
             for key in ['growth', 'profitability', 'valuation', 'risk']:
                 item = dimensions.get(key)
-                if not item: continue
+                if not item:
+                    continue
                 label_text = item.get('label', '--')
                 label_color = dim_colors.get(key, _C['navy'])
                 dim_data.append([
@@ -936,10 +1105,10 @@ def export_pdf_report(results, output_file):
 
             if cornerstone_rows:
                 cs_data = [[
-                    Paragraph(f"<b>投资者</b>", styles["TableHeader"]),
-                    Paragraph(f"<b>分级/类别</b>", styles["TableHeader"]),
-                    Paragraph(f"<b>占比/金额</b>", styles["TableHeader"]),
-                    Paragraph(f"<b>作用与判断</b>", styles["TableHeader"]),
+                    Paragraph("<b>投资者</b>", styles["TableHeader"]),
+                    Paragraph("<b>分级/类别</b>", styles["TableHeader"]),
+                    Paragraph("<b>占比/金额</b>", styles["TableHeader"]),
+                    Paragraph("<b>作用与判断</b>", styles["TableHeader"]),
                 ]]
                 row_styles = []
                 tier_order = {'S': 0, 'A': 1, 'B': 2, '弱': 3, None: 4}
@@ -1000,7 +1169,7 @@ def export_pdf_report(results, output_file):
 
         reasons = ipo.get('score_reasons', [])
         if reasons:
-            reason_data = [[Paragraph(f"<b>评分理由</b>", styles["Label"])]]
+            reason_data = [[Paragraph("<b>评分理由</b>", styles["Label"])]]
             for reason in reasons:
                 reason_data.append([Paragraph(f"  {reason}", styles["BulletPoint"])])
             reason_tbl = Table(reason_data, colWidths=[500], hAlign="LEFT")

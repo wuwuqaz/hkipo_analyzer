@@ -1,7 +1,26 @@
+import os
 import re
 
 from .utils import _contains_any, _infer_sector
 from .settings import SETTINGS
+
+
+def _load_investor_profiles():
+    """从 YAML 加载基石投资者档案，加载失败时回退到内置数据。"""
+    import yaml as _yaml
+    yaml_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data", "cornerstone_investors.yaml",
+    )
+    try:
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            data = _yaml.safe_load(f)
+        profiles = data.get("investors", [])
+        if profiles:
+            return profiles
+    except Exception:
+        pass
+    return CornerstoneAnalyzer._BUILTIN_INVESTOR_PROFILES
 
 
 class CornerstoneAnalyzer:
@@ -15,7 +34,7 @@ class CornerstoneAnalyzer:
         '未知': 45,
     }
 
-    INVESTOR_PROFILES = [
+    _BUILTIN_INVESTOR_PROFILES = [
         {
             'name': 'GIC',
             'tier': 'S',
@@ -498,14 +517,6 @@ class CornerstoneAnalyzer:
         },
     ]
 
-    # Backward-compatible tier views used by older callers/tests.
-    S_TIER = [
-        (p['name'], p['aliases']) for p in INVESTOR_PROFILES if p['tier'] == 'S'
-    ]
-    A_TIER = [
-        (p['name'], p['aliases']) for p in INVESTOR_PROFILES if p['tier'] == 'A'
-    ]
-
     # 章节锚点：用于判断是否存在基石投资者章节
     CORNERSTONE_ANCHORS = [
         'cornerstone investors',
@@ -573,7 +584,6 @@ class CornerstoneAnalyzer:
             idx2, anchor2 = self._find_section_anchor(remaining_text, self.CORNERSTONE_ANCHORS)
             if idx2 >= 0:
                 idx = toc_region_end + idx2
-                anchor = anchor2
 
         # 检查找到的位置是否在目录页
         lines_before = text[:idx].count('\n')
@@ -586,6 +596,27 @@ class CornerstoneAnalyzer:
         # 确保 context 至少覆盖 500000 字符，以包含所有基石投资者
         context = text[idx:max(end_idx, idx + 500000)]
         return context, True
+
+    @staticmethod
+    def _source_excerpt(context, max_chars=12000):
+        """Return a compact original-text excerpt for manual verification."""
+        if not context:
+            return ""
+        lines = [line.strip() for line in context.splitlines()]
+        compact_lines = []
+        blank_seen = False
+        for line in lines:
+            if not line:
+                if not blank_seen and compact_lines:
+                    compact_lines.append("")
+                blank_seen = True
+                continue
+            blank_seen = False
+            compact_lines.append(re.sub(r'\s+', ' ', line))
+        excerpt = "\n".join(compact_lines).strip()
+        if len(excerpt) <= max_chars:
+            return excerpt
+        return excerpt[:max_chars].rstrip() + "\n\n...[excerpt truncated for display]"
 
     def _find_section_end(self, text, start_idx):
         """找到章节结束位置。"""
@@ -730,27 +761,11 @@ class CornerstoneAnalyzer:
             'role_note': profile.get('role_note'),
         }
 
-    def _best_profile(self, text):
-        """从 text 中匹配最佳投资者档案（不区分 source，仅用于行内名称解析）。"""
-        if not text:
-            return None
-        matched = []
-        seen = set()
-        for profile in self.INVESTOR_PROFILES:
-            if not _contains_any(text, profile.get('aliases', [])):
-                continue
-            key = profile['name']
-            if key in seen:
-                continue
-            seen.add(key)
-            matched.append(profile)
-        matched.sort(key=lambda item: {'S': 0, 'A': 1, 'B': 2, '弱': 3}.get(item.get('tier'), 4))
-        return matched[0] if matched else None
+    TIER_SORT_ORDER = {'S': 0, 'A': 1, 'B': 2, '弱': 3}
 
-    def _matched_profiles(self, text):
-        """从 text 中匹配所有投资者档案，返回列表。"""
+    def _match_profiles(self, text, best_only=False):
         if not text:
-            return []
+            return None if best_only else []
         matched = []
         seen = set()
         for profile in self.INVESTOR_PROFILES:
@@ -761,14 +776,16 @@ class CornerstoneAnalyzer:
                 continue
             seen.add(key)
             matched.append(profile)
-        matched.sort(key=lambda item: {'S': 0, 'A': 1, 'B': 2, '弱': 3}.get(item.get('tier'), 4))
+        matched.sort(key=lambda item: self.TIER_SORT_ORDER.get(item.get('tier'), 4))
+        if best_only:
+            return matched[0] if matched else None
         return matched
 
-    @staticmethod
-    def _tier_label_for_legacy(tier):
-        if tier == 'A':
-            return 'A'
-        return tier or ''
+    def _best_profile(self, text):
+        return self._match_profiles(text, best_only=True)
+
+    def _matched_profiles(self, text):
+        return self._match_profiles(text, best_only=False)
 
     def _effective_tier_score(self, tier, offer_pct=None):
         effective_tier = tier or '未知'
@@ -778,21 +795,22 @@ class CornerstoneAnalyzer:
             effective_tier = 'B'
         return self.TIER_BASE_SCORE.get(effective_tier, self.TIER_BASE_SCORE['未知'])
 
+    INDEPENDENCE_RULES = [
+        (['主权', '养老金', '全球顶级长线资管'], (95, '独立长线')),
+        (['大型投行/资管', '医疗专业基金', '中资长线'], (82, '独立机构')),
+        (['PE/VC', '成长基金'], (72, '专业财务投资')),
+        (['客户', '供应商', '关系型'], (35, '独立性弱')),
+        (['地方', '区域'], (58, '独立性一般')),
+    ]
+
     @staticmethod
     def _independence_score(profile):
         if not profile:
             return 45, '未知'
         category = profile.get('category', '')
-        if '主权' in category or '养老金' in category or '全球顶级长线资管' in category:
-            return 95, '独立长线'
-        if '大型投行/资管' in category or '医疗专业基金' in category or '中资长线' in category:
-            return 82, '独立机构'
-        if 'PE/VC' in category or '成长基金' in category:
-            return 72, '专业财务投资'
-        if '客户' in category or '供应商' in category or '关系型' in category:
-            return 35, '独立性弱'
-        if '地方' in category or '区域' in category:
-            return 58, '独立性一般'
+        for keywords, result in CornerstoneAnalyzer.INDEPENDENCE_RULES:
+            if any(kw in category for kw in keywords):
+                return result
         return 60, '一般独立'
 
     @staticmethod
@@ -805,10 +823,10 @@ class CornerstoneAnalyzer:
             return 78, '通用强背书'
         if sector and sector in tags:
             return 90, '赛道强匹配'
-        if '产业战略' in category:
-            return 55, '需核实产业协同'
-        if '客户' in category or '供应商' in category:
-            return 45, '可能商业绑定'
+        CATEGORY_FIT = {'产业战略': (55, '需核实产业协同'), '客户': (45, '可能商业绑定'), '供应商': (45, '可能商业绑定')}
+        for cat_kw, result in CATEGORY_FIT.items():
+            if cat_kw in category:
+                return result
         return 60, '赛道相关性一般'
 
     @staticmethod
@@ -1137,7 +1155,7 @@ class CornerstoneAnalyzer:
     def _extract_cornerstone_by_regex(self, table_text):
         rows = []
         lines = table_text.split('\n')
-        combined = ' '.join(l.strip() for l in lines if l.strip())
+        combined = ' '.join(line.strip() for line in lines if line.strip())
         combined = re.sub(r'[\x00-\x1f\x7f-\x9f]+', ' ', combined)
         combined = re.sub(r'\s+', ' ', combined)
 
@@ -1586,7 +1604,6 @@ class CornerstoneAnalyzer:
             strengths.append('S级/顶级长线基石: ' + '、'.join(top_names[:3]))
         if a_names:
             strengths.append('A级专业机构覆盖较广: ' + '、'.join(a_names[:5]))
-        ct = SETTINGS.cornerstone
         if cornerstone_pct is not None and ct.pct_healthy_low <= cornerstone_pct <= ct.pct_healthy_high:
             strengths.append(f'基石占比{cornerstone_pct:.1f}%，锁定比例健康')
         if any('医疗专业基金' in cat for cat in categories):
@@ -1604,7 +1621,6 @@ class CornerstoneAnalyzer:
             concerns.append(f'存在{len(weak_rows)}家弱信号/关系型基石，需关注透明度')
         if not profile_rows:
             red_flags.append('未完整提取基石明细')
-        ct = SETTINGS.cornerstone
         if cornerstone_pct is not None and cornerstone_pct < ct.pct_acceptable_low:
             red_flags.append('基石占比低于30%，稳定筹码不足')
         if cornerstone_pct is not None and cornerstone_pct > ct.pct_acceptable_high:
@@ -1614,42 +1630,26 @@ class CornerstoneAnalyzer:
         if sector_match is False:
             red_flags.append('赛道与基石机构错配')
 
-        ct = SETTINGS.cornerstone
         if red_flags:
-            # 红旗处理：普通红旗扣分，严重红旗封顶
-            # 严重红旗定义
-            severe_flags = [
-                '关联方认购', 'related party', 'connected person',
-                '锁定异常', 'lockup abnormality',
-                '虚假基石', 'fake cornerstone',
-                '撤回认购', 'withdrawn subscription',
-            ]
-            has_severe = any(any(severe in str(rf).lower() for severe in severe_flags) for rf in red_flags)
-            
+            has_severe = any(any(severe in str(rf).lower() for severe in ct.severe_cornerstone_flags) for rf in red_flags)
             if has_severe:
-                # 严重红旗封顶80分
                 score = min(score, ct.score_cap_low_red_flags)
             else:
-                # 普通红旗扣分：每个扣3分，最高扣10分
                 penalty = min(10, len(red_flags) * 3)
                 score = max(0, score - penalty)
 
-        if score >= ct.grade_s:
-            label = 'S级'
-            grade_band = 'S'
-            recommendation = '强背书，可显著加分'
-        elif score >= ct.grade_a:
-            label = 'A级'
-            grade_band = '强A' if score >= ct.grade_a_strong else 'A'
-            recommendation = '有价值背书，需结合估值'
-        elif score >= ct.grade_b:
-            label = 'B级'
-            grade_band = 'B'
-            recommendation = '一般背书，小幅加分'
-        else:
-            label = '弱基石'
-            grade_band = '弱'
-            recommendation = '弱信号，不加分'
+        GRADE_BANDS = [
+            (ct.grade_s, 'S级', 'S', '强背书，可显著加分'),
+            (ct.grade_a, 'A级', None, '有价值背书，需结合估值'),
+            (ct.grade_b, 'B级', 'B', '一般背书，小幅加分'),
+        ]
+        label, grade_band, recommendation = '弱基石', '弱', '弱信号，不加分'
+        for threshold, lbl, band, rec in GRADE_BANDS:
+            if score >= threshold:
+                label = lbl
+                grade_band = '强A' if band is None and score >= ct.grade_a_strong else (band or lbl.rstrip('级'))
+                recommendation = rec
+                break
 
         if not strengths:
             strengths.append('已披露基石承诺，但未识别到强机构组合')
@@ -1712,6 +1712,7 @@ class CornerstoneAnalyzer:
                 'sector_match': None,
                 'has_cornerstone_section': False,
                 'detail': '未发现基石投资者章节，不进行全文投资者匹配',
+                'source_excerpt': '',
                 'model_version': 'cornerstone_v2_2026_05',
             }
 
@@ -1729,9 +1730,24 @@ class CornerstoneAnalyzer:
             cornerstone_rows, cornerstone_matched, cornerstone_pct, sector, sector_match, spv_flags
         )
         result['has_cornerstone_section'] = True
+        result['source_excerpt'] = self._source_excerpt(context)
         # 保留所有 matched_investors（含 pre_ipo_section），但分开标记
         result['all_matched_investors'] = matched
         return result
+
+
+# 模块级加载：优先从 YAML 读取，失败回退到内置数据
+CornerstoneAnalyzer.INVESTOR_PROFILES = _load_investor_profiles()
+CornerstoneAnalyzer.S_TIER = [
+    (p['name'], p['aliases'])
+    for p in CornerstoneAnalyzer.INVESTOR_PROFILES
+    if p['tier'] == 'S'
+]
+CornerstoneAnalyzer.A_TIER = [
+    (p['name'], p['aliases'])
+    for p in CornerstoneAnalyzer.INVESTOR_PROFILES
+    if p['tier'] == 'A'
+]
 
 
 # ---------------------------------------------------------------------------

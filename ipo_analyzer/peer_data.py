@@ -9,10 +9,8 @@
 import os
 import re
 import shutil
-import copy
 import logging
 from datetime import date, datetime
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

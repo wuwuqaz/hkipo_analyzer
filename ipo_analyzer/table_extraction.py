@@ -17,7 +17,7 @@ def extract_financial_table_by_row(text, row_label_patterns, year_headers=None):
                 if i < table_start:
                     continue
                 window_lines = lines[i:min(i + 5, len(lines))]
-                combined = ' '.join(l.strip() for l in window_lines)
+                combined = ' '.join(line.strip() for line in window_lines)
                 nums = _extract_table_nums(combined, n_years)
                 if len(nums) >= n_years:
                     row_data = {y: nums[yi] for yi, y in enumerate(sorted_years) if yi < len(nums)}

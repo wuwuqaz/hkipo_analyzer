@@ -1,0 +1,653 @@
+meta:
+  model_version: cornerstone_v2_2026_05
+  last_updated: '2026-05-09'
+  description: 基石投资者数据库 — 用于港股IPO基石质量评估
+  total_investors: 60
+investors:
+- name: GIC
+  tier: S
+  category: 顶级主权基金/养老金
+  aliases:
+  - gic private limited
+  - gic private
+  - government of singapore investment
+  - 新加坡政府投资公司
+  - 新加坡政府投资
+  - gic
+  role_note: 新加坡主权长线资金，独立性和全球配置能力强
+  sector_tags:
+  - all
+- name: Temasek
+  tier: S
+  category: 顶级主权基金/养老金
+  aliases:
+  - temasek
+  - 淡马锡
+  role_note: 新加坡长期资本，主权属性强
+  sector_tags:
+  - all
+- name: QIA
+  tier: S
+  category: 顶级主权基金/养老金
+  aliases:
+  - qia
+  - qatar investment authority
+  - 卡塔尔投资局
+  role_note: 中东主权财富基金，长期资金属性强
+  sector_tags:
+  - all
+- name: ADIA
+  tier: S
+  category: 顶级主权基金/养老金
+  aliases:
+  - adia
+  - abu dhabi investment authority
+  - 阿布扎比投资局
+  role_note: 全球大型主权财富基金，长期配置能力强
+  sector_tags:
+  - all
+- name: CPPIB
+  tier: S
+  category: 顶级主权基金/养老金
+  aliases:
+  - cpp investments
+  - cppib
+  - canada pension plan
+  - 加拿大养老金
+  role_note: 养老金属性长线资金
+  sector_tags:
+  - all
+- name: KIA
+  tier: S
+  category: 顶级主权基金/养老金
+  aliases:
+  - kuwait investment authority
+  - kia
+  - 科威特投资局
+  role_note: 主权财富基金，长线属性强
+  sector_tags:
+  - all
+- name: BlackRock
+  tier: S
+  category: 全球顶级长线资管
+  aliases:
+  - blackrock
+  - 贝莱德
+  - 貝萊德
+  role_note: 全球顶级资管，市场背书和定价锚较强
+  sector_tags:
+  - all
+- name: Capital Group
+  tier: S
+  category: 全球顶级长线资管
+  aliases:
+  - capital group
+  - capital research
+  - 资本集团
+  role_note: 全球长线资管，研究体系成熟
+  sector_tags:
+  - all
+- name: Fidelity/FMR
+  tier: S
+  category: 全球顶级长线资管
+  aliases:
+  - fidelity international
+  - fidelity
+  - fmr
+  - 富达
+  role_note: 全球顶级长线资管，机构认可度高
+  sector_tags:
+  - all
+- name: T. Rowe Price
+  tier: S
+  category: 全球顶级长线资管
+  aliases:
+  - t. rowe price
+  - t rowe price
+  - 普信
+  role_note: 全球成长型长线资管
+  sector_tags:
+  - all
+- name: Schroders
+  tier: S
+  category: 全球顶级长线资管
+  aliases:
+  - schroders
+  - 施罗德
+  role_note: 国际长线资管机构
+  sector_tags:
+  - all
+- name: Oaktree Capital
+  tier: S
+  category: 全球顶级长线资管
+  aliases:
+  - oaktree
+  - oaktree capital
+  - 橡树资本
+  role_note: 全球顶级困境资产/信用投资机构，港股基石参投经验丰富
+  sector_tags:
+  - all
+- name: Mubadala
+  tier: S
+  category: 顶级主权基金/养老金
+  aliases:
+  - mubadala
+  - mubadala investment
+  - 穆巴达拉
+  role_note: 阿布扎比主权财富基金，长线配置能力强
+  sector_tags:
+  - all
+- name: Ontario Teachers
+  tier: S
+  category: 顶级主权基金/养老金
+  aliases:
+  - ontario teachers
+  - ontario teachers pension
+  - 安大略教师
+  - 安大略
+  role_note: 加拿大大型养老金，长线属性强
+  sector_tags:
+  - all
+- name: Norges Bank
+  tier: S
+  category: 顶级主权基金/养老金
+  aliases:
+  - norges bank
+  - norway central bank
+  - 挪威央行
+  - 挪威主权
+  role_note: 全球最大主权财富基金之一，长期配置能力强
+  sector_tags:
+  - all
+- name: PIF
+  tier: S
+  category: 顶级主权基金/养老金
+  aliases:
+  - public investment fund
+  - pif
+  - 沙特主权
+  - 沙特公共投资基金
+  role_note: 中东大型主权财富基金，长期资金属性强
+  sector_tags:
+  - all
+- name: Tencent
+  tier: S
+  category: 强产业战略投资者
+  aliases:
+  - tencent
+  - 腾讯
+  - huang river
+  - huang river investment
+  role_note: 强产业生态基石，若业务协同明确则含金量高
+  sector_tags:
+  - hardtech
+  - consumer
+- name: Alibaba
+  tier: S
+  category: 强产业战略投资者
+  aliases:
+  - alibaba
+  - 阿里巴巴
+  - 阿里
+  role_note: 强产业生态基石，若业务协同明确则含金量高
+  sector_tags:
+  - hardtech
+  - consumer
+- name: CATL
+  tier: S
+  category: 强产业战略投资者
+  aliases:
+  - catl
+  - 宁德时代
+  role_note: 产业链龙头背书，订单/生态协同价值高
+  sector_tags:
+  - hardtech
+- name: Hillhouse/HHLR
+  tier: A
+  category: 一线PE/VC/成长基金
+  aliases:
+  - hillhouse
+  - hhlr
+  - hhlra
+  - 高瓴
+  role_note: 一线成长基金，科技/医疗投资经验强
+  sector_tags:
+  - healthcare
+  - hardtech
+  - consumer
+- name: HongShan/红杉中国
+  tier: A
+  category: 一线PE/VC/成长基金
+  aliases:
+  - hongshan
+  - sequoia china
+  - 红杉中国
+  - 红杉
+  role_note: 一线成长基金，项目筛选能力强
+  sector_tags:
+  - healthcare
+  - hardtech
+  - consumer
+- name: Boyu Capital
+  tier: A
+  category: 一线PE/VC/成长基金
+  aliases:
+  - boyu
+  - 博裕
+  role_note: 一线PE机构，背书有参考价值
+  sector_tags:
+  - all
+- name: Primavera
+  tier: A
+  category: 一线PE/VC/成长基金
+  aliases:
+  - primavera
+  - 春华
+  role_note: 一线PE机构，背书有参考价值
+  sector_tags:
+  - all
+- name: CPE
+  tier: A
+  category: 一线PE/VC/成长基金
+  aliases:
+  - cpe
+  - 源峰
+  role_note: 成长型投资机构，背书有参考价值
+  sector_tags:
+  - all
+- name: Qiming Venture
+  tier: A
+  category: 一线PE/VC/成长基金
+  aliases:
+  - qiming
+  - 启明
+  role_note: 医疗/科技投资经验较强
+  sector_tags:
+  - healthcare
+  - hardtech
+- name: OrbiMed
+  tier: A
+  category: 医疗专业基金
+  aliases:
+  - orbimed
+  - 奥博
+  role_note: 医疗专业基金，行业尽调能力强
+  sector_tags:
+  - healthcare
+- name: Deerfield
+  tier: A
+  category: 医疗专业基金
+  aliases:
+  - deerfield
+  role_note: 医疗健康专业基金，临床/管线判断有参考价值
+  sector_tags:
+  - healthcare
+- name: RTW
+  tier: A
+  category: 医疗专业基金
+  aliases:
+  - rtw funds
+  - rtw
+  role_note: 生物科技全生命周期投资机构，行业背书较强
+  sector_tags:
+  - healthcare
+- name: Lake Bleu
+  tier: A
+  category: 医疗专业基金
+  aliases:
+  - lake bleu
+  - 清池
+  role_note: 医疗主题基金，赛道匹配度高
+  sector_tags:
+  - healthcare
+- name: LAV / Lilly Asia Ventures
+  tier: A
+  category: 医疗专业基金
+  aliases:
+  - lilly asia ventures
+  - lav
+  - lilly asia
+  - 礼来亚洲
+  - 禮來亞洲
+  role_note: 全球顶级医疗健康VC，生物医药管线判断力强
+  sector_tags:
+  - healthcare
+- name: IDG Capital
+  tier: A
+  category: 一线PE/VC/成长基金
+  aliases:
+  - idg capital
+  - idg
+  - idg breyer fund
+  - idg breyer
+  role_note: 全球知名科技VC，跨越AI芯片/医药领域基石参投
+  sector_tags:
+  - hardtech
+  - healthcare
+- name: Greenwoods/景林
+  tier: A
+  category: 一线PE/VC/成长基金
+  aliases:
+  - greenwoods
+  - greenwoods asset
+  - 景林
+  - 景林资产
+  - greenwoods investment
+  role_note: 中国头部私募基金，2025年港股基石参投最活跃机构(14次)
+  sector_tags:
+  - all
+- name: 高毅资产
+  tier: A
+  category: 一线PE/VC/成长基金
+  aliases:
+  - gaoyi
+  - gao yi
+  - 高毅资产
+  - 高毅
+  role_note: 中国头部长线私募基金，港股基石参投经验丰富(10次+)
+  sector_tags:
+  - all
+- name: Danshuiquan
+  tier: A
+  category: 一线PE/VC/成长基金
+  aliases:
+  - danshuiquan
+  - dan shui quan
+  - 淡水泉
+  role_note: 中国头部长线私募基金，擅长消费/医疗/科技领域
+  sector_tags:
+  - all
+- name: General Atlantic
+  tier: A
+  category: 一线PE/VC/成长基金
+  aliases:
+  - general atlantic
+  - 泛大西洋
+  - 泛大西洋投资
+  role_note: 全球领先成长型股权基金，聚焦科技/消费/医疗
+  sector_tags:
+  - hardtech
+  - healthcare
+  - consumer
+- name: Millennium
+  tier: A
+  category: 全球顶级长线资管
+  aliases:
+  - millennium
+  - millennium management
+  - 千禧年
+  - 千禧年基金
+  role_note: 全球头部多策略对冲基金，港股基石参投活跃
+  sector_tags:
+  - all
+- name: ORIX Asia AM
+  tier: A
+  category: 大型投行/资管平台
+  aliases:
+  - orix
+  - orix asia
+  - orix asia am
+  - 欧力士
+  - 欧力士亚洲
+  role_note: 日本金融集团资管平台，近年港股基石参投
+  sector_tags:
+  - all
+- name: YF Capital/云锋投资
+  tier: A
+  category: 一线PE/VC/成长基金
+  aliases:
+  - yf capital
+  - yunfeng capital
+  - yunfeng
+  - 云锋投资
+  - 云锋
+  role_note: 马云/虞锋发起PE基金，产业资源/生态协同强
+  sector_tags:
+  - hardtech
+  - healthcare
+  - consumer
+- name: Decheng Capital
+  tier: A
+  category: 医疗专业基金
+  aliases:
+  - decheng capital
+  - decheng
+  - 德诚
+  - 德诚资本
+  role_note: 全球医疗健康专业VC，生物医药管线尽调能力强
+  sector_tags:
+  - healthcare
+- name: WuXi AppTec Fund
+  tier: A
+  category: 医疗专业基金
+  aliases:
+  - wuxi apptec
+  - wuxi fund
+  - wuxi pharmatech
+  - 药明康德
+  - 药明
+  role_note: 全球CXO龙头药明康德投资平台，行业生态协同
+  sector_tags:
+  - healthcare
+- name: UBS Asset Management
+  tier: A
+  category: 大型投行/资管平台
+  aliases:
+  - ubs asset management
+  - ubs am
+  - 瑞银资管
+  - 瑞银
+  - 瑞銀
+  role_note: 国际大型资管平台，机构认可度较好
+  sector_tags:
+  - all
+- name: JPMorgan Asset Management
+  tier: A
+  category: 大型投行/资管平台
+  aliases:
+  - jpmorgan asset management
+  - jp morgan asset management
+  - jpm am
+  - 摩根资产
+  role_note: 国际大型资管平台，机构认可度较好
+  sector_tags:
+  - all
+- name: Invesco
+  tier: A
+  category: 大型投行/资管平台
+  aliases:
+  - invesco
+  - 景顺
+  role_note: 国际资管机构，背书有参考价值
+  sector_tags:
+  - all
+- name: M&G
+  tier: A
+  category: 大型投行/资管平台
+  aliases:
+  - m&g
+  - m g investment
+  - m&g investments
+  role_note: 国际资管机构，背书有参考价值
+  sector_tags:
+  - all
+- name: Morgan Stanley IM
+  tier: A
+  category: 大型投行/资管平台
+  aliases:
+  - morgan stanley investment management
+  - morgan stanley im
+  - 摩根士丹利投资管理
+  role_note: 国际大型资管平台
+  sector_tags:
+  - all
+- name: Goldman Sachs AM
+  tier: A
+  category: 大型投行/资管平台
+  aliases:
+  - goldman sachs asset management
+  - goldman sachs am
+  - 高盛资管
+  role_note: 国际大型资管平台
+  sector_tags:
+  - all
+- name: 国风投/国新系
+  tier: A
+  category: 知名中资长线/国资基金
+  aliases:
+  - china venture capital innovation
+  - 国风投
+  - 国新
+  - 国调基金
+  - 中国诚通
+  - 诚通
+  - 混改基金
+  role_note: 国家级/央企背景资本，政策和产业认可度较强
+  sector_tags:
+  - hardtech
+  - healthcare
+- name: China AMC
+  tier: A
+  category: 知名中资长线/保险/公募
+  aliases:
+  - china amc
+  - 华夏基金
+  - 华夏
+  - 華夏
+  role_note: 头部中资公募，国内资金认可度较好
+  sector_tags:
+  - all
+- name: Fullgoal Fund
+  tier: A
+  category: 知名中资长线/保险/公募
+  aliases:
+  - fullgoal
+  - 富国基金
+  - 富国
+  role_note: 头部中资公募，国内资金认可度较好
+  sector_tags:
+  - all
+- name: GF Fund
+  tier: A
+  category: 知名中资长线/保险/公募
+  aliases:
+  - gf fund
+  - 广发基金
+  - 广发
+  role_note: 头部中资公募，国内资金认可度较好
+  sector_tags:
+  - all
+- name: ICBC Credit Suisse/ICBC Wealth
+  tier: A
+  category: 知名中资长线/保险/公募
+  aliases:
+  - icbcubs
+  - icbc wealth
+  - icbc credit suisse
+  - 工银瑞信
+  - 工银理财
+  role_note: 银行系/公募长线资金，稳定性较好
+  sector_tags:
+  - all
+- name: E Fund
+  tier: A
+  category: 知名中资长线/保险/公募
+  aliases:
+  - e fund
+  - 易方达
+  role_note: 头部中资公募，国内资金认可度较好
+  sector_tags:
+  - all
+- name: Mirae Asset
+  tier: A
+  category: 大型投行/资管平台
+  aliases:
+  - mirae
+  - 未来资产
+  - 未來資產
+  role_note: 亚洲大型金融/资管平台，具备区域资金背书
+  sector_tags:
+  - all
+- name: Huadeng Technology/华登国际
+  tier: B
+  category: 区域/主题基金
+  aliases:
+  - huadeng technology
+  - huadeng
+  - 华登国际
+  - 华登科技
+  - walden international
+  - walden technology
+  role_note: 历史悠久的半导体/TMT主题基金，在科技领域有一定背书
+  sector_tags:
+  - hardtech
+  - healthcare
+- name: Arc Avenue
+  tier: B
+  category: 区域/主题基金
+  aliases:
+  - arc avenue
+  role_note: 区域资管平台，背书强度弱于全球头部机构
+  sector_tags:
+  - all
+- name: Isometry Global
+  tier: B
+  category: 区域/主题基金
+  aliases:
+  - isometry global
+  - isometry
+  role_note: 主题基金，公开长期业绩和规模透明度有限
+  sector_tags:
+  - healthcare
+- name: Sage Partners
+  tier: B
+  category: 区域/主题基金
+  aliases:
+  - sage partners
+  - sage
+  role_note: 主题基金，公开长期业绩和规模透明度有限
+  sector_tags:
+  - healthcare
+- name: 地方/普通产业基金
+  tier: B
+  category: 地方国资/小型产业基金
+  aliases:
+  - local government
+  - city investment
+  - industrial fund
+  - 产业基金
+  - 地方国资
+  - 城市基金
+  - huatai capital
+  - 华泰资本
+  role_note: 有资金承诺，但独立研究背书较弱
+  sector_tags:
+  - all
+- name: 客户/供应商/经销商
+  tier: 弱
+  category: 客户/供应商/经销商
+  aliases:
+  - customer
+  - supplier
+  - distributor
+  - 客户
+  - 供应商
+  - 经销商
+  role_note: 可能有产业关系，但独立定价判断较弱
+  sector_tags:
+  - all
+- name: 不透明SPV/家办/券商关联资金
+  tier: 弱
+  category: 不透明基金/关系型资金
+  aliases:
+  - family office
+  - spv
+  - special purpose vehicle
+  - newly incorporated
+  - sole limited partner
+  - 家族办公室
+  - 新设基金
+  - 券商关联
+  role_note: 透明度较低，对公司质地背书有限
+  sector_tags:
+  - all

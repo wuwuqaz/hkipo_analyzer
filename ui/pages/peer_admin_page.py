@@ -92,13 +92,13 @@ class PeerAdminPage:
 
         col_preview_stale, col_write_stale, col_preview_all, col_write_all = st.columns(4)
         with col_preview_stale:
-            if st.button("👁 预览过期同行", use_container_width=True):
+            if st.button("👁 预览过期同行", width="stretch"):
                 with st.spinner("dry-run 预览过期..."):
                     r = self.updater.update_all(stale_only=True, dry_run=True)
                     st.session_state["peer_preview_result"] = r
                     st.session_state["peer_preview_type"] = "stale"
         with col_write_stale:
-            if st.button("✅ 写入过期同行", use_container_width=True, disabled=not confirm_write):
+            if st.button("✅ 写入过期同行", width="stretch", disabled=not confirm_write):
                 with st.spinner("正在写入过期同行..."):
                     try:
                         r = self.updater.update_all(stale_only=True, dry_run=False)
@@ -106,13 +106,13 @@ class PeerAdminPage:
                     except Exception as e:
                         st.warning(f"⚠ 更新失败: {e}")
         with col_preview_all:
-            if st.button("👁 预览全部同行", use_container_width=True):
+            if st.button("👁 预览全部同行", width="stretch"):
                 with st.spinner("dry-run 预览全部..."):
                     r = self.updater.update_all(stale_only=False, dry_run=True)
                     st.session_state["peer_preview_result"] = r
                     st.session_state["peer_preview_type"] = "all"
         with col_write_all:
-            if st.button("✅ 写入全部同行", use_container_width=True, disabled=not confirm_write):
+            if st.button("✅ 写入全部同行", width="stretch", disabled=not confirm_write):
                 with st.spinner("正在写入全部同行..."):
                     try:
                         r = self.updater.update_all(stale_only=False, dry_run=False)
@@ -125,7 +125,7 @@ class PeerAdminPage:
             r = st.session_state["peer_preview_result"]
             ptype = st.session_state.get("peer_preview_type", "?")
             previewed = r.get("previewed", 0)
-            updated = r.get("updated", 0)
+            r.get("updated", 0)
             failed = r.get("failed", 0)
             skipped = r.get("skipped", 0)
             processed = r.get("processed", 0)
@@ -227,5 +227,5 @@ class PeerAdminPage:
                 "错误": r.get("update_error", "") or "",
             })
         df = pd.DataFrame(df_rows)
-        st.dataframe(df, use_container_width=True, hide_index=True,
+        st.dataframe(df, width="stretch", hide_index=True,
                      height=min(500, len(df) * 36 + 50))

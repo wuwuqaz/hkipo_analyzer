@@ -140,7 +140,7 @@ def _is_biotech(prospectus_info: dict, text: str) -> bool:
     hits = _text_hits(text, _BIOTECH_KEYWORDS)
     if hits >= SETTINGS.valuation.biotech_keyword_hits_min:
         return True
-    subsector = prospectus_info.get("peer_comparison", {}).get("subsector", "")
+    subsector = (prospectus_info.get("peer_comparison") or {}).get("subsector", "")
     if subsector in _BIOTECH_SUBSECTORS:
         return True
     return False
@@ -189,11 +189,12 @@ def classify_company(prospectus_info: dict, text: str = "") -> CompanyProfile:
     Returns:
         CompanyProfile 实例
     """
-    sector = prospectus_info.get('sector', 'unknown')
-    subsector = prospectus_info.get('peer_comparison', {}).get('subsector')
+    sector = prospectus_info.get('sector')
+    if sector is None:
+        sector = 'unknown'
+    subsector = (prospectus_info.get('peer_comparison') or {}).get('subsector')
     revenue = prospectus_info.get('revenue')
     net_profit = prospectus_info.get('net_profit')
-    name = str(prospectus_info.get('extracted_company_name', '') or '').lower()
 
     # 文本回退：若未传入 text，尝试从 prospectus_info 获取
     if not text:

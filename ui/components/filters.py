@@ -1,4 +1,3 @@
-from typing import Any
 
 import streamlit as st
 
@@ -20,7 +19,7 @@ class IpoFilters:
     def render_dashboard_filters() -> tuple[bool, bool, bool, bool]:
         filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
         with filter_col1:
-            filter_high_score = st.checkbox("🏆 高分（≥60）")
+            filter_high_score = st.checkbox("🏆 打新高分（≥60）")
         with filter_col2:
             filter_low_risk = st.checkbox("🛡️ 低风险")
         with filter_col3:
@@ -34,7 +33,7 @@ class IpoFilters:
                       filter_has_cornerstone: bool, filter_valuation_ok: bool) -> list[dict]:
         filtered = list(ipos)
         if filter_high_score:
-            filtered = [r for r in filtered if r.get("score", 0) >= 60]
+            filtered = [r for r in filtered if r.get("ipo_trade_score", r.get("trade_score", r.get("score", 0))) >= 60]
         if filter_low_risk:
             filtered = [r for r in filtered if r.get("risk_penalty", 0) <= 3]
         if filter_has_cornerstone:
@@ -51,7 +50,7 @@ class IpoFilters:
         with filter_col2:
             show_live = st.checkbox("显示仍在招股", value=False)
         with filter_col3:
-            sort_by = st.selectbox("排序", ["截止日从近到远", "截止日从远到近", "评分从高到低", "评分从低到高"], label_visibility="collapsed")
+            sort_by = st.selectbox("排序", ["截止日从近到远", "截止日从远到近", "打新分从高到低", "打新分从低到高", "长期分从高到低"], label_visibility="collapsed")
         with filter_col4:
             tracking_status = st.selectbox("跟踪状态", ["全部", "未跟踪", "已完成", "待公告", "异常/部分"], label_visibility="collapsed")
         return query, show_live, sort_by, tracking_status

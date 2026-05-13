@@ -1,7 +1,7 @@
 from html import escape as html_escape
 from typing import Any
 
-from ipo_analyzer.utils import _is_num, _normalize_gm
+from ipo_analyzer.utils import _is_num
 
 
 class SafeHtml(str):
@@ -44,10 +44,10 @@ def score_class(score: float) -> str:
 def score_color_hex(score: float) -> str:
     score = _num(score)
     if score >= 70:
-        return "#34d399"
+        return "#059669"
     elif score >= 55:
-        return "#a3e635"
+        return "#65A30D"
     elif score >= 40:
-        return "#fbbf24"
+        return "#D97706"
     else:
-        return "#fb7185"
+        return "#DC2626"

@@ -19,6 +19,8 @@ class FXConfig:
     rmb_to_hkd: float = 1.08
     usd_to_hkd: float = 7.8
     usd_to_hkd_precise: float = 7.8344  # 基石投资等场景使用
+    # 入场费 = 经纪佣金(1%) + 证监会交易征费(0.0027%) + 联交所交易费(0.00565%) + 印花税(0.00015%)
+    entry_fee_rate: float = 0.01 + 0.000027 + 0.0000565 + 0.0000015
 
 
 @dataclass
@@ -66,6 +68,35 @@ class ScoringWeights:
     scale_max: int = 10
     market_max: int = 5
     cornerstone_max: int = 20
+    # 长期评分组合权重
+    long_fundamental_w: float = 0.63
+    long_valuation_w: float = 0.22
+    long_customer_quality_w: float = 0.12
+    long_theme_w: float = 0.03
+    long_cash_weak_penalty: int = 4
+    long_cash_runway_penalty: int = 2
+    long_risk_penalty_max: int = 8
+    # 权重配置文件
+    live_heat_trade: float = 0.35
+    live_heat_fundamental: float = 0.30
+    live_heat_data_quality: float = 0.05
+    live_heat_valuation: float = 0.20
+    live_heat_theme: float = 0.10
+    prospectus_trade: float = 0.20
+    prospectus_fundamental: float = 0.35
+    prospectus_data_quality: float = 0.10
+    prospectus_valuation: float = 0.20
+    prospectus_theme: float = 0.15
+
+    # 客户质量评分阈值
+    customer_supply_chain_high: int = 25
+    customer_supply_chain_mid: int = 15
+    customer_commercial_high: int = 20
+    customer_commercial_mid: int = 12
+    customer_retention_high: int = 20
+    customer_retention_mid: int = 12
+    customer_ndr_high: int = 20
+    customer_ndr_mid: int = 12
 
 
 @dataclass
@@ -261,6 +292,9 @@ class BusinessBreakdownThresholds:
     new_biz_revenue_ratio_max: float = 0.3
     new_biz_total_share_min: float = 10.0
     main_segment_dominance_pct: float = 70.0
+    gross_margin_high: float = 60.0
+    gross_margin_low: float = 20.0
+    profit_revenue_mismatch_threshold: float = 15.0
 
 
 @dataclass
@@ -282,6 +316,23 @@ class CashFlowThresholds:
 
 
 @dataclass
+class ShareholderThresholds:
+    """Pre-IPO融资与股东分析阈值"""
+    ipo_premium_high: float = 50.0
+    ipo_premium_moderate: float = 20.0
+    controlling_concentrated: float = 30.0
+
+
+@dataclass
+class OrderBacklogThresholds:
+    """订单可见度分析阈值"""
+    order_ratio_strong: float = 2.0
+    order_ratio_moderate: float = 1.0
+    backlog_months_strong: float = 12.0
+    backlog_months_moderate: float = 6.0
+
+
+@dataclass
 class CacheConfig:
     version: int = 1
     ttl_days: int = 7
@@ -294,7 +345,7 @@ class HistoryConfig:
 
 @dataclass
 class FileConfig:
-    max_upload_size_mb: int = 80
+    max_upload_size_mb: int = 50  # 与 .streamlit/config.toml server.maxUploadSize 保持一致
     temp_file_ttl_days: int = 7
 
 
@@ -325,6 +376,7 @@ class NetworkConfig:
     playwright_timeout: int = 60000
     head_timeout: int = 10
     margin_page_size: int = 100
+    max_pdf_size_mb: int = 100  # PDF 文件大小上限（MB），防止磁盘耗尽
 
 
 @dataclass
@@ -401,6 +453,8 @@ class Settings:
     business_breakdown: BusinessBreakdownThresholds = field(default_factory=BusinessBreakdownThresholds)
     geographic: GeographicThresholds = field(default_factory=GeographicThresholds)
     cash_flow: CashFlowThresholds = field(default_factory=CashFlowThresholds)
+    shareholder: ShareholderThresholds = field(default_factory=ShareholderThresholds)
+    order_backlog: OrderBacklogThresholds = field(default_factory=OrderBacklogThresholds)
     cache: CacheConfig = field(default_factory=CacheConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
     file: FileConfig = field(default_factory=FileConfig)

@@ -3,15 +3,15 @@ import os
 import logging
 from datetime import datetime
 
-from .utils import _is_num, _normalize_gm, _normalize_company_name
+from .utils import _is_num
+from .table_extraction import extract_financial_table_by_row
+from .cornerstone import CornerstoneAnalyzer
 from .text_extractor import extract_pdf_text
 from .identity_validator import validate_pdf_identity
 from .prospectus_basic_extractor import extract_prospectus_basic_info
 from .settings import SETTINGS
 
 logger = logging.getLogger(__name__)
-from .table_extraction import extract_financial_table_by_row
-from .cornerstone import CornerstoneAnalyzer
 
 
 class ProspectusParser:
@@ -32,6 +32,8 @@ class ProspectusParser:
         unit = unit_str.lower()
         if 'billion' in unit:
             return value * 1000
+        if 'thousand' in unit:
+            return value / 1000
         return value
 
     @staticmethod
@@ -98,7 +100,7 @@ class ProspectusParser:
     @staticmethod
     def _extract_years(text):
         years = []
-        for year in re.findall(r'\b(20[0-9]{2})\b', text):
+        for year in re.findall(r'(20[0-9]{2})(?:年|\b)', text):
             year_int = int(year)
             if 2010 <= year_int <= datetime.now().year:
                 years.append(year_int)
@@ -129,7 +131,7 @@ class ProspectusParser:
                 )
             except Exception:
                 continue
-            if percent and not (0 < value <= 100):
+            if percent and not (-200 < value <= 200):
                 continue
             tokens.append(value)
         return tokens
@@ -167,6 +169,9 @@ class ProspectusParser:
                         'rmb in thousands', 'hk$ in thousands',
                         "rmb'000", "hk$'000",
                         'rmb thousand', 'hkd thousand',
+                        # 中文表格上下文
+                        '人民幣千元', '港元千元', '人民幣百萬', '港元百萬',
+                        '截至', '年度', '止年度',
                     )
                 )
                 if not table_like:
@@ -216,7 +221,18 @@ class ProspectusParser:
 
     @classmethod
     def _extract_financial_row_values(cls, block_lines, row_idx, year_count):
-        values = []
+        # 优先从匹配行本身提取（中文表格标签与数值同行）
+        match_line_values = cls._numeric_values_from_table_line(
+            (block_lines[row_idx] or '').strip(),
+        )
+        amount_like = [v for v in match_line_values if abs(v) >= 500]
+        if len(amount_like) >= year_count:
+            return amount_like[:year_count]
+        if len(match_line_values) >= year_count:
+            return match_line_values[:year_count]
+
+        # 回退：从后续行扫描（英文表格数值可能在下一行或多行展开）
+        values = list(match_line_values)
         for j in range(row_idx + 1, min(len(block_lines), row_idx + 14)):
             line = (block_lines[j] or '').strip()
             if not line:
@@ -231,7 +247,7 @@ class ProspectusParser:
         if not values:
             return []
 
-        amount_like = [value for value in values if abs(value) >= 500]
+        amount_like = [v for v in values if abs(v) >= 500]
         if len(amount_like) >= year_count:
             return amount_like[:year_count]
 
@@ -246,22 +262,34 @@ class ProspectusParser:
     def _row_implies_negative(key, row_line):
         lower = (row_line or '').lower()
         if key in ('net_profit', 'adjusted_net_profit'):
-            return bool(re.match(r'^(?:adjusted\s+net\s+)?loss\b', lower))
+            if re.match(r'^(?:adjusted\s+net\s+)?loss\b', lower):
+                return True
+            # 中文亏损行
+            if re.search(r'虧損|亏损', row_line or ''):
+                return True
         if key == 'operating_cash_flow':
-            return bool(re.match(r'^net\s+cash\s+used\b', lower))
+            if re.match(r'^net\s+cash\s+used\b', lower):
+                return True
+            # 中文经营现金流为负
+            if re.search(r'所用現金|所用现金|現金流出|现金流出', row_line or ''):
+                return True
         return False
 
     def _extract_consolidated_financial_table(self, text):
         """提取综合损益表主表，避免业务分部表或叙述段落覆盖核心财务值。"""
         lines = text.split('\n')
         row_patterns = [
-            ('revenue', [r'^Revenue\b']),
-            ('cost_of_sales', [r'^Cost of sales\b']),
-            ('gross_profit', [r'^Gross profit\b']),
-            ('rd_expense', [r'^Research and development expenses\b']),
-            ('net_profit', [r'^(?:Profit|Loss) for the year\b', r'^Profit/\(Loss\) for the year\b', r'^(?:Profit|Loss) for the period\b']),
-            ('adjusted_net_profit', [r'^Adjusted net profit\b', r'^Adjusted net loss\b']),
-            ('operating_cash_flow', [r'^Net cash (?:generated|used) (?:from|in) operating activities\b']),
+            ('revenue', [r'^Revenue\b', r'^收益\b', r'^收入\b']),
+            ('cost_of_sales', [r'^Cost of sales\b', r'^銷售成本\b', r'^營業成本\b']),
+            ('gross_profit', [r'^Gross profit\b', r'^毛利\b']),
+            ('rd_expense', [r'^Research and development expenses\b', r'^研發開支\b', r'^研發費用\b']),
+            ('net_profit', [r'^(?:Profit|Loss) for the year\b', r'^Profit/\(Loss\) for the year\b', r'^(?:Profit|Loss) for the period\b',
+                           r'^年內虧損\b', r'^年內利潤\b', r'^年度虧損\b', r'^年度利潤\b',
+                           r'^年內虧損及全面收益總額\b', r'^年內利潤及全面收益總額\b']),
+            ('adjusted_net_profit', [r'^Adjusted net profit\b', r'^Adjusted net loss\b',
+                                     r'^經調整.*?利潤\b', r'^經調整.*?虧損\b']),
+            ('operating_cash_flow', [r'^Net cash (?:generated|used) (?:from|in) operating activities\b',
+                                     r'^經營活動.*?現金流量\b', r'^經營活動.*?淨額\b']),
         ]
 
         _YEAR_HEADERS = [
@@ -272,6 +300,13 @@ class ProspectusParser:
             r'Six months ended',
             r'Year ended',
             r'Track Record Period',
+            # 中文招股书财年表头
+            r'截至.*?12月31日止年度',
+            r'截至.*?止年度',
+            r'截至.*?止六個月',
+            r'截至.*?止六个月',
+            r'截至.*?止三個月',
+            r'截至.*?止三个月',
         ]
         _year_header_re = re.compile('|'.join(_YEAR_HEADERS), re.IGNORECASE)
 
@@ -284,6 +319,12 @@ class ProspectusParser:
             r'HK\$ in thousands',
             r'rmb in thousands',
             r'hk\$ in thousands',
+            # 中文单位：千元（可能跨行，DOTALL 已启用）
+            r'人民幣.*?千元',
+            r'港元.*?千元',
+            r'港幣.*?千元',
+            r'人民幣.*?千(?!萬|万)',
+            r'港元.*?千(?!萬|万)',
         ]
         _MILLION_UNIT_PATTERNS = [
             r'RMB\s*million',
@@ -294,9 +335,13 @@ class ProspectusParser:
             r'hkd\s*million',
             r'RMB\s*\(?million\)?',
             r'HKD\s*\(?million\)?',
+            # 中文单位：百万元（可能跨行，DOTALL 已启用）
+            r'人民幣.*?百萬',
+            r'港元.*?百萬',
+            r'港幣.*?百萬',
         ]
-        _unit_re = re.compile('|'.join(_UNIT_PATTERNS), re.IGNORECASE)
-        _million_unit_re = re.compile('|'.join(_MILLION_UNIT_PATTERNS), re.IGNORECASE)
+        _unit_re = re.compile('|'.join(_UNIT_PATTERNS), re.IGNORECASE | re.DOTALL)
+        _million_unit_re = re.compile('|'.join(_MILLION_UNIT_PATTERNS), re.IGNORECASE | re.DOTALL)
 
         _CORE_STATEMENT_TOKENS = [
             'consolidated statements of profit or loss',
@@ -307,6 +352,11 @@ class ProspectusParser:
             'results of operations',
             'summary financial data',
             'summary of our consolidated statements',
+            # 中文财报标识
+            '綜合全面收益表', '綜合損益表', '合併損益表',
+            '合併全面收益表', '損益表', '財務資料', '經營業績',
+            '綜合損益及其他全面收益表', '財務摘要', '歷史財務資料',
+            '合併財務狀況表', '綜合財務狀況表',
         ]
         _BREAKDOWN_TOKENS = [
             'key operating data',
@@ -315,13 +365,17 @@ class ProspectusParser:
             'gross profit and gross margins by',
             'revenue by geographical',
             'revenue by product',
+            # 中文分部/明细标识（应避免当作主表）
+            '收益明細', '收入明細', '分部收益', '按地區', '按產品',
         ]
 
         for start_idx, line in enumerate(lines):
             if not _year_header_re.search(line or ''):
                 continue
 
-            preceding_text = '\n'.join(lines[max(0, start_idx - 12):start_idx]).lower()
+            # 扩大搜索窗口以覆盖中文招股书中表头与财年行距离较远的情况
+            preceding_window = lines[max(0, start_idx - 25):start_idx]
+            preceding_text = '\n'.join(preceding_window).lower()
             is_core_statement = any(token in preceding_text for token in _CORE_STATEMENT_TOKENS)
             is_breakdown_table = any(token in preceding_text for token in _BREAKDOWN_TOKENS)
             if not is_core_statement or is_breakdown_table:
@@ -329,7 +383,8 @@ class ProspectusParser:
 
             header_block = '\n'.join(lines[start_idx:start_idx + 18])
             years = []
-            for match in re.finditer(r'\b(20\d{2})\b', header_block):
+            # 中英文年份识别：20\d{2} 后可能跟 年 或非单词字符
+            for match in re.finditer(r'(20\d{2})(?:年|\b)', header_block):
                 year = int(match.group(1))
                 if year not in years:
                     years.append(year)
@@ -339,16 +394,23 @@ class ProspectusParser:
             block_lines = lines[start_idx:start_idx + 190]
             block_text = '\n'.join(block_lines)
             lower_block = block_text.lower()
-            if 'revenue' not in lower_block:
+            if 'revenue' not in lower_block and '收益' not in block_text and '收入' not in block_text:
                 continue
 
-            is_thousand_unit = _unit_re.search(lower_block)
-            is_million_unit = _million_unit_re.search(lower_block)
+            # 只取表头附近（前25行）做单位检测，避免远处叙述文字中百萬干扰千元判断
+            header_zone = '\n'.join(block_lines[:40])
+            is_thousand_unit = _unit_re.search(header_zone)
+            is_million_unit = _million_unit_re.search(header_zone)
             table_unit = None
-            if is_million_unit:
-                table_unit = 'million'
-            elif is_thousand_unit:
+            if is_thousand_unit and not is_million_unit:
                 table_unit = 'thousand'
+            elif is_million_unit and not is_thousand_unit:
+                table_unit = 'million'
+            elif is_thousand_unit and is_million_unit:
+                # 两者都出现时，检查哪个更靠近表头
+                thu_pos = min((m.start() for m in _unit_re.finditer(header_zone)), default=99999)
+                mpu_pos = min((m.start() for m in _million_unit_re.finditer(header_zone)), default=99999)
+                table_unit = 'thousand' if thu_pos < mpu_pos else 'million'
             else:
                 continue
 
@@ -370,7 +432,7 @@ class ProspectusParser:
                         break
 
             revenue_row = table.get('revenue') or {}
-            if len(revenue_row) >= 2 and all(value > 0 for value in revenue_row.values()):
+            if len(revenue_row) >= 2 and all(value >= 0 for value in revenue_row.values()):
                 return table
 
         return {}
@@ -380,17 +442,25 @@ class ProspectusParser:
         同时返回币种和单位（million/thousand/unknown）。"""
         patterns = [
             # (pattern, currency, unit)
+            # 英文模式
             (r"RMB\s*million|RMB\s*\(?million\)?|rmb\s*million", "RMB", "million"),
             (r"HK\$\s*million|HKD\s*million|hk\$\s*million|HKD\s*\(?million\)?", "HKD", "million"),
             (r"US\$\s*million|USD\s*million|us\$\s*million", "USD", "million"),
             (r"RMB[’'‘`]?000|RMB\s*thousand|RMB\s*in\s*thousands|rmb[’'‘`]?000|rmb\s*thousand", "RMB", "thousand"),
             (r"HK\$[’'‘`]?000|HK\$\s*thousand|HK\$\s*in\s*thousands|HKD\s*thousand|hk\$[’'‘`]?000", "HKD", "thousand"),
             (r"US\$[’'‘`]?000|USD\s*thousand|us\$[’'‘`]?000", "USD", "thousand"),
+            # 中文模式
+            (r'人民幣百萬|人民幣.*?百萬', "RMB", "million"),
+            (r'港元百萬|港元.*?百萬|港幣百萬', "HKD", "million"),
+            (r'美元百萬|美元.*?百萬', "USD", "million"),
+            (r'人民幣千元|人民幣.*?千元', "RMB", "thousand"),
+            (r'港元千元|港元.*?千元|港幣千元', "HKD", "thousand"),
+            (r'美元千元|美元.*?千元', "USD", "thousand"),
         ]
         for pat, currency, unit in patterns:
             if re.search(pat, text, re.IGNORECASE):
                 return currency, unit
-        return "RMB", "unknown"  # 默认
+        return "HKD", "unknown"  # 默认
 
     def _apply_financial_table_to_info(self, info, fin_table, source, force=False):
         if not fin_table:
@@ -460,27 +530,36 @@ class ProspectusParser:
 
     def _has_financial_loss_context(self, text):
         loss_keywords = [
-            'loss for the year',
-            'loss for the period',
-            'net loss',
+            'loss for the year', 'loss for the period', 'net loss',
             'loss attributable',
+            '年內虧損', '年内亏损', '淨虧損', '净亏损', '虧損淨額', '亏损净额',
         ]
-        # Only search within the financial statement section to avoid false matches
-        # from table of contents, risk factors, or notes
-        fs_start = text.lower().find('consolidated statement of profit or loss')
+        # 中英文财报章节标志
+        _FS_TOKENS = [
+            'consolidated statement of profit or loss',
+            'consolidated statements of profit or loss',
+            '綜合損益表', '合併損益表', '損益表',
+            '綜合全面收益表', '合併全面收益表',
+            '綜合損益及其他全面收益表',
+        ]
+        fs_start = -1
+        text_lower = text.lower()
+        for token in _FS_TOKENS:
+            pos = text_lower.find(token.lower())
+            if pos >= 0:
+                fs_start = pos
+                break
         if fs_start < 0:
-            return False
+            # 回退：在整个文本中搜索（中文招股书可能没有明显的英文章节标识）
+            fs_start = 0
         window_start = max(0, fs_start - 2000)
         window_end = min(len(text), fs_start + 8000)
         window = text[window_start:window_end]
 
         risk_context_patterns = [
-            'risk factor',
-            'may result in',
-            'could result in',
-            'may incur',
-            'may be adversely',
-            'forward-looking',
+            'risk factor', 'may result in', 'could result in',
+            'may incur', 'may be adversely', 'forward-looking',
+            '風險因素', '风险因素',
         ]
         for i, line in enumerate(window.split('\n')):
             lower_line = line.lower()
@@ -506,7 +585,7 @@ class ProspectusParser:
         revenue = info.get('revenue')
         revenue_y1 = info.get('revenue_y1')
         trusted_statement = info.get('financial_table_source') == 'consolidated_statement'
-        if _is_num(revenue) and revenue <= 0:
+        if _is_num(revenue) and revenue < 0:
             info.pop('revenue', None)
             info.pop('revenue_year', None)
             add_flag('收入为非正数，已剔除')
@@ -675,6 +754,9 @@ class ProspectusParser:
             r'highest offer price[^0-9]*?HK?\$?\s*([0-9,]+(?:\.[0-9]+)?)',
             r'offer price[^0-9]*?([0-9,]+(?:\.[0-9]+)?)\s*(?:to|-)\s*([0-9,]+(?:\.[0-9]+)?)',
             r'offer price[^0-9]*?HK?\$?\s*([0-9,]+(?:\.[0-9]+)?)',
+            # 中文发售價
+            r'發售價[^0-9]*?(?:每股.*?)?\s*(?:HK\$|港元)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:港元|HKD)',
+            r'最終發售價[^0-9]*?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:港元|HKD)',
         ]
         for pattern in price_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
@@ -692,6 +774,10 @@ class ProspectusParser:
         lot_patterns = [
             r'board lot size[^0-9]*?([0-9,]+)',
             r'each board lot[^0-9]*?([0-9,]+)',
+            # 中文每手股数
+            r'每手[^0-9]*?([0-9,]+)\s*股',
+            r'每手買賣單位[^0-9]*?([0-9,]+)\s*股',
+            r'買賣單位每手([0-9,]+)\s*股',
         ]
         for pattern in lot_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
@@ -732,17 +818,23 @@ class ProspectusParser:
 
         self._extract_metric_with_fallback(
             text, 'revenue',
-            ['revenue', 'total revenue', 'sales'],
-            ['revenue', 'total revenue', 'sales', 'turnover'],
+            ['revenue', 'total revenue', 'sales', '收益', '收入', '營業收入', '营业收入'],
+            ['revenue', 'total revenue', 'sales', 'turnover', '收益', '收入', '營業收入', '营业收入'],
             sanity_check=_revenue_sanity,
         )
 
         self._extract_metric_with_fallback(
             text, 'net_profit',
             ['net profit', 'profit for the year', 'profit attributable', 'loss for the year', 'net loss',
-             'profit/(loss) for the year', 'profit for the period', 'loss for the period'],
+             'profit/(loss) for the year', 'profit for the period', 'loss for the period',
+             '净利润', '淨利潤', '純利', '年內利潤', '年內虧損', '年内利润', '年内亏损',
+             '本公司權益股東應佔利潤', '本公司权益股东应占利润', '年度溢利',
+            ],
             ['net profit', 'profit for the year', 'profit attributable', 'loss for the year',
-             'profit/(loss) for the year', 'profit for the period', 'loss for the period'],
+             'profit/(loss) for the year', 'profit for the period', 'loss for the period',
+             '净利润', '淨利潤', '純利', '年內利潤', '年內虧損', '年内利润', '年内亏损',
+             '本公司權益股東應佔利潤', '本公司权益股东应占利润', '年度溢利',
+            ],
             sanity_check=_profit_sanity,
         )
         if 'net_profit' in info:

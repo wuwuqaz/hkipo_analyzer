@@ -118,13 +118,13 @@ def test_find_allotment_announcement_filters_non_ipo(monkeypatch):
     </table>
     """
 
-    monkeypatch.setattr(pl, "_fetch_stock_id", lambda stock_code: "1000301498")
+    monkeypatch.setattr(pl, "_fetch_stock_id", lambda stock_code, lang="EN": "1000301498")
     monkeypatch.setattr(pl, "_retry_request", lambda *args, **kwargs: SimpleNamespace(text=html))
 
     found = pl.find_allotment_announcement("01236")
     assert found is not None
     assert found["href"].endswith("/ipo.pdf")
-    assert found["source"] == "hkex_title_search"
+    assert "hkex_title_search" in found["source"]
 
 
 def test_fetch_price_performance_with_mock_yfinance(monkeypatch):
@@ -231,12 +231,12 @@ def test_update_post_listing_fills_actual_over_sub_ratio():
         shutil.rmtree(temp_dir)
 
 
-def test_update_post_listing_does_not_overwrite_existing():
-    """Test that existing actual_over_sub_ratio is not overwritten."""
+def test_update_post_listing_overwrites_with_real_data():
+    """Test that public_subscription_level from allotment overwrites estimated values."""
     temp_dir = tempfile.mkdtemp()
     try:
         store = HistoryStore(temp_dir)
-        # Create initial record with existing actual_over_sub_ratio
+        # Create initial record with estimated actual_over_sub_ratio
         initial = {
             "hk_code": "01236",
             "company_name": "LDROBOT",
@@ -246,7 +246,7 @@ def test_update_post_listing_does_not_overwrite_existing():
         }
         store.merge_analysis_result(initial)
         
-        # Update with post_listing containing different public_subscription_level
+        # Update with post_listing containing real public_subscription_level
         post_listing_data = {
             "status": "ok",
             "stock_code": "01236",
@@ -255,8 +255,9 @@ def test_update_post_listing_does_not_overwrite_existing():
         updated = store.update_post_listing("01236", post_listing_data)
         
         assert updated is not None
-        assert updated["actual_over_sub_ratio"] == 4322.0
-        assert updated["over_sub_ratio_source"] == "historical_actual"
+        assert updated["actual_over_sub_ratio"] == 6707.66
+        assert updated["over_sub_ratio"] == 6707.66
+        assert updated["over_sub_ratio_source"] == "post_listing_actual"
     finally:
         shutil.rmtree(temp_dir)
 

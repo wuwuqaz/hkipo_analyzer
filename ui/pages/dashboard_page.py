@@ -1,7 +1,6 @@
 from typing import Any
 
 import streamlit as st
-import pandas as pd
 
 from ipo_analyzer.core import analyze_live_ipos
 from ipo_analyzer.cache import ResultCache
@@ -46,26 +45,59 @@ class DashboardPage:
 
         rows = self.fmt.ipo_summary_rows(filtered)
         if not rows:
-            st.info("没有匹配的IPO")
+            st.info(f"没有匹配的IPO（{len(results)} 只中已全部过滤）")
             return
 
-        df = pd.DataFrame(rows)
-        df = df.sort_values("_score_num", ascending=False)
-        df = df.drop(columns=["_score_num"])
-        st.dataframe(df, use_container_width=True, hide_index=True, height=min(400, len(df) * 40 + 50))
+        rows = sorted(rows, key=lambda row: row.get("_score_num", 0), reverse=True)
+        st.caption(f"显示 {len(rows)} / {len(results)} 只IPO")
+        st.markdown(self._render_summary_table(rows), unsafe_allow_html=True)
 
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown('<div class="section-title">📋 选择查看详情</div>', unsafe_allow_html=True)
-        codes = [f"{r['股票代码']} - {r['公司名称']} ({r['总评分']})" for r in rows]
-        selected = st.selectbox("选择IPO", [""] + codes, format_func=lambda x: "请选择..." if x == "" else x, label_visibility="collapsed")
+
+        if not rows:
+            st.info("没有可查看详情的IPO")
+        else:
+            codes = [f"{r['股票代码']} - {r['公司名称']} (打新 {r['打新交易分']})" for r in rows]
+
+            selected = st.radio(
+                "选择IPO查看详情",
+                ["（不选择）"] + codes,
+                index=0,
+                format_func=lambda x: x if x != "（不选择）" else "请选择一只IPO...",
+                label_visibility="collapsed",
+                horizontal=True,
+                key="_ipo_detail_radio"
+            )
+
+            if selected and selected != "（不选择）":
+                stock_code = selected.split(" - ", 1)[0].strip()
+                for ipo in filtered:
+                    if ipo.get("hk_code") == stock_code:
+                        self.detail_view.render(ipo)
+                        break
+
         st.markdown('</div>', unsafe_allow_html=True)
 
-        if selected and selected != "":
-            stock_code = selected.split(" - ", 1)[0].strip()
-            for ipo in filtered:
-                if ipo.get("hk_code") == stock_code:
-                    self.detail_view.render(ipo)
-                    break
+    def _render_summary_table(self, rows: list[dict]) -> str:
+        columns = [key for key in rows[0].keys() if key != "_score_num"] if rows else []
+        header = "".join(f"<th>{self.html.escape(column)}</th>" for column in columns)
+        body_rows = []
+        for row in rows:
+            cells = "".join(
+                f"<td>{self.html.escape(row.get(column, '--'))}</td>"
+                for column in columns
+            )
+            body_rows.append(f"<tr>{cells}</tr>")
+
+        return (
+            '<div class="dashboard-table-wrap">'
+            '<table class="dashboard-table">'
+            f'<thead><tr>{header}</tr></thead>'
+            f'<tbody>{"".join(body_rows)}</tbody>'
+            '</table>'
+            '</div>'
+        )
 
     def _render_hero(self) -> None:
         self.html.hero_section(
@@ -84,11 +116,11 @@ class DashboardPage:
 
         col1, col2, col3 = st.columns([2, 2, 3])
         with col1:
-            if st.button("🔄 更新IPO（使用缓存）", type="primary", use_container_width=True):
+            if st.button("🔄 更新IPO（使用缓存）", type="primary", width="stretch"):
                 with st.spinner("正在获取和分析IPO数据..."):
                     self._execute_ipo_update(force_refresh=False)
         with col2:
-            if st.button("⚡ 强制刷新（重新下载）", use_container_width=True):
+            if st.button("⚡ 强制刷新（重新下载）", width="stretch"):
                 with st.spinner("正在重新下载和分析..."):
                     self._execute_ipo_update(force_refresh=True)
         with col3:
@@ -108,7 +140,6 @@ class DashboardPage:
             return "暂无缓存"
         latest_cache = max(cache_times)
         try:
-            dt_obj = type(latest_cache)(latest_cache) if not isinstance(latest_cache, str) else latest_cache
             from datetime import datetime
             dt_obj = datetime.fromisoformat(latest_cache)
             return dt_obj.strftime("%Y-%m-%d %H:%M")

@@ -1,10 +1,5 @@
-import sys
 import os
 import logging
-
-logging.basicConfig(level=logging.WARNING, format="%(message)s")
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import streamlit as st
 
@@ -14,6 +9,8 @@ from ui.pages.history_page import HistoryPage
 from ui.utils.file_utils import cleanup_temp_files
 from ui.renderers.html_renderer import HtmlRenderer
 from ui.constants import DISCLAIMER
+
+logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
 TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -51,7 +48,12 @@ PAGE_REGISTRY = [
 
 
 def main():
-    st.set_page_config(page_title="港股IPO打新分析", page_icon="📊", layout="wide")
+    st.set_page_config(
+        page_title="港股IPO打新分析", 
+        page_icon="📊", 
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
 
     if not st.session_state.get("_temp_cleaned"):
         cleanup_temp_files(TEMP_DIR)
@@ -60,7 +62,7 @@ def main():
 
     HtmlRenderer.sidebar_header("📊", "港股IPO分析", "IPO Analyzer Pro")
 
-    page_label = st.sidebar.radio("导航", [label for label, _ in PAGE_REGISTRY])
+    page_label = st.sidebar.radio("导航", [label for label, _ in PAGE_REGISTRY], key="_sidebar_nav")
     factory = dict(PAGE_REGISTRY)[page_label]
     try:
         factory().render()

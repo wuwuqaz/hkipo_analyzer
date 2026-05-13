@@ -1,14 +1,14 @@
 from html import escape as html_escape
-from typing import Any, Optional
+from typing import Any
 
-from ui.utils.shared_utils import SafeHtml, _num
+from ui.utils.shared_utils import SafeHtml
 
 
 class HtmlRenderer:
     """HTML 渲染器，负责生成安全的 HTML 片段"""
 
     allowed_score_classes = {"score-excellent", "score-good", "score-medium", "score-poor", ""}
-    allowed_colors = {"#34d399", "#a3e635", "#fbbf24", "#fb7185"}
+    allowed_colors = {"#059669", "#65A30D", "#D97706", "#DC2626"}
     allowed_tag_colors = {"green", "yellow", "red", "blue", "gray"}
 
     @staticmethod
@@ -30,7 +30,7 @@ class HtmlRenderer:
             safe_pct = 0
         safe_color = color if color in HtmlRenderer.allowed_colors else "#64748b"
         return SafeHtml(
-            f'<div class="progress-bar"><div class="fill" style="width:{safe_pct}%;background:{safe_color}"></div></div>'
+            f'<div class="progress-bar"><div class="fill" style="width:{safe_pct}%;background:{safe_color};box-shadow:0 0 6px {safe_color}40;"></div></div>'
         )
 
     @staticmethod
@@ -75,15 +75,15 @@ class HtmlRenderer:
         st.sidebar.markdown(f"""
         <div style="text-align:center;padding:20px 0 16px;">
             <div style="font-size:28px;">{HtmlRenderer.escape(icon)}</div>
-            <div style="font-size:18px;font-weight:700;color:#f1f5f9;">{HtmlRenderer.escape(title)}</div>
-            <div style="font-size:12px;color:#64748b;margin-top:4px;">{HtmlRenderer.escape(subtitle)}</div>
+            <div style="font-size:18px;font-weight:700;color:#1E40AF;">{HtmlRenderer.escape(title)}</div>
+            <div style="font-size:12px;color:#64748B;margin-top:4px;">{HtmlRenderer.escape(subtitle)}</div>
         </div>
         """, unsafe_allow_html=True)
 
     @staticmethod
     def empty_state(icon: str, title: str, description: str, extra: str = "") -> None:
         import streamlit as st
-        extra_html = f"<div style='font-size:14px;color:#94a3b8;margin-top:8px;'>{extra}</div>" if extra else ""
+        extra_html = f"<div style='font-size:14px;color:#475569;margin-top:8px;'>{extra}</div>" if extra else ""
         st.markdown(f"""
         <div class="section-card" style="text-align:center;padding:60px 24px;">
             <div style="font-size:48px;margin-bottom:16px;">{icon}</div>

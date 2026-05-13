@@ -289,6 +289,12 @@ class ProspectusDownloader:
                 if result.returncode == 0 and os.path.exists(tmp_path):
                     with open(tmp_path, 'rb') as f:
                         content = f.read()
+                    size_mb = len(content) / 1024 / 1024
+                    max_size = SETTINGS.network.max_pdf_size_mb
+                    if size_mb > max_size:
+                        logger.warning("  ✗ PDF 超出大小限制: %.2f MB > %d MB", size_mb, max_size)
+                        last_error = RuntimeError(f"PDF 超出大小限制: {size_mb:.1f} MB > {max_size} MB")
+                        continue
                     if content[:4] == b'%PDF':
                         return SimpleNamespace(content=content), url
                     last_error = RuntimeError("curl 下载结果不是有效 PDF")
@@ -319,10 +325,14 @@ class ProspectusDownloader:
                 matched_pdf = self._find_prospectus_from_new_listing_page(stock_code, company_name, page_url)
                 if matched_pdf:
                     response, final_url = self._download_pdf_with_fallback(matched_pdf)
+                    size_mb = len(response.content) / 1024 / 1024
+                    max_size = SETTINGS.network.max_pdf_size_mb
+                    if size_mb > max_size:
+                        logger.warning("  ✗ PDF 超出大小限制: %.2f MB > %d MB", size_mb, max_size)
+                        return None
                     pdf_path = os.path.join(self.cache_dir, f"{stock_code}_prospectus.pdf")
                     with open(pdf_path, 'wb') as f:
                         f.write(response.content)
-                    size_mb = len(response.content) / 1024 / 1024
                     scheme_note = "https" if final_url.startswith('https://') else "http"
                     logger.info("  ✓ 通过新上市信息页下载成功: %s (%.2f MB, %s)", pdf_path, size_mb, scheme_note)
                     return pdf_path
@@ -337,8 +347,8 @@ class ProspectusDownloader:
                 page = browser.new_page()
                 
                 pages_to_try = [
-                    f"https://www2.hkexnews.hk/new-listings/new-listing-information/main-board?sc_lang=en",
-                    f"https://www2.hkexnews.hk/new-listings/new-listing-information/growth-enterprise-market?sc_lang=en",
+                    "https://www2.hkexnews.hk/new-listings/new-listing-information/main-board?sc_lang=en",
+                    "https://www2.hkexnews.hk/new-listings/new-listing-information/growth-enterprise-market?sc_lang=en",
                 ]
                 
                 for page_url in pages_to_try:
@@ -403,13 +413,16 @@ class ProspectusDownloader:
                                 response = _retry_request(httpx.head, full_url, timeout=SETTINGS.network.head_timeout, follow_redirects=True)
                                 if response.status_code == 200:
                                     size = int(response.headers.get('content-length', 0))
-                                    if size > 1000000:
+                                    max_size = SETTINGS.network.max_pdf_size_mb * 1024 * 1024
+                                    if size > 1000000 and size <= max_size:
                                         pdf_path = os.path.join(self.cache_dir, f"{stock_code}_prospectus.pdf")
                                         response = _retry_request(httpx.get, full_url, timeout=SETTINGS.network.pdf_download_timeout, follow_redirects=True)
                                         with open(pdf_path, 'wb') as f:
                                             f.write(response.content)
                                         logger.info("  ✓ 下载成功: %s (%.2f MB)", pdf_path, size / 1024 / 1024)
                                         return pdf_path
+                                    elif size > max_size:
+                                        logger.warning("  ✗ PDF 超出大小限制: %.2f MB > %d MB", size / 1024 / 1024, max_size)
                             except Exception:
                                 continue
                     except Exception as e:
