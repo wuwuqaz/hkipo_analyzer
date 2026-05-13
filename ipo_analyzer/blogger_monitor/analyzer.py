@@ -58,19 +58,21 @@ class BloggerAnalyzer:
         stock_code: str,
         company_name: str,
     ) -> Optional[BloggerOpinionModel]:
+        # 优先走 LLM 路径
         prompt = self._build_prompt(article, stock_code, company_name)
         raw = self._call_llm(prompt)
-        if raw is None:
-            return None
+        if raw is not None:
+            data = self._parse_json(raw)
+            if data is None:
+                data = self._repair_json(raw)
+            if data is not None:
+                result = self._validate_with_pydantic(data)
+                if result is not None:
+                    return result
+            logger.warning("LLM 响应 JSON 解析失败: %s", raw[:200] if raw else "")
 
-        data = self._parse_json(raw)
-        if data is None:
-            data = self._repair_json(raw)
-        if data is None:
-            logger.warning("LLM 响应 JSON 解析失败: %s", raw[:200])
-            return None
-
-        return self._validate_with_pydantic(data)
+        # 回退：关键词情感分析
+        return self._keyword_sentiment(article, stock_code, company_name)
 
     def _build_prompt(
         self,
@@ -86,9 +88,71 @@ class BloggerAnalyzer:
             content=article.content or article.snippet,
         )
 
+    # --- 关键词情感分析（无需 LLM，作为 API key 缺失时的回退）---
+    _POSITIVE_KEYWORDS = [
+        "看好", "推荐", "建议申购", "积极申购", "建议认购", "值得参与",
+        "值得打新", "可申购", "建议参与", "重点关注", "强烈推荐",
+        "估值合理", "定价合理", "性价比较高", "值得关注",
+    ]
+    _NEGATIVE_KEYWORDS = [
+        "看空", "不建议", "谨慎参与", "放弃申购", "不参与",
+        "风险较大", "风险过高", "定价偏高", "估值偏高",
+        "不建议申购", "不建议参与", "观望", "避开",
+    ]
+
+    def _keyword_sentiment(self, article: SearchResultModel, stock_code: str, company_name: str) -> Optional[BloggerOpinionModel]:
+        content = f"{article.title} {article.content or article.snippet or ''}"
+        if len(content) < 50:
+            return None
+
+        pos_hits = [kw for kw in self._POSITIVE_KEYWORDS if kw in content]
+        neg_hits = [kw for kw in self._NEGATIVE_KEYWORDS if kw in content]
+
+        pos_score = len(pos_hits)
+        neg_score = len(neg_hits)
+
+        if pos_score == 0 and neg_score == 0:
+            return None
+
+        if pos_score > neg_score:
+            stance = "positive"
+            stance_score = min(90, 55 + pos_score * 10)
+        elif neg_score > pos_score:
+            stance = "negative"
+            stance_score = max(10, 45 - neg_score * 10)
+        else:
+            stance = "neutral"
+            stance_score = 50
+
+        reasons = pos_hits[:3] if pos_hits else []
+        risks = neg_hits[:3] if neg_hits else []
+
+        return BloggerOpinionModel(
+            stock_code=stock_code,
+            company_name=company_name,
+            source=article.source_domain,
+            author="",
+            author_type="blogger",
+            title=article.title,
+            published_at=article.published_at,
+            stance=stance,
+            stance_score=stance_score,
+            apply_suggestion="",
+            suggested_capital_ratio="",
+            main_reasons=reasons,
+            risk_points=risks,
+            valuation_comment="",
+            summary=f"关键词匹配: 正面{pos_score}个, 负面{neg_score}个",
+            confidence_score=30,
+            evidence_quotes=[],
+            is_actionable=bool(pos_score or neg_score),
+        )
+
+    # --- LLM 分析 ---
+
     def _call_llm(self, prompt: str) -> Optional[str]:
         if not self.config.llm_api_key:
-            logger.warning("LLM_API_KEY 未配置，跳过 LLM 分析")
+            logger.debug("LLM_API_KEY 未配置，使用关键词回退")
             return None
 
         url = f"{self.config.llm_base_url.rstrip('/')}/chat/completions"

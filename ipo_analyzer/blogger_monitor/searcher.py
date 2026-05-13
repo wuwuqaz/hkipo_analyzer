@@ -3,8 +3,6 @@ import time
 from typing import Optional
 from urllib.parse import urlparse, parse_qs, urlunparse
 
-from tavily import TavilyClient
-
 from .config import BloggerMonitorConfig, load_config
 from .models import SearchResultModel
 
@@ -34,15 +32,16 @@ _TRACKING_PARAMS = frozenset(
 class BloggerSearcher:
     def __init__(self, config: Optional[BloggerMonitorConfig] = None):
         self.config = config or load_config()
-        self._client: Optional[TavilyClient] = None
+        self._tavily_client = None
 
-    def _get_client(self) -> Optional[TavilyClient]:
-        if self._client is not None:
-            return self._client
+    def _get_tavily_client(self):
+        if self._tavily_client is not None:
+            return self._tavily_client
         if not self.config.tavily_api_key:
             return None
-        self._client = TavilyClient(api_key=self.config.tavily_api_key)
-        return self._client
+        from tavily import TavilyClient
+        self._tavily_client = TavilyClient(api_key=self.config.tavily_api_key)
+        return self._tavily_client
 
     def generate_keywords(self, company_name: str, stock_code: str) -> list[str]:
         keywords = []
@@ -56,10 +55,7 @@ class BloggerSearcher:
         if not keywords:
             return []
 
-        client = self._get_client()
-        if client is None:
-            logger.warning("TAVILY_API_KEY 未配置，跳过搜索")
-            return []
+        provider = self.config.search_provider
 
         seen_urls: set[str] = set()
         results: list[SearchResultModel] = []
@@ -67,7 +63,15 @@ class BloggerSearcher:
         for i, keyword in enumerate(keywords):
             if i > 0:
                 time.sleep(0.5)
-            items = self._search_single_keyword(keyword)
+
+            if provider == "duckduckgo":
+                items = self._search_duckduckgo(keyword)
+            else:
+                # 默认 tavily，无 API key 时自动回退到 duckduckgo
+                items = self._search_tavily(keyword)
+                if not items and not self.config.tavily_api_key:
+                    items = self._search_duckduckgo(keyword)
+
             for item in items:
                 canon = self.canonicalize_url(item.url)
                 if canon in seen_urls:
@@ -77,9 +81,10 @@ class BloggerSearcher:
 
         return results
 
-    def _search_single_keyword(self, keyword: str) -> list[SearchResultModel]:
-        client = self._get_client()
+    def _search_tavily(self, keyword: str) -> list[SearchResultModel]:
+        client = self._get_tavily_client()
         if client is None:
+            logger.warning("TAVILY_API_KEY 未配置，跳过搜索")
             return []
 
         try:
@@ -107,6 +112,37 @@ class BloggerSearcher:
                     source_domain=self.extract_domain(url),
                 )
             )
+        return items
+
+    def _search_duckduckgo(self, keyword: str) -> list[SearchResultModel]:
+        try:
+            from duckduckgo_search import DDGS
+        except ImportError:
+            logger.warning("DuckDuckGo 搜索未安装，请运行: pip install duckduckgo-search")
+            return []
+
+        items: list[SearchResultModel] = []
+        try:
+            with DDGS() as ddgs:
+                for r in ddgs.text(
+                    keyword,
+                    max_results=self.config.max_results_per_keyword,
+                ):
+                    url = r.get("href", "") or r.get("url", "")
+                    items.append(
+                        SearchResultModel(
+                            title=r.get("title", ""),
+                            url=url,
+                            snippet=r.get("body", ""),
+                            content=r.get("body", ""),
+                            published_at=None,
+                            source_domain=self.extract_domain(url),
+                        )
+                    )
+        except Exception:
+            logger.exception("DuckDuckGo 搜索失败，关键词: %s", keyword)
+            return []
+
         return items
 
     @staticmethod

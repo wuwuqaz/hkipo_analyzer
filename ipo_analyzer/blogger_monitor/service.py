@@ -80,6 +80,7 @@ class BloggerMonitorService:
         failed_count = 0
         skipped_count = 0
         opinions: list = []
+        analysis_dicts: list = []
 
         for post in new_posts:
             search_result = SearchResultModel(
@@ -149,6 +150,7 @@ class BloggerMonitorService:
                 "is_actionable": opinion.is_actionable,
                 "analysis_status": "completed",
             }
+            analysis_dicts.append(analysis_data)
             self.db.insert_analysis(analysis_data)
             self.db.update_post_fetch_status(post["id"], "analyzed")
 
@@ -159,7 +161,9 @@ class BloggerMonitorService:
             skipped_count,
         )
 
-        consensus = self.consensus_calculator.calculate(stock_code, opinions, failed_count, skipped_count)
+        consensus = self.consensus_calculator.calculate(
+            stock_code, analysis_dicts, new_posts, failed_count, skipped_count,
+        )
 
         self.db.upsert_consensus(consensus.model_dump())
         logger.info(

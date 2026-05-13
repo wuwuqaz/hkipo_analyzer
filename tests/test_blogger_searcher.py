@@ -88,7 +88,8 @@ class TestSearchNoApiKey:
     def test_search_returns_empty_without_api_key(self):
         cfg = BloggerMonitorConfig(tavily_api_key="", keyword_templates=["{company_name}"])
         s = BloggerSearcher(cfg)
-        results = s.search("公司", "09999")
+        # DuckDuckGo 自动回退可能产生真实结果，改为直接测试 Tavily 路径
+        results = s._search_tavily("公司")
         assert results == []
 
 
@@ -106,8 +107,8 @@ class TestSearchSingleKeyword:
                 }
             ]
         }
-        with patch.object(searcher, "_get_client", return_value=mock_client):
-            results = searcher._search_single_keyword("测试公司 IPO")
+        with patch.object(searcher, "_get_tavily_client", return_value=mock_client):
+            results = searcher._search_tavily("测试公司 IPO")
         assert len(results) == 1
         assert results[0].title == "测试文章"
         assert results[0].source_domain == "example.com"
@@ -115,6 +116,6 @@ class TestSearchSingleKeyword:
     def test_search_single_keyword_exception(self, searcher):
         mock_client = MagicMock()
         mock_client.search.side_effect = Exception("API error")
-        with patch.object(searcher, "_get_client", return_value=mock_client):
-            results = searcher._search_single_keyword("测试公司 IPO")
+        with patch.object(searcher, "_get_tavily_client", return_value=mock_client):
+            results = searcher._search_tavily("测试公司 IPO")
         assert results == []
