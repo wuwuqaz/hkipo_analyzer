@@ -99,6 +99,10 @@ class ValuationResult:
     final_total_fund: Optional[float] = None
     final_public_offer: Optional[float] = None
     market_cap_to_rd_ratio: Optional[float] = None
+    ev_sales_ratio: Optional[float] = None
+    net_cash_hkd_million: Optional[float] = None
+    pre_ipo_valuation_million: Optional[float] = None
+    ipo_valuation_premium_pct: Optional[float] = None
     biotech_valuation_label: Optional[str] = None
     biotech_valuation_reasons: list[str] = field(default_factory=list)
     biotech_stage_label: Optional[str] = None
@@ -111,6 +115,11 @@ class ValuationResult:
     net_profit_hkd_million: Optional[float] = None
     adjusted_profit_hkd_million: Optional[float] = None
     financial_currency: Optional[str] = None
+    evidence_excerpt: str = ""
+    # 补充缺失字段
+    revenue_previous_hkd_million: Optional[float] = None
+    biotech_valuation_framework: Optional[str] = None
+    revenue_quality: str = "standard"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -138,12 +147,21 @@ class BusinessBreakdown:
     fastest_growing_segment: Optional[str] = None
     new_business_segment: Optional[str] = None
     growth_source: str = "missing"
+    business_model_label: Optional[str] = None
+    business_model_reasons: list[str] = field(default_factory=list)
+    segment_concentration_label: Optional[str] = None
+    segment_moat_label: Optional[str] = None
     vbp_risk_score: int = 0
     vbp_summary: str = ""
     asp_data: dict[str, Any] = field(default_factory=dict)
     business_breakdown_confidence: str = "missing"
     business_breakdown_warning: Optional[str] = None
+    profit_driver_segment: Optional[str] = None
+    revenue_driver_segment: Optional[str] = None
+    profit_revenue_mismatch: bool = False
+    profit_revenue_mismatch_detail: Optional[str] = None
     confidence: str = "missing"
+    evidence_excerpt: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -155,7 +173,8 @@ class BusinessBreakdown:
         # segments 需要手动转换
         seg_raw = data.get("segments", [])
         segs = [BusinessSegment(**s) if isinstance(s, dict) else s for s in seg_raw]
-        data = {k: v for k, v in data.items() if k != "segments"}
+        valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
+        data = {k: v for k, v in data.items() if k != "segments" and k in valid_keys}
         return cls(segments=segs, **data)
 
 
@@ -170,6 +189,11 @@ class GeographicResult:
     geographic_table: dict[str, Any] = field(default_factory=dict)
     geographic_confidence: str = "missing"
     confidence: str = "missing"
+    # 补充缺失字段
+    hong_kong_revenue_pct: Optional[float] = None
+    hong_kong_revenue_trend: Optional[str] = None
+    mainland_revenue_pct: Optional[float] = None
+    detailed_geo_table: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -214,15 +238,34 @@ class CashFlowResult:
     ocf_to_net_profit: Optional[float] = None
     ocf_to_revenue: Optional[float] = None
     cash_and_cash_equivalents: Optional[float] = None
+    inventory_amount: Optional[float] = None
+    receivables_amount: Optional[float] = None
+    monthly_cash_burn: Optional[float] = None
     cash_runway_years: Optional[float] = None
     post_ipo_cash_runway_years: Optional[float] = None
     inventory_turnover_days_latest: Optional[float] = None
     receivables_turnover_days_latest: Optional[float] = None
     receivables_growth_vs_revenue: Optional[float] = None
+    inventory_amount_prev: Optional[float] = None
+    receivables_amount_prev: Optional[float] = None
+    operating_cash_flow_prev: Optional[float] = None
+    cash_balance_prev: Optional[float] = None
+    working_capital_trend_label: str = "缺失"
+    working_capital_trend_reasons: list[str] = field(default_factory=list)
+    working_capital_pressure_label: str = "缺失"
+    working_capital_pressure_score: int = 0
+    working_capital_pressure_reasons: list[str] = field(default_factory=list)
     cash_quality_label: str = "缺失"
     financing_dependency_label: str = "缺失"
     working_capital_risks: list[str] = field(default_factory=list)
     confidence: str = "missing"
+    evidence_excerpt: str = ""
+    # 补充缺失字段
+    adjusted_net_profit: Optional[float] = None
+    adjusted_net_profit_y1: Optional[float] = None
+    adjusted_profit_trend_label: str = "缺失"
+    payables_turnover_days_prev: Optional[float] = None
+    yoy_anomalies: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -253,6 +296,13 @@ class CapacityResult:
 class RnDResult:
     rd_expense_latest: Optional[float] = None
     rd_expense_ratio: Optional[float] = None
+    patent_count: Optional[int] = None
+    software_copyright_count: Optional[int] = None
+    rd_staff_count: Optional[int] = None
+    rd_staff_ratio: Optional[float] = None
+    backlog_amount: Optional[float] = None
+    industry_rank: Optional[str] = None
+    market_size_notes: Optional[str] = None
     product_count_approved: Optional[int] = None
     product_count_pipeline: Optional[int] = None
     core_product_names: list[str] = field(default_factory=list)
@@ -268,6 +318,10 @@ class RnDResult:
     rd_ratio_biotech: bool = False
     class_ii_count: int = 0
     class_iii_count: int = 0
+    hardtech_moat_label: str = "缺失"
+    hardtech_moat_reasons: list[str] = field(default_factory=list)
+    hardtech_moat_score: int = 0
+    evidence_excerpt: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -382,7 +436,13 @@ class AdvancedFrameworkResult:
         if data is None:
             return None
         comps_raw = data.get("components", {})
-        comps = {k: DimensionScore(**v) if isinstance(v, dict) else v for k, v in comps_raw.items()}
+        ds_valid_keys = {f.name for f in DimensionScore.__dataclass_fields__.values()}
+        comps = {}
+        for k, v in comps_raw.items():
+            if isinstance(v, dict):
+                comps[k] = DimensionScore(**{kk: vv for kk, vv in v.items() if kk in ds_valid_keys})
+            else:
+                comps[k] = v
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
         other = {k: v for k, v in data.items() if k != "components" and k in valid_keys}
         return cls(components=comps, **other)
@@ -400,6 +460,11 @@ class StockQuality:
     score: int = 0
     reasons: list[str] = field(default_factory=list)
     dimensions: dict[str, StockQualityDimension] = field(default_factory=dict)
+    fisher_label: str = "缺失"
+    fisher_reasons: list[str] = field(default_factory=list)
+    lynch_label: str = "缺失"
+    lynch_reasons: list[str] = field(default_factory=list)
+    long_term_notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -480,6 +545,10 @@ class ProspectusInfo:
     is_chapter_18c: bool = False
     public_offer_clawback_max_pct: Optional[float] = None
     public_offer_clawback_note: Optional[str] = None
+    business_model_label: Optional[str] = None
+    business_model_reasons: list[str] = field(default_factory=list)
+    segment_concentration_label: Optional[str] = None
+    segment_moat_label: Optional[str] = None
 
     # --- 财务数据 ---
     revenue: Optional[float] = None
@@ -531,6 +600,8 @@ class ProspectusInfo:
     peer_comparison: Optional[PeerComparisonResult] = None
     advanced_framework: Optional[AdvancedFrameworkResult] = None
     stock_quality: Optional[StockQuality] = None
+    shareholder: Optional[dict[str, Any]] = None
+    order_backlog: Optional[dict[str, Any]] = None
 
     def to_dict(self, drop_runtime: bool = True) -> dict[str, Any]:
         d = asdict(self)
@@ -595,6 +666,7 @@ class IPOData:
     over_sub_ratio: Optional[float] = None
     over_sub_ratio_source: str = "missing"
     market_heat: str = ""
+    live_market_heat: dict[str, Any] = field(default_factory=dict)
     margin_detail: Optional[dict[str, Any]] = None
 
     # 评分
@@ -604,6 +676,8 @@ class IPOData:
     ipo_trade_label: str = ""
     long_term_score: int = 0
     long_term_label: str = ""
+    fisher_label: str = ""
+    lynch_label: str = ""
     valuation_pressure_label: str = ""
     subscription_recommendation: str = ""
     recommendation_reasons: list[str] = field(default_factory=list)
@@ -622,6 +696,9 @@ class IPOData:
     advanced_score_adjustment: int = 0
     # 交易信号拆解（供 UI 展示）
     signal_breakdown: dict[str, Any] = field(default_factory=dict)
+
+    # 商业分析
+    profit_driver_segment: Optional[str] = None
 
     # 重新分析相关字段
     weight_profile: dict[str, Any] = field(default_factory=dict)

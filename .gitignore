@@ -7,6 +7,10 @@ temp/allotment/
 temp/reanalysis/
 temp/results_cache.json
 temp/ipo_history.json
+temp/*.db
+temp/*.db-shm
+temp/*.db-wal
+temp/*.py
 data/backups/
 .env
 *.egg-info/

@@ -118,13 +118,13 @@ def test_find_allotment_announcement_filters_non_ipo(monkeypatch):
     </table>
     """
 
-    monkeypatch.setattr(pl, "_fetch_stock_id", lambda stock_code: "1000301498")
+    monkeypatch.setattr(pl, "_fetch_stock_id", lambda stock_code, lang="EN": "1000301498")
     monkeypatch.setattr(pl, "_retry_request", lambda *args, **kwargs: SimpleNamespace(text=html))
 
     found = pl.find_allotment_announcement("01236")
     assert found is not None
     assert found["href"].endswith("/ipo.pdf")
-    assert found["source"] == "hkex_title_search"
+    assert "hkex_title_search" in found["source"]
 
 
 def test_fetch_price_performance_with_mock_yfinance(monkeypatch):

@@ -45,10 +45,11 @@ class DashboardPage:
 
         rows = self.fmt.ipo_summary_rows(filtered)
         if not rows:
-            st.info("没有匹配的IPO")
+            st.info(f"没有匹配的IPO（{len(results)} 只中已全部过滤）")
             return
 
         rows = sorted(rows, key=lambda row: row.get("_score_num", 0), reverse=True)
+        st.caption(f"显示 {len(rows)} / {len(results)} 只IPO")
         st.markdown(self._render_summary_table(rows), unsafe_allow_html=True)
 
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -65,7 +66,8 @@ class DashboardPage:
                 index=0,
                 format_func=lambda x: x if x != "（不选择）" else "请选择一只IPO...",
                 label_visibility="collapsed",
-                horizontal=True
+                horizontal=True,
+                key="_ipo_detail_radio"
             )
 
             if selected and selected != "（不选择）":
@@ -138,7 +140,6 @@ class DashboardPage:
             return "暂无缓存"
         latest_cache = max(cache_times)
         try:
-            dt_obj = type(latest_cache)(latest_cache) if not isinstance(latest_cache, str) else latest_cache
             from datetime import datetime
             dt_obj = datetime.fromisoformat(latest_cache)
             return dt_obj.strftime("%Y-%m-%d %H:%M")

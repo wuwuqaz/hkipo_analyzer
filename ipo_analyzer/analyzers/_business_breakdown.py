@@ -1,6 +1,7 @@
 import re
 import logging
 from ..table_extraction import extract_segment_table
+from ..utils import extract_text_excerpts
 from ..settings import SETTINGS
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,26 @@ class BusinessBreakdownAnalyzer:
         r'Visual Perception Products',
         r'Robot lawn mowers?',
         r'Autonomous mobile robots?',
+        r'Robot bodies?',
+        r'Robotic solutions?',
+        r'Industrial robots?',
+        r'Parallel robots?',
+        r'Mobile robots?',
+        r'AGV',
+        r'AMR',
+        r'SCARA',
+        r'Six[- ]axis robots?',
+        r'Wafer handling',
+        r'Controllers?',
+        r'Vision systems?',
+        r'机器人本体',
+        r'机器人解决方案',
+        r'并联机器人',
+        r'移动机器人',
+        r'工业机器人',
+        r'晶圆搬运',
+        r'控制器',
+        r'视觉系统',
         r'Consumer electronics',
         r'Industrial equipment',
         r'Medical implants?',
@@ -29,6 +50,22 @@ class BusinessBreakdownAnalyzer:
         r'Remaining',
     ]
 
+    _ROBOT_BUSINESS_HINTS = {
+        'robot_body': [
+            'robot bodies', 'robot body', 'robotic body', '工业机器人', '机器人本体',
+            'parallel robots', '并联机器人', 'SCARA', '六轴', 'six-axis',
+            'wafer handling', '晶圆搬运',
+        ],
+        'robot_solution': [
+            'robotic solutions', 'robot solutions', 'robot solution', '机器人解决方案',
+            'autonomous mobile robots', 'mobile robots', 'agv', 'amr', '移动机器人',
+            'system integration', 'solution business',
+        ],
+        'robot_component': [
+            'controllers', 'controller', 'vision systems', '视觉系统',
+        ],
+    }
+
     _EXCLUDE_SEGMENTS = [
         'net cash', 'cash and cash', 'net increase', 'decrease in cash',
         'summary', 'operating activities', 'investing activities',
@@ -36,6 +73,15 @@ class BusinessBreakdownAnalyzer:
         'cash at end', 'profit for', 'loss for', 'depreciation', 'amortization',
         'working capital', 'trade receivables', 'trade payables', 'inventories',
         'total revenue', 'total', 'amount',
+    ]
+
+    _GROSS_PROFIT_PATTERNS = [
+        'breakdown of gross profit by business line',
+        'gross profit by business line',
+        'breakdown of gross profit',
+        'gross profit breakdown',
+        '毛利按业务线',
+        '毛利拆分',
     ]
 
     def analyze(self, prospectus_info, text='', ipo_data=None):
@@ -48,12 +94,21 @@ class BusinessBreakdownAnalyzer:
             'fastest_growing_segment': None,
             'new_business_segment': None,
             'growth_source': 'missing',
+            'business_model_label': None,
+            'business_model_reasons': [],
+            'segment_concentration_label': None,
+            'segment_moat_label': None,
             'vbp_risk_score': 0,
             'vbp_summary': '',
             'asp_data': {},
             'business_breakdown_confidence': 'missing',
             'business_breakdown_warning': None,
+            'profit_driver_segment': None,
+            'revenue_driver_segment': None,
+            'profit_revenue_mismatch': False,
+            'profit_revenue_mismatch_detail': None,
             'confidence': 'missing',
+            'evidence_excerpt': '',
         }
         try:
             segments = self._extract_generic_segments(text)
@@ -85,8 +140,43 @@ class BusinessBreakdownAnalyzer:
                     if total_latest > 0 and s.get('share_pct') is None:
                         s['share_pct'] = round(s.get('revenue_latest', 0) / total_latest * 100, 1)
 
+                gp_data = self._extract_segment_gross_profits(text, segments)
+                total_gp = 0
+                for s in segments:
+                    seg_name = s.get('name', '')
+                    gp = gp_data.get(seg_name)
+                    if gp and gp.get('gross_profit_latest') is not None:
+                        s['gross_profit_latest'] = gp['gross_profit_latest']
+                        if gp.get('gross_profit_previous') is not None:
+                            s['gross_profit_previous'] = gp['gross_profit_previous']
+                        rev_latest = s.get('revenue_latest')
+                        if rev_latest and rev_latest != 0:
+                            s['gross_margin_pct'] = round(s['gross_profit_latest'] / rev_latest * 100, 1)
+                        total_gp += s['gross_profit_latest']
+
+                if total_gp > 0:
+                    for s in segments:
+                        gp_latest = s.get('gross_profit_latest')
+                        if gp_latest is not None:
+                            s['gross_profit_share_pct'] = round(gp_latest / total_gp * 100, 1)
+
+                segments_with_gp_share = [s for s in segments if s.get('gross_profit_share_pct') is not None]
+                if segments_with_gp_share:
+                    profit_driver = max(segments_with_gp_share, key=lambda x: x.get('gross_profit_share_pct', 0))
+                    result['profit_driver_segment'] = profit_driver.get('name')
+
                 sorted_by_share = sorted(segments, key=lambda x: x.get('share_pct', 0), reverse=True)
                 result['main_segment'] = sorted_by_share[0].get('name') if sorted_by_share else None
+
+                result['revenue_driver_segment'] = result.get('main_segment')
+
+                if result['profit_driver_segment'] and result['revenue_driver_segment']:
+                    if result['profit_driver_segment'] != result['revenue_driver_segment']:
+                        result['profit_revenue_mismatch'] = True
+                        result['profit_revenue_mismatch_detail'] = (
+                            f"收入主要来自{result['revenue_driver_segment']}，"
+                            f"但毛利主要来自{result['profit_driver_segment']}"
+                        )
 
                 sorted_by_growth = sorted(segments, key=lambda x: x.get('growth_pct', 0) or 0, reverse=True)
                 result['fastest_growing_segment'] = sorted_by_growth[0].get('name') if sorted_by_growth else None
@@ -110,6 +200,36 @@ class BusinessBreakdownAnalyzer:
                 main_share = sorted_by_share[0].get('share_pct', 0) if sorted_by_share else 0
                 main_growth = sorted_by_share[0].get('growth_pct', 0) if sorted_by_share else 0
                 new_biz = result.get('new_business_segment')
+                main_name = (sorted_by_share[0].get('name') or '').lower() if sorted_by_share else ''
+                body_share = self._segment_share_for_keywords(segments, self._ROBOT_BUSINESS_HINTS['robot_body'])
+                solution_share = self._segment_share_for_keywords(segments, self._ROBOT_BUSINESS_HINTS['robot_solution'])
+                component_share = self._segment_share_for_keywords(segments, self._ROBOT_BUSINESS_HINTS['robot_component'])
+                concentration_share = max((s.get('share_pct', 0) or 0) for s in segments) if segments else 0
+                if concentration_share >= 70:
+                    result['segment_concentration_label'] = '主业集中'
+                elif concentration_share >= 40:
+                    result['segment_concentration_label'] = '双轮驱动'
+                else:
+                    result['segment_concentration_label'] = '多元分散'
+
+                business_model_reasons = []
+                if body_share or solution_share:
+                    if solution_share >= body_share:
+                        result['business_model_label'] = '机器人解决方案为主'
+                        business_model_reasons.append('收入更偏向解决方案/集成')
+                    else:
+                        result['business_model_label'] = '机器人本体为主'
+                        business_model_reasons.append('本体收入占比更高')
+                if component_share:
+                    business_model_reasons.append('存在控制器/视觉等关键部件收入')
+                if main_name:
+                    if any(k in main_name for k in ('solution', '解决方案')):
+                        result['segment_moat_label'] = '方案驱动'
+                    elif any(k in main_name for k in ('body', '本体', 'robots', 'robot')):
+                        result['segment_moat_label'] = '本体驱动'
+                if not result.get('business_model_label') and main_name:
+                    result['business_model_label'] = '分部结构待确认'
+                result['business_model_reasons'] = business_model_reasons
 
                 if new_biz:
                     result['growth_source'] = '主业增长 + 新业务贡献'
@@ -121,6 +241,13 @@ class BusinessBreakdownAnalyzer:
                     result['growth_source'] = '增长来源待确认'
 
                 result['segments'] = segments
+                excerpt_patterns = list(self._BUSINESS_LINE_PATTERNS[:4])
+                excerpt_patterns.extend(
+                    rf'{re.escape(str(seg.get("name", "")))}' for seg in segments[:4] if seg.get('name')
+                )
+                result['evidence_excerpt'] = "\n\n".join(
+                    extract_text_excerpts(text, excerpt_patterns, window=180, max_chars=1000, limit=3)
+                )
 
             vbp_score, vbp_summary = self._analyze_vbp(text, prospectus_info)
             result['vbp_risk_score'] = vbp_score
@@ -278,6 +405,16 @@ class BusinessBreakdownAnalyzer:
 
         return segments
 
+    def _segment_share_for_keywords(self, segments, keywords):
+        if not segments:
+            return 0
+        total = 0
+        for seg in segments:
+            name = str(seg.get('name', '')).lower()
+            if any(kw.lower() in name for kw in keywords):
+                total += seg.get('share_pct', 0) or 0
+        return round(total, 1)
+
     def _collect_all_nums_from_lines(self, lines, start_idx):
         all_nums = []
         for j in range(start_idx + 1, min(start_idx + 30, len(lines))):
@@ -388,6 +525,75 @@ class BusinessBreakdownAnalyzer:
             })
 
         return segments
+
+    def _extract_segment_gross_profits(self, text, segments):
+        if not segments:
+            return {}
+
+        gross_profits = {}
+        lines = text.split('\n')
+        section_start = None
+
+        for i, line in enumerate(lines):
+            ll = line.lower().strip()
+            if any(p in ll for p in self._GROSS_PROFIT_PATTERNS):
+                section_start = i
+                break
+
+        if section_start is not None:
+            window_lines = lines[section_start:min(section_start + 250, len(lines))]
+            window = '\n'.join(window_lines)
+
+            year_matches = re.findall(r'\b(20\d{2})\b', window)
+            years = []
+            for y in year_matches:
+                yi = int(y)
+                if yi not in years and 2015 <= yi <= 2030:
+                    years.append(yi)
+            years = sorted(years)
+            if len(years) >= 2:
+                gp_entries = self._parse_segment_table(window_lines, years)
+                for gp_entry in gp_entries:
+                    gp_name = gp_entry.get('name', '')
+                    for seg in segments:
+                        seg_name = seg.get('name', '')
+                        if seg_name and gp_name and (
+                            gp_name.lower() == seg_name.lower()
+                            or gp_name.lower() in seg_name.lower()
+                            or seg_name.lower() in gp_name.lower()
+                        ):
+                            gross_profits[seg_name] = {
+                                'gross_profit_latest': gp_entry.get('revenue_latest'),
+                                'gross_profit_previous': gp_entry.get('revenue_previous'),
+                            }
+                            break
+
+        for seg in segments:
+            seg_name = seg.get('name', '')
+            if seg_name in gross_profits:
+                continue
+            for pattern in [
+                rf'gross\s+profit\s+margin\s+of\s+{re.escape(seg_name)}\s+was\s+([\d.]+)\s*%',
+                rf'gross\s+margin\s+of\s+{re.escape(seg_name)}\s+was\s+([\d.]+)\s*%',
+                rf'gross\s+profit\s+margin\s+for\s+{re.escape(seg_name)}\s+was\s+([\d.]+)\s*%',
+                rf'gross\s+margin\s+for\s+{re.escape(seg_name)}\s+was\s+([\d.]+)\s*%',
+                rf'{re.escape(seg_name)}\s+gross\s+profit\s+margin\s+was\s+([\d.]+)\s*%',
+                rf'{re.escape(seg_name)}\s+gross\s+margin\s+was\s+([\d.]+)\s*%',
+            ]:
+                m = re.search(pattern, text, re.IGNORECASE)
+                if m:
+                    margin_pct = float(m.group(1))
+                    rev_latest = seg.get('revenue_latest')
+                    rev_previous = seg.get('revenue_previous')
+                    gp_latest = round(rev_latest * margin_pct / 100, 2) if rev_latest and margin_pct else None
+                    gp_previous = round(rev_previous * margin_pct / 100, 2) if rev_previous and margin_pct else None
+                    gross_profits[seg_name] = {
+                        'gross_profit_latest': gp_latest,
+                        'gross_profit_previous': gp_previous,
+                    }
+                    break
+
+        return gross_profits
 
     def _analyze_vbp(self, text, prospectus_info=None):
         sector = 'unknown'

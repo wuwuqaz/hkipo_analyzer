@@ -296,6 +296,7 @@ def export_pdf_report(results, output_file):
             cornerstone_total_usd = prospectus_info.get('cornerstone_investment_usd_million')
             cornerstone_offer_ratio_pct = prospectus_info.get('cornerstone_offer_ratio_pct') or cornerstone_analysis.get('cornerstone_pct')
             valuation = prospectus_info.get('valuation', {}) or {}
+            cashflow = prospectus_info.get('cashflow', {}) or {}
             global_offer_shares = prospectus_info.get('global_offer_shares')
             hk_offer_shares = prospectus_info.get('hk_offer_shares')
             intl_offer_shares = prospectus_info.get('international_offer_shares')
@@ -312,6 +313,8 @@ def export_pdf_report(results, output_file):
             if market_cap_million is not None and gross_proceeds_million is not None:
                 ipo_pre_valuation_million = max(0, market_cap_million - gross_proceeds_million)
             pe_ratio = valuation.get('adjusted_pe_ratio') or valuation.get('pe_ratio')
+            ev_sales_ratio = valuation.get('ev_sales_ratio')
+            ipo_valuation_premium_pct = valuation.get('ipo_valuation_premium_pct')
 
             global_offer_lots = None
             hk_offer_lots = None
@@ -389,6 +392,8 @@ def export_pdf_report(results, output_file):
             add_pair("IPO前估值", _fmt_hkd_billion(ipo_pre_valuation_million), "总市值", _fmt_hkd_billion(market_cap_million), "#ffffff", l_color=_C['red'], r_color=_C['red'], l_bold=True, r_bold=True)
             add_pair("募集(公开)", _fmt_hkd_billion(gross_proceeds_million), "净募集", _fmt_hkd_billion(net_proceeds_million), _C['green_light'])
             add_pair("发行比例", f"{issuance_ratio_pct:.2f}%" if issuance_ratio_pct is not None else "--", "市盈率", f"{pe_ratio:.2f}x" if pe_ratio is not None else "--", "#ffffff")
+            add_pair("EV/Sales", f"{ev_sales_ratio:.2f}x" if ev_sales_ratio is not None else "--", "IPO溢价", f"{ipo_valuation_premium_pct:.1f}%" if ipo_valuation_premium_pct is not None else "--", _C['blue_bg'])
+            add_pair("营运资本趋势", cashflow.get("working_capital_trend_label") or "--", "现金流质量", cashflow.get("cash_quality_label") or "--", _C['blue_bg'])
             add_pair("基石投资", cornerstone_value, "基石占比", f"{cornerstone_offer_ratio_pct:.2f}%" if cornerstone_offer_ratio_pct is not None else "--", _C['blue_bg'])
 
             tbl = Table(rows, colWidths=[100, 150, 100, 150], hAlign="LEFT")
@@ -426,6 +431,10 @@ def export_pdf_report(results, output_file):
                 ('float_structure', '筹码弹性', _C['blue']),
                 ('cornerstone_quality', '基石质量', _C['gold']),
                 ('valuation_reading', '估值解释', _C['amber']),
+                ('market_heat', '实时热度', _C['teal']),
+                ('sector_flow', '板块资金流', _C['green']),
+                ('sector_momentum', '板块动能', _C['blue']),
+                ('sector_board', '板块指数', _C['navy']),
                 ('theme_bonus', '主题催化', _C['purple']),
                 ('liquidity_bonus', '港股通路径', _C['teal']),
                 ('data_confidence', '数据置信度', _C['green']),
@@ -475,6 +484,131 @@ def export_pdf_report(results, output_file):
                 ("RIGHTPADDING", (0, 0), (-1, -1), 6),
                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(_C['slate_50'])]),
                 *row_styles,
+            ]))
+            return tbl
+
+        def build_overview_table(ipo):
+            prospectus_info = ipo.get('prospectus_info', {}) or {}
+            valuation = prospectus_info.get('valuation', {}) or {}
+            cashflow = prospectus_info.get('cashflow', {}) or {}
+            business_breakdown = prospectus_info.get('business_breakdown', {}) or {}
+            rnd_pipeline = prospectus_info.get('rnd_pipeline', {}) or {}
+            cornerstone_analysis = prospectus_info.get('cornerstone_analysis', {}) or {}
+            live_heat = ipo.get('live_market_heat') or (ipo.get('signal_breakdown') or {}).get('market_heat') or {}
+
+            def _text(value, limit=42):
+                text = str(value if value is not None else '--')
+                text = text if len(text) <= limit else text[:limit - 3] + '...'
+                return xml_escape(text)
+
+            rows = [
+                [
+                    Paragraph("<b>总览判断</b>", styles["TableHeader"]),
+                    Paragraph("<b>关键标签</b>", styles["TableHeader"]),
+                    Paragraph("<b>补充说明</b>", styles["TableHeader"]),
+                ]
+            ]
+            key_labels = [
+                valuation.get("valuation_label", "--"),
+                cornerstone_analysis.get("label", "--"),
+                cashflow.get("working_capital_trend_label", "--"),
+                cashflow.get("working_capital_pressure_label", "--"),
+                live_heat.get("sector_heat_label", "--"),
+                live_heat.get("sector_board_label", "--"),
+                live_heat.get("sector_momentum_label", "--"),
+            ]
+            notes = []
+            if prospectus_info.get("is_chapter_18c") and _is_num(prospectus_info.get("public_offer_clawback_max_pct")):
+                notes.append(f"18C可回拨至{prospectus_info['public_offer_clawback_max_pct']:g}%")
+            elif prospectus_info.get("public_offer_ratio_pct") is not None:
+                notes.append(f"公开发售{prospectus_info['public_offer_ratio_pct']:.1f}%")
+            if business_breakdown.get("business_model_label"):
+                notes.append(str(business_breakdown.get("business_model_label")))
+            if rnd_pipeline.get("hardtech_moat_label"):
+                notes.append(f"护城河{rnd_pipeline.get('hardtech_moat_label')}")
+            if cashflow.get("working_capital_trend_reasons"):
+                notes.append("；".join(cashflow.get("working_capital_trend_reasons", [])[:2]))
+            if cashflow.get("working_capital_pressure_reasons"):
+                notes.append("；".join(cashflow.get("working_capital_pressure_reasons", [])[:2]))
+            if live_heat.get("sector_flow_label") and live_heat.get("sector_flow_label") != "缺失":
+                notes.append(f"资金流{live_heat.get('sector_flow_label')}")
+            if live_heat.get("sector_board_label") and live_heat.get("sector_board_label") != "缺失":
+                notes.append(f"板块指数{live_heat.get('sector_board_label')}")
+
+            rows.append([
+                Paragraph(_text(ipo.get("subscription_recommendation") or "--", 18), styles["Value"]),
+                Paragraph(_text(" · ".join(str(item) for item in key_labels if item and item != "缺失"), 80), styles["MutedValue"]),
+                Paragraph(_text("；".join(notes) if notes else "--", 120), styles["MutedValue"]),
+            ])
+
+            tbl = Table(rows, colWidths=[84, 170, 266], hAlign="LEFT")
+            tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_C['slate_100'])),
+                ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor(_C['slate_200'])),
+                ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor(_C['slate_200'])),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ]))
+            return tbl
+
+        def build_evidence_section(ipo):
+            prospectus_info = ipo.get('prospectus_info', {}) or {}
+            cornerstone_analysis = prospectus_info.get('cornerstone_analysis', {}) or {}
+            sections = []
+
+            def _compact_text(value, limit):
+                text = re.sub(r'\s+', ' ', str(value or '')).strip()
+                if len(text) > limit:
+                    text = text[:limit - 3] + '...'
+                return xml_escape(text)
+
+            cornerstone_excerpt = cornerstone_analysis.get('source_excerpt') or cornerstone_analysis.get('raw_pdf_excerpt') or ''
+            if cornerstone_excerpt:
+                sections.append(('基石原文', cornerstone_excerpt))
+
+            business_excerpt = (prospectus_info.get('business_breakdown', {}) or {}).get('evidence_excerpt') or ''
+            if business_excerpt:
+                sections.append(('业务分部', business_excerpt))
+
+            cashflow_excerpt = (prospectus_info.get('cashflow', {}) or {}).get('evidence_excerpt') or ''
+            if cashflow_excerpt:
+                sections.append(('营运资本', cashflow_excerpt))
+
+            rnd_excerpt = (prospectus_info.get('rnd_pipeline', {}) or {}).get('evidence_excerpt') or ''
+            if rnd_excerpt:
+                sections.append(('研发护城河', rnd_excerpt))
+
+            valuation_excerpt = (prospectus_info.get('valuation', {}) or {}).get('evidence_excerpt') or ''
+            if valuation_excerpt:
+                sections.append(('估值口径', valuation_excerpt))
+
+            if not sections:
+                return None
+
+            rows = [
+                [Paragraph("<b>证据来源</b>", styles["TableHeader"]), Paragraph("<b>原文摘录</b>", styles["TableHeader"])],
+            ]
+            for title, excerpt in sections[:5]:
+                rows.append([
+                    Paragraph(_compact_text(title, 24), styles["Value"]),
+                    Paragraph(_compact_text(excerpt, 220), styles["MutedValue"]),
+                ])
+
+            tbl = Table(rows, colWidths=[88, 422], hAlign="LEFT", repeatRows=1)
+            tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_C['brand'])),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor(_C['slate_200'])),
+                ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor(_C['slate_200'])),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(_C['slate_50'])]),
             ]))
             return tbl
 
@@ -634,6 +768,18 @@ def export_pdf_report(results, output_file):
             ipo_elements.append(signal_breakdown_table)
             ipo_elements.append(Spacer(1, 10))
 
+        overview_table = build_overview_table(ipo)
+        if overview_table:
+            ipo_elements.append(overview_table)
+            ipo_elements.append(Spacer(1, 10))
+
+        evidence_section = build_evidence_section(ipo)
+        if evidence_section:
+            ipo_elements.append(Paragraph("<b>原文证据</b>", styles["Label"]))
+            ipo_elements.append(Spacer(1, 4))
+            ipo_elements.append(evidence_section)
+            ipo_elements.append(Spacer(1, 10))
+
         # --- waterfall 得分拆解 ---
         wp = ipo.get('weight_profile', {}) or {}
         weights = wp.get('weights', {})
@@ -649,7 +795,6 @@ def export_pdf_report(results, output_file):
                 ("基本面", ipo.get('fundamental_score', 0), weights.get('fundamental', 0)),
                 ("估值面", ipo.get('valuation_score', 0), weights.get('valuation', 0)),
                 ("主题面", ipo.get('theme_score', 0), weights.get('theme', 0)),
-                ("数据质量", ipo.get('data_quality_score', 0), weights.get('data_quality', 0)),
             ]
             raw_total = 0
             for title, score, weight in wf_items:

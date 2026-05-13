@@ -62,7 +62,7 @@ def main():
 
     HtmlRenderer.sidebar_header("📊", "港股IPO分析", "IPO Analyzer Pro")
 
-    page_label = st.sidebar.radio("导航", [label for label, _ in PAGE_REGISTRY])
+    page_label = st.sidebar.radio("导航", [label for label, _ in PAGE_REGISTRY], key="_sidebar_nav")
     factory = dict(PAGE_REGISTRY)[page_label]
     try:
         factory().render()

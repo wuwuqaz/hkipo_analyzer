@@ -1,6 +1,6 @@
 # 港股 IPO 打新分析 (hkipo_analyzer)
 
-**当前版本：0.4.1-alpha；状态：开发中，仅供研究参考**
+**当前版本：0.5.0-alpha；状态：开发中，仅供研究参考**
 
 > 🤖 本项目由 AI（Claude Code + deepseek）全流程驱动完成，从需求分析、架构设计、代码实现到测试和部署，均为 AI 自主生成。
 
@@ -55,6 +55,16 @@ hkipo_analyzer/
 │   ├── history.py                  # 历史数据持久化
 │   ├── report.py                   # PDF 报告生成（ReportLab）
 │   ├── table_extraction.py         # 财务表格提取
+│   ├── blogger_monitor/            # 博主观点监控（搜索/过滤/LLM分析/共识汇总）
+│   │   ├── models.py               # 统一 Pydantic 模型
+│   │   ├── config.py               # 配置加载
+│   │   ├── db.py                   # SQLite 存储层
+│   │   ├── searcher.py              # Tavily 搜索封装
+│   │   ├── relevance_filter.py     # 相关性过滤
+│   │   ├── analyzer.py             # LLM 观点提取
+│   │   ├── consensus.py            # 共识汇总
+│   │   ├── service.py              # Service 层编排
+│   │   └── __main__.py             # CLI 入口
 │   └── utils.py                    # 共用工具函数
 ├── scripts/
 │   ├── test_peer_comps.py          # 同行对比单元测试
@@ -120,6 +130,25 @@ hkipo_analyzer/
 综合结论覆盖"偏贵但可解释"、"赛道合理"、"PS辅助"等场景，避免成长型/稀缺赛道公司被简单阈值误判。
 
 ## 更新日志
+
+### 0.5.0-alpha — 2026-05-13
+- **feat: 新增 `blogger_monitor` 子包**：自动搜索和分析港股新股打新博主观点，提供市场情绪参考
+  - `models.py`：SearchResultModel、RelevanceResultModel、BloggerOpinionModel、ConsensusResultModel（统一 Pydantic v2）
+  - `config.py`：从 `.env` 和 `sources.yaml` 加载配置
+  - `db.py`：SQLite 存储层，含 blogger_posts、blogger_analysis、ipo_blogger_consensus 三张表（含 UNIQUE 索引和调试字段）
+  - `searcher.py`：Tavily Search API 封装，支持关键词生成、canonical URL 规范化、API key 缺失优雅降级
+  - `relevance_filter.py`：同名公司过滤、纯公告检测、时效性检查、相关性评分
+  - `analyzer.py`：OpenAI 兼容 LLM API 调用，JSON repair + Pydantic 校验，失败容错
+  - `consensus.py`：加权共识评分（source_weight × recency_weight × relevance_weight × content_quality_weight），coverage_score，data_quality_warning
+  - `service.py`：编排搜索->过滤->分析->共识完整流程
+  - `__main__.py`：CLI 入口，支持 `run`/`search`/`consensus` 子命令
+- **feat: 前端博主观点卡片**：`detail_view.py` 新增 `_render_blogger_consensus`，展示综合情绪、共识分、观点分布、主要理由/风险、代表性文章、调试摘要
+- **feat: 历史页面搜索按钮**：`history_page.py` 新增"🔍 搜索博主观点"按钮，支持手动触发
+- **fix: post_listing.py 中签复盘解析增强**：支持 3 种英文 POOL 表格格式（全额中签/部分中签+N Shares/甲乙组标准格式）
+- **fix: detail_view.py 表格对齐与基础信息**：所有 `<td>` 添加 `padding:8px;text-align:right;`；无 POOL 数据时显示公配信息（公开发售、有效申请、整体中签率）
+- **fix: history.py 评分重算与数据保护**：`prospectus text` 为空时回退到 PDF；重分析 `parse_success=false` 时保留原分数；保护 `post_listing_actual` 数据不被覆盖
+- **fix: Python 3.9 兼容性**：所有 blogger_monitor 模块使用 `Optional[X]`/`Union[X, Y]` 替代 `X | Y` 语法
+- **tests: 新增 7 个测试文件**：`test_blogger_models`、`test_blogger_db`、`test_blogger_searcher`、`test_blogger_relevance_filter`、`test_blogger_analyzer`、`test_blogger_consensus`、`test_blogger_service`，共 92 个测试用例
 
 ### 0.4.1-alpha — 2026-05-09
 - **fix: peer_comps.py _split_peer_samples 修正 fallback 逻辑**：hk_quant >= 2 时只用港股；hk_quant < 2 且 all listed quant >= 2 时 fallback 到 hk + non-HK；仅 1 个样本时标记 `quantitative_basis=single_reference`，避免有 non-HK 数据却误判"样本不足"

@@ -1,6 +1,6 @@
 import re
 import logging
-from ..utils import _is_num, _normalize_gm
+from ..utils import _is_num, _normalize_gm, extract_text_excerpts
 from ..settings import SETTINGS
 from ..industry_router import classify_company
 logger = logging.getLogger(__name__)
@@ -24,6 +24,10 @@ class ValuationAnalyzer:
             'revenue_hkd_million': None,
             'revenue_previous_hkd_million': None,
             'market_cap_hkd_million': None,
+            'ev_sales_ratio': None,
+            'net_cash_hkd_million': None,
+            'pre_ipo_valuation_million': None,
+            'ipo_valuation_premium_pct': None,
             'valuation_price_basis': prospectus_info.get('valuation_price_basis', 'prospectus_price'),
             'indicative_offer_price': prospectus_info.get('indicative_offer_price'),
             'final_offer_price': prospectus_info.get('final_offer_price'),
@@ -33,6 +37,7 @@ class ValuationAnalyzer:
             'final_total_fund': prospectus_info.get('final_total_fund'),
             'final_public_offer': prospectus_info.get('final_public_offer'),
             'market_cap_to_rd_ratio': None,
+            'evidence_excerpt': '',
             'biotech_valuation_label': None,
             'biotech_valuation_reasons': [],
             'biotech_stage_label': None,
@@ -125,6 +130,27 @@ class ValuationAnalyzer:
                 rd_hkd = round(rd_expense * fx, 2)
                 if rd_hkd > 0:
                     result['market_cap_to_rd_ratio'] = round(market_cap_m / rd_hkd, 2)
+
+            cashflow = prospectus_info.get('cashflow') or {}
+            if isinstance(cashflow, dict) and _is_num(cashflow.get('cash_and_cash_equivalents')):
+                result['net_cash_hkd_million'] = round(cashflow['cash_and_cash_equivalents'] * fx, 2)
+            if _is_num(market_cap_m) and _is_num(revenue) and revenue > 0:
+                ev = market_cap_m
+                if _is_num(result.get('net_cash_hkd_million')):
+                    ev = market_cap_m - result['net_cash_hkd_million']
+                result['ev_sales_ratio'] = round(max(ev, 0) / revenue, 2)
+
+            indicative_market_cap = prospectus_info.get('indicative_market_cap_hkd_million')
+            gross_proceeds = prospectus_info.get('final_total_fund')
+            pre_ipo_valuation = None
+            if _is_num(indicative_market_cap):
+                pre_ipo_valuation = indicative_market_cap
+            elif _is_num(market_cap_m) and _is_num(gross_proceeds):
+                pre_ipo_valuation = max(0, market_cap_m - gross_proceeds)
+            if _is_num(pre_ipo_valuation):
+                result['pre_ipo_valuation_million'] = round(pre_ipo_valuation, 2)
+            if _is_num(result.get('pre_ipo_valuation_million')) and result['pre_ipo_valuation_million'] > 0 and _is_num(market_cap_m):
+                result['ipo_valuation_premium_pct'] = round((market_cap_m - result['pre_ipo_valuation_million']) / result['pre_ipo_valuation_million'] * 100, 1)
 
             reasons = []
             pe = result['pe_ratio']
@@ -225,6 +251,7 @@ class ValuationAnalyzer:
                 revenue_small = _is_num(revenue) and revenue < SETTINGS.valuation.biotech_revenue_small
                 if revenue_small:
                     result['revenue_too_small_for_ps'] = True
+                    result['ev_sales_ratio'] = None
                     biotech_reasons.append(f"收入基数极小(HKD M{revenue:.0f})，PS严重失真，仅供参考")
                     biotech_label = "PS辅助/管线估值"
                 elif ps_val is not None and _is_num(revenue) and revenue < SETTINGS.valuation.biotech_revenue_moderate:
@@ -248,6 +275,10 @@ class ValuationAnalyzer:
                     biotech_reasons.append(f"市值/研发费用={rdr:.1f}x")
                     if rdr > SETTINGS.valuation.biotech_market_cap_to_rd_extreme and revenue_small:
                         biotech_reasons.append("市值/R&D极高，需关注估值泡沫风险")
+                if result.get('ev_sales_ratio') is not None:
+                    biotech_reasons.append(f"EV/Sales约{result['ev_sales_ratio']:.1f}x")
+                if result.get('ipo_valuation_premium_pct') is not None:
+                    biotech_reasons.append(f"IPO估值相对前值溢价约{result['ipo_valuation_premium_pct']:.1f}%")
 
                 if result['valuation_profitability_type'] == 'loss_making':
                     biotech_reasons.append("未盈利临床阶段创新药，PE不适用")
@@ -321,6 +352,10 @@ class ValuationAnalyzer:
                 reasons.append(f"P/B {result['pb_ratio']:.1f}x")
             if ps_val is not None:
                 reasons.append(f"PS {ps_val:.1f}x")
+            if result.get('ev_sales_ratio') is not None:
+                reasons.append(f"EV/Sales {result['ev_sales_ratio']:.1f}x")
+            if result.get('ipo_valuation_premium_pct') is not None:
+                reasons.append(f"IPO估值相对前值溢价{result['ipo_valuation_premium_pct']:.1f}%")
             if result.get('market_cap_to_rd_ratio') is not None and is_biotech:
                 reasons.append(f"市值/R&D {result['market_cap_to_rd_ratio']:.1f}x")
             if result.get('cash_runway_years') is not None:
@@ -348,6 +383,29 @@ class ValuationAnalyzer:
                 result['confidence'] = 'exact_table'
             elif _is_num(market_cap_m):
                 result['confidence'] = 'market_cap_only'
+
+            excerpt_text = text or prospectus_info.get('_extracted_text', '') or ''
+            result['evidence_excerpt'] = "\n\n".join(
+                extract_text_excerpts(
+                    excerpt_text,
+                    [
+                        r'\bP/E\b',
+                        r'\bP/B\b',
+                        r'\bP/S\b',
+                        r'EV/Sales',
+                        r'市值',
+                        r'估值',
+                        r'募集',
+                        r'发行价',
+                        r'offer price',
+                        r'final offer price',
+                        r'final market cap',
+                    ],
+                    window=180,
+                    max_chars=900,
+                    limit=3,
+                )
+            )
         except Exception as e:
             logger.warning("%s: %s", type(self).__name__, e)
             result['_error'] = str(e)

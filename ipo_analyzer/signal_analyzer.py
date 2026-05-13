@@ -6,6 +6,17 @@ from .utils import _is_num, _contains_any, SECTOR_KEYWORDS
 from .settings import SETTINGS
 from .cornerstone import get_sovereign_capital, get_top_tier_capital, get_weak_signal_capital
 from .industry_router import classify_company
+from .market_heat import LiveMarketHeatAnalyzer
+
+
+def _score_from_board_heat(label: str) -> int:
+    return {
+        "强势": 6,
+        "热门": 4,
+        "温和": 2,
+        "冷清": 0,
+        "缺失": 0,
+    }.get(label, 0)
 
 
 class SignalComponentAnalyzer:
@@ -66,7 +77,7 @@ class SignalComponentAnalyzer:
             'float_structure': self._analyze_float_structure(ipo, prospectus_info),
             'cornerstone_structure': self._analyze_cornerstone_structure(prospectus_info, text),
             'valuation_framework': self._analyze_valuation_framework(prospectus_info, text),
-            'mainline_beta': self._analyze_mainline_beta(prospectus_info, text),
+            'mainline_beta': self._analyze_mainline_beta(ipo, prospectus_info, text),
             'stock_connect_path': self._analyze_stock_connect_path(prospectus_info, text),
             'data_quality': self._analyze_data_quality(prospectus_info),
         }
@@ -93,6 +104,18 @@ class SignalComponentAnalyzer:
         confidence = 'mixed_rule_keyword' if components['mainline_beta'].get('confidence') == 'keyword_only' else 'rule_based'
         if red_flags:
             confidence = f'{confidence}_with_flags'
+
+        live_heat = components['mainline_beta'].get('live_market_heat') or {}
+        live_heat_label = live_heat.get('sector_heat_label', '缺失')
+        live_heat_score = live_heat.get('sector_heat_score', 0) or 0
+        live_flow_label = live_heat.get('sector_flow_label', '缺失')
+        live_flow_score = live_heat.get('sector_flow_score', 0) or 0
+        live_momentum_label = live_heat.get('sector_momentum_label', '缺失')
+        live_momentum_score = live_heat.get('sector_momentum_score', 0) or 0
+        live_board_label = live_heat.get('sector_board_label', '缺失')
+        live_board_heat_label = live_heat.get('sector_board_heat_label', '缺失')
+        live_board_flow_label = live_heat.get('sector_board_flow_label', '缺失')
+        live_board_change_pct = live_heat.get('sector_board_change_pct')
 
         vm = components['valuation_framework']
         valuation_label = vm.get('label', '')
@@ -127,6 +150,26 @@ class SignalComponentAnalyzer:
                 'detail': vm.get('detail', ''),
                 'label': valuation_label,
             },
+            'market_heat': {
+                'strength': self._strength(live_heat_score, 15, high_ratio=0.7, mid_ratio=0.4),
+                'detail': live_heat.get('sector_heat_detail', '') or components['mainline_beta'].get('detail', ''),
+                'label': live_heat_label,
+            },
+            'sector_flow': {
+                'strength': self._strength(live_flow_score, 8, high_ratio=0.7, mid_ratio=0.4),
+                'detail': live_heat.get('sector_flow_detail', ''),
+                'label': live_flow_label,
+            },
+            'sector_momentum': {
+                'strength': self._strength(live_momentum_score, 8, high_ratio=0.7, mid_ratio=0.4),
+                'detail': live_heat.get('sector_momentum_detail', ''),
+                'label': live_momentum_label,
+            },
+            'sector_board': {
+                'strength': self._strength(_score_from_board_heat(live_board_heat_label), 8, high_ratio=0.7, mid_ratio=0.4),
+                'detail': live_heat.get('sector_board_detail', ''),
+                'label': live_board_label,
+            },
             'theme_bonus': {
                 'strength': self._strength(components['mainline_beta'].get('score', 0), 15, high_ratio=0.67, mid_ratio=0.33),
                 'detail': components['mainline_beta'].get('detail', ''),
@@ -140,7 +183,10 @@ class SignalComponentAnalyzer:
                 'detail': components['data_quality'].get('detail', ''),
                 'red_flags': components['data_quality'].get('red_flags', []),
             },
+            'valuation_driver': None,
         }
+
+        signal_breakdown['valuation_driver'] = self._analyze_valuation_driver(ipo, prospectus_info)
 
         return {
             'signal_breakdown': signal_breakdown,
@@ -151,6 +197,7 @@ class SignalComponentAnalyzer:
             'watch_items': watch_items[:8],
             'hold_strategy': self._build_hold_strategy(score, components, red_flags),
             'confidence': confidence,
+            'live_market_heat': live_heat,
         }
 
     def _analyze_real_money(self, ipo):
@@ -353,8 +400,14 @@ class SignalComponentAnalyzer:
         red_flags = []
 
         growth = None
+        growth_for_peg = None
         if _is_num(revenue) and _is_num(revenue_y1) and revenue_y1 > 0:
             growth = (revenue - revenue_y1) / revenue_y1
+        net_profit_y1 = prospectus_info.get('net_profit_y1')
+        if _is_num(net_profit) and _is_num(net_profit_y1) and net_profit_y1 != 0:
+            growth_for_peg = (net_profit - net_profit_y1) / abs(net_profit_y1)
+        elif growth is not None:
+            growth_for_peg = growth
 
         vt = SETTINGS.valuation
         vsl = SETTINGS.valuation_score
@@ -405,9 +458,11 @@ class SignalComponentAnalyzer:
             else:
                 abs_score = min(6, abs_score)
         elif _is_num(pe) and pe > 0:
-            if growth and growth > SETTINGS.valuation_score.peg_growth_min:
-                peg = pe / (growth * 100)
+            if growth_for_peg is not None and abs(growth_for_peg) > SETTINGS.valuation_score.peg_growth_min:
+                peg = pe / (growth_for_peg * 100)
                 reasons.append(f"PEG约{peg:.2f}")
+                if growth_for_peg == growth and _is_num(net_profit) and _is_num(net_profit_y1) and net_profit_y1 != 0:
+                    reasons.append("使用营收增速替代盈利增速计算PEG")
                 pg = SETTINGS.peg
                 abs_score = 6 if peg < pg.undervalued else (5 if peg < pg.fair else (4 if peg < pg.high else 2))
             elif pe <= vt.pe_fair:
@@ -564,11 +619,55 @@ class SignalComponentAnalyzer:
             label = '估值有垫' if score >= vsl.valuation_high else ('估值可看' if score >= vsl.valuation_mid else ('估值压力' if score > 0 else '缺失'))
         return self._component(score, 20, label, detail, reasons=reasons, red_flags=red_flags)
 
-    def _analyze_mainline_beta(self, prospectus_info, text):
+    def _analyze_mainline_beta(self, ipo, prospectus_info, text):
         sector = prospectus_info.get('sector', 'unknown')
+        peer_comparison = prospectus_info.get('peer_comparison') or {}
+        business_breakdown = prospectus_info.get('business_breakdown') or {}
+        rnd_pipeline = prospectus_info.get('rnd_pipeline') or {}
+        subsector = peer_comparison.get('subsector') or ''
+        business_model_label = business_breakdown.get('business_model_label') or ''
+        hardtech_moat_label = rnd_pipeline.get('hardtech_moat_label') or rnd_pipeline.get('pipeline_quality_label') or ''
+        market_heat = ipo.get('market_heat', '')
+        over_sub_ratio = ipo.get('over_sub_ratio')
+        forecast_over_sub_ratio = ipo.get('forecast_over_sub_ratio')
+        actual_over_sub_ratio = ipo.get('actual_over_sub_ratio')
+        live_heat = ipo.get('live_market_heat') or LiveMarketHeatAnalyzer().analyze(prospectus_info, text, peer_comparison=peer_comparison)
+        live_heat_label = live_heat.get('sector_heat_label', '缺失')
+        live_heat_score = live_heat.get('sector_heat_score', 0) or 0
+        live_flow_label = live_heat.get('sector_flow_label', '缺失')
+        live_flow_score = live_heat.get('sector_flow_score', 0) or 0
+        live_momentum_label = live_heat.get('sector_momentum_label', '缺失')
+        live_momentum_score = live_heat.get('sector_momentum_score', 0) or 0
+        live_board_label = live_heat.get('sector_board_label', '缺失')
+        live_board_heat_label = live_heat.get('sector_board_heat_label', '缺失')
+        live_board_flow_label = live_heat.get('sector_board_flow_label', '缺失')
+        live_board_change_pct = live_heat.get('sector_board_change_pct')
         lower_text = (text or '').lower()
-        keywords = self.MAINLINE_KEYWORDS.get(sector, [])
-        hits = [kw for kw in keywords if kw.lower() in lower_text]
+        keywords = list(self.MAINLINE_KEYWORDS.get(sector, []))
+        if subsector == 'robotics_factory_automation':
+            keywords.extend([
+                'robot body', 'robot bodies', 'robotic solution', 'robotic solutions',
+                'industrial robot', 'automation system', 'scara', 'six-axis', 'parallel robot',
+                'agv', 'amr', 'wafer handling', 'factory automation', '机器人本体', '机器人解决方案',
+                '并联机器人', '移动机器人', '六轴机器人', '晶圆搬运', '控制器', '视觉系统',
+            ])
+        elif subsector == 'ai_drug_delivery_nanomedicine':
+            keywords.extend([
+                'ai drug delivery', 'nanomedicine', 'nanoparticle', 'lipid nanoparticle',
+                'lnp', 'rna formulation', 'targeted delivery', 'drug delivery platform',
+                '18c', 'ai-driven drug',
+            ])
+        elif subsector == 'robotics_visual_perception':
+            keywords.extend([
+                'visual perception', 'machine vision', 'vision system', 'robot vision',
+                '3d vision', '视觉', '机器视觉',
+            ])
+
+        hits = []
+        for kw in keywords:
+            if kw.lower() in lower_text and kw not in hits:
+                hits.append(kw)
+
         mt = SETTINGS.mainline
         score = mt.hardtech_hit if sector == 'hardtech' and hits else 0
         if sector == 'healthcare':
@@ -577,6 +676,56 @@ class SignalComponentAnalyzer:
             score = mt.consumer_hit if hits else mt.consumer_no_hit
         elif sector == 'hardtech' and not hits:
             score = mt.hardtech_no_hit
+
+        market_bonus = 0
+        if market_heat == '极热':
+            market_bonus = 4
+        elif market_heat == '热门':
+            market_bonus = 3
+        elif market_heat == '温和':
+            market_bonus = 1
+        elif _is_num(over_sub_ratio):
+            if over_sub_ratio >= 100:
+                market_bonus = 3
+            elif over_sub_ratio >= 20:
+                market_bonus = 2
+            elif over_sub_ratio >= 5:
+                market_bonus = 1
+
+        if market_bonus and hits:
+            score += market_bonus
+        elif market_bonus and sector in ('healthcare', 'hardtech') and subsector:
+            score += max(1, market_bonus - 1)
+
+        live_market_bonus = 0
+        if live_heat_label == '极热':
+            live_market_bonus = 4
+        elif live_heat_label == '热门':
+            live_market_bonus = 3
+        elif live_heat_label == '温和':
+            live_market_bonus = 1
+        if live_market_bonus:
+            score += live_market_bonus
+        if live_flow_label == '放量':
+            score += 2
+        elif live_flow_label == '活跃':
+            score += 1
+        if live_momentum_label == '强势':
+            score += 2
+        elif live_momentum_label == '上行':
+            score += 1
+        if live_board_heat_label == '强势':
+            score += 2
+        elif live_board_heat_label == '热门':
+            score += 1
+
+        if sector == 'hardtech':
+            if business_model_label in ('机器人本体为主', '机器人解决方案为主'):
+                score += 1
+            if hardtech_moat_label in ('强', '中'):
+                score += 1
+        elif sector == 'healthcare' and subsector:
+            score += 1
 
         # AI drug delivery / nanomedicine / 18C 等稀缺组合额外加分
         ai_delivery_keywords = [
@@ -589,9 +738,91 @@ class SignalComponentAnalyzer:
             score = min(15, score + min(6, ai_hits))
             hits.extend([f'AI_delivery_{i}' for i in range(ai_hits)])
 
-        detail = f"{sector}；关键词{len(hits)}个；需外部行情确认"
-        label = '主线候选' if score >= mt.high_threshold else ('观察赛道' if score >= mt.mid_threshold else '非主线')
-        return self._component(score, 15, label, detail, confidence='keyword_only', reasons=['未接入板块涨幅/成交/南向资金，主线判断为低置信度'])
+        detail_parts = [sector]
+        if subsector:
+            detail_parts.append(f"细分:{subsector.replace('_', ' / ')}")
+        detail_parts.append(f"关键词{len(hits)}个")
+        if market_heat:
+            detail_parts.append(f"热度:{market_heat}")
+        elif _is_num(over_sub_ratio):
+            detail_parts.append(f"超购:{over_sub_ratio:.1f}x")
+        if _is_num(forecast_over_sub_ratio):
+            detail_parts.append(f"预测:{forecast_over_sub_ratio:.1f}x")
+        if _is_num(actual_over_sub_ratio):
+            detail_parts.append(f"实际:{actual_over_sub_ratio:.1f}x")
+        if market_bonus:
+            detail_parts.append(f"热度加成{market_bonus}")
+        if live_heat_label and live_heat_label != '缺失':
+            detail_parts.append(f"同行热度:{live_heat_label}")
+            if live_heat.get('sector_peer_count'):
+                detail_parts.append(f"样本{live_heat['sector_peer_count']}家")
+            if _is_num(live_heat.get('sector_index_change_pct')):
+                detail_parts.append(f"恒指{live_heat['sector_index_change_pct']:+.2f}%")
+            if live_momentum_label != '缺失':
+                detail_parts.append(f"动能:{live_momentum_label}")
+            if live_board_label != '缺失':
+                detail_parts.append(f"板块:{live_board_label}")
+            if live_heat_score:
+                detail_parts.append(f"实时分{live_heat_score}")
+            if live_flow_label != '缺失':
+                detail_parts.append(f"资金流:{live_flow_label}")
+            if live_board_heat_label != '缺失':
+                detail_parts.append(f"板块热度:{live_board_heat_label}")
+            if live_board_flow_label != '缺失':
+                detail_parts.append(f"板块流:{live_board_flow_label}")
+            if _is_num(live_board_change_pct):
+                detail_parts.append(f"板块涨跌{live_board_change_pct:+.2f}%")
+        if business_model_label:
+            detail_parts.append(f"业务:{business_model_label}")
+        if hardtech_moat_label:
+            detail_parts.append(f"护城河:{hardtech_moat_label}")
+
+        reasons = []
+        red_flags = []
+        if hits:
+            reasons.append("赛道关键词与文本匹配")
+        if market_heat:
+            reasons.append(f"招股热度为{market_heat}")
+        elif _is_num(over_sub_ratio):
+            reasons.append(f"超购倍数约{over_sub_ratio:.1f}x")
+        else:
+            reasons.append("未获取公开热度数据，按文本与赛道特征判断")
+        if live_heat_label != '缺失':
+            reasons.append(f"可比公司实时热度为{live_heat_label}")
+            if live_heat.get('sector_peer_median_change_pct') is not None:
+                reasons.append(f"同行中位涨跌约{live_heat['sector_peer_median_change_pct']:+.2f}%")
+            if live_momentum_label != '缺失':
+                reasons.append(f"板块动能为{live_momentum_label}")
+            if live_flow_label != '缺失':
+                reasons.append(f"板块资金流为{live_flow_label}")
+            if live_board_label != '缺失':
+                reasons.append(f"板块指数为{live_board_label}")
+            if live_board_heat_label != '缺失':
+                reasons.append(f"板块指数热度为{live_board_heat_label}")
+            if live_board_flow_label != '缺失':
+                reasons.append(f"板块指数资金流为{live_board_flow_label}")
+        if subsector:
+            reasons.append(f"细分赛道:{subsector.replace('_', ' / ')}")
+        if business_model_label in ('机器人本体为主', '机器人解决方案为主'):
+            reasons.append("业务模型与主线方向一致")
+        if hardtech_moat_label in ('强', '中'):
+            reasons.append("研发/订单/专利信号支持赛道持续性")
+
+        if not hits:
+            red_flags.append("文本中未识别出明显主线词，需谨慎")
+        if sector == 'unknown':
+            red_flags.append("行业未明确，主线判断依赖较弱")
+
+        if market_heat or _is_num(over_sub_ratio) or _is_num(forecast_over_sub_ratio) or _is_num(actual_over_sub_ratio) or live_heat_label != '缺失':
+            confidence = 'market_signal'
+        else:
+            confidence = 'keyword_only'
+
+        score = min(15, score)
+        label = '主线候选' if score >= mt.high_threshold and (hits or market_heat in ('极热', '热门') or market_bonus >= 3) else ('观察赛道' if score >= mt.mid_threshold else '非主线')
+        component = self._component(score, 15, label, '；'.join(detail_parts), confidence=confidence, reasons=reasons, red_flags=red_flags)
+        component['live_market_heat'] = live_heat
+        return component
 
     def _analyze_stock_connect_path(self, prospectus_info, text):
         market_cap = prospectus_info.get('market_cap_hkd_million')
@@ -755,11 +986,69 @@ class SignalComponentAnalyzer:
                 red_flags.append(f"PE极端({pe:.0f}x)，需核对净利润单位")
                 score -= 2
 
+        yoy_anomalies = prospectus_info.get('cashflow', {}).get('yoy_anomalies', [])
+        unexplained_count = 0
+        for anomaly in yoy_anomalies:
+            if anomaly.get('explanation'):
+                reasons.append(f"{anomaly['item']}同比{anomaly['direction']}{anomaly['change_pct']}%，已有解释")
+            else:
+                unexplained_count += 1
+                red_flags.append(f"{anomaly['item']}同比{anomaly['direction']}{anomaly['change_pct']}%，未找到解释")
+        if unexplained_count > 0:
+            score -= min(unexplained_count, 3)
+
         if not red_flags:
             reasons.append("核心财务口径未发现明显异常")
         label = '可信' if score >= vsl.data_quality_high else ('需复核' if score >= vsl.data_quality_mid else '高风险')
         detail = '；'.join(red_flags[:2]) if red_flags else '财务数据通过基础异常检查'
         return self._component(score, 5, label, detail, reasons=reasons, red_flags=red_flags)
+
+    def _analyze_valuation_driver(self, ipo_data, prospectus_info):
+        sector = prospectus_info.get('sector', 'unknown')
+        subsector = (prospectus_info.get('peer_comparison') or {}).get('subsector') or ''
+        valuation = prospectus_info.get('valuation') or {}
+        pe = valuation.get('adjusted_pe_ratio') or valuation.get('pe_ratio')
+        ps = valuation.get('ps_ratio')
+        profitable = prospectus_info.get('profitable')
+
+        subsector_theme_map = {
+            'robotics_factory_automation': '机器人/自动化',
+            'ai_drug_delivery_nanomedicine': 'AI+纳米医药',
+            'robotics_visual_perception': '机器视觉',
+            'ai_chip_semiconductor': 'AI芯片',
+            'innovative_drug_biotech': '创新药',
+            'medical_device_surgery': '医疗器械',
+        }
+        sector_theme_map = {
+            'hardtech': '硬科技',
+            'healthcare': '医药创新',
+        }
+        theme_name = subsector_theme_map.get(subsector, sector_theme_map.get(sector, '主题'))
+
+        if profitable is False and sector in ('hardtech', 'healthcare'):
+            return {
+                'driver_type': 'growth_scarcity',
+                'key_drivers': ['收入增速', '订单可见度', '毛利率维持', f'{theme_name}主题贝塔'],
+                'driver_detail': '该赛道按收入增速+稀缺性定价，不按当期利润',
+            }
+        elif profitable is True and _is_num(pe) and pe > 0 and pe < 20:
+            return {
+                'driver_type': 'profit_value',
+                'key_drivers': ['盈利增长', '股息率', '利润率稳定性'],
+                'driver_detail': '估值以盈利增长和股息回报为锚，关注利润可持续性',
+            }
+        elif sector in ('hardtech', 'healthcare') and _is_num(ps) and ps > 10:
+            return {
+                'driver_type': 'theme_beta',
+                'key_drivers': ['主题动量', '板块资金流', '可比估值'],
+                'driver_detail': '估值由主题热度与资金流驱动，需关注主题持续性',
+            }
+        else:
+            return {
+                'driver_type': 'mixed',
+                'key_drivers': ['盈利增长', '收入增速', '估值安全垫'],
+                'driver_detail': '估值受多因素混合驱动，需综合判断',
+            }
 
     def _build_hold_strategy(self, score, components, red_flags):
         mainline_score = components.get('mainline_beta', {}).get('score', 0)

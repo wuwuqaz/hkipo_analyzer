@@ -1,0 +1,56 @@
+search:
+  provider: tavily
+  max_results_per_keyword: 5
+  site_filters:
+    - xueqiu.com
+    - futunn.com
+    - snowballsecurities.com
+    - longgu.com
+    - zhitongcaijing.com
+    - hkexnews.hk
+  exclude_domains:
+    - youtube.com
+    - tiktok.com
+
+keywords:
+  templates:
+    - "{company_name} IPO分析"
+    - "{company_name} 打新"
+    - "{company_name} 招股"
+    - "{stock_code} HK IPO"
+    - "{company_name} 暗盘"
+    - "{company_name} 孖展"
+    - "{company_name} 一手中签率"
+    - "{company_name} 富途"
+    - "{company_name} 雪球"
+    - "{company_name} 龙龟"
+
+source_weights:
+  xueqiu.com: 1.0
+  futunn.com: 1.0
+  longgu.com: 0.9
+  zhitongcaijing.com: 0.7
+  default: 0.5
+
+relevance:
+  max_article_age_months: 6
+  min_content_length: 200
+  ipo_keywords:
+    - IPO
+    - 打新
+    - 招股
+    - 上市
+    - 中签
+    - 孖展
+    - 暗盘
+    - 港股
+    - HKEX
+  opinion_keywords:
+    - 建议
+    - 推荐
+    - 看好
+    - 看空
+    - 申购
+    - 观点
+    - 分析
+    - 评级

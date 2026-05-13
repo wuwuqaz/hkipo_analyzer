@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from html import unescape
 from typing import Any, Optional
 
@@ -137,25 +137,66 @@ def _extract_labeled_text(text: str, label_pattern: str, values: tuple[str, ...]
 
 def _parse_allocation_pool(text: str, pool_name: str) -> dict[str, Any]:
     rows = []
-    row_pattern = re.compile(
+
+    # 英文POOL表格：逐行解析，支持多种配发格式
+    # 格式A: Y out of Z [applicants] to receive N [H] Shares   (甲组常见)
+    # 格式B: N Shares plus Y out of Z to receive additional M Shares  (乙组部分中签)
+    # 格式C: N Shares   (乙组全额中签)
+    en_row_pattern = re.compile(
         r"([0-9][0-9,]*)\s+([0-9][0-9,]*)\s+"
-        r"([0-9][0-9,]*)\s+out\s+of\s+([0-9][0-9,]*)\s+applicants"
-        r"(?:\s+to\s+receive\s+([0-9][0-9,]*)\s+H\s+Shares)?"
-        r"[\s\S]{0,120}?([0-9]+(?:\.[0-9]+)?)%",
+        r"([\s\S]{0,200}?)"
+        r"([0-9]+(?:\.[0-9]+)?)%",
         re.IGNORECASE,
     )
-    for match in row_pattern.finditer(text or ""):
+    for match in en_row_pattern.finditer(text or ""):
         applied = _to_int(match.group(1))
         valid_apps = _to_int(match.group(2))
-        successful_apps = _to_int(match.group(3))
-        denominator = _to_int(match.group(4))
-        allocated_shares = _to_int(match.group(5))
-        allotment_pct = _to_float(match.group(6))
-        if applied is None or valid_apps is None or successful_apps is None:
+        allotment_text = match.group(3).strip()
+        allotment_pct = _to_float(match.group(4))
+        if applied is None or valid_apps is None:
             continue
-        success_rate_pct = None
-        if denominator:
-            success_rate_pct = round(successful_apps / denominator * 100, 2)
+
+        successful_apps = None
+        allocated_shares = None
+
+        # 格式A: Y out of Z [applicants] to receive N [H] Shares
+        m_a = re.search(
+            r"([0-9][0-9,]*)\s+out\s+of\s+([0-9][0-9,]*)\s+(?:applicants\s+)?"
+            r"(?:to\s+receive\s+([0-9][0-9,]*)\s+(?:H\s+)?Shares)?",
+            allotment_text, re.IGNORECASE,
+        )
+        # 格式B: N Shares plus Y out of Z to receive additional M Shares
+        m_b = re.search(
+            r"([0-9][0-9,]*)\s+(?:H\s+)?Shares\s+plus\s+"
+            r"([0-9][0-9,]*)\s+out\s+of\s+([0-9][0-9,]*)\s+"
+            r"to\s+receive\s+additional\s+([0-9][0-9,]*)\s+(?:H\s+)?Shares",
+            allotment_text, re.IGNORECASE,
+        )
+        # 格式C: N [H] Shares (全额中签)
+        m_c = re.search(
+            r"^([0-9][0-9,]*)\s+(?:H\s+)?Shares$",
+            allotment_text, re.IGNORECASE,
+        )
+
+        if m_b:
+            base_shares = _to_int(m_b.group(1))
+            partial_success = _to_int(m_b.group(2))
+            denominator = _to_int(m_b.group(3))
+            add_shares = _to_int(m_b.group(4))
+            successful_apps = denominator
+            allocated_shares = base_shares + add_shares if base_shares and add_shares else base_shares
+        elif m_a:
+            successful_apps = _to_int(m_a.group(1))
+            denominator = _to_int(m_a.group(2))
+            allocated_shares = _to_int(m_a.group(3))
+        elif m_c:
+            allocated_shares = _to_int(m_c.group(1))
+            successful_apps = valid_apps
+
+        if successful_apps is None:
+            continue
+
+        success_rate_pct = round(successful_apps / valid_apps * 100, 2) if valid_apps else None
         rows.append(
             {
                 "applied_shares": applied,
@@ -166,6 +207,34 @@ def _parse_allocation_pool(text: str, pool_name: str) -> dict[str, Any]:
                 "success_rate_pct": success_rate_pct,
             }
         )
+
+    # 中文POOL表格
+    cn_row_pattern = re.compile(
+        r"([0-9][0-9,]*)\s+([0-9][0-9,]*)\s+"
+        r"([0-9][0-9,]*)\s*(?:份|名)?\s*(?:有效|合资格)?\s*申[请購]"
+        r"[\s\S]{0,60}?([0-9]+(?:\.[0-9]+)?)%",
+    )
+    if not rows:
+        for match in cn_row_pattern.finditer(text or ""):
+            applied = _to_int(match.group(1))
+            valid_apps = _to_int(match.group(2))
+            successful_apps = _to_int(match.group(3))
+            allotment_pct = _to_float(match.group(4))
+            if applied is None or valid_apps is None or successful_apps is None:
+                continue
+            success_rate_pct = None
+            if valid_apps:
+                success_rate_pct = round(successful_apps / valid_apps * 100, 2)
+            rows.append(
+                {
+                    "applied_shares": applied,
+                    "valid_applications": valid_apps,
+                    "successful_applications": successful_apps,
+                    "allocated_shares": None,
+                    "allotment_pct": allotment_pct,
+                    "success_rate_pct": success_rate_pct,
+                }
+            )
 
     valid_total = sum(row["valid_applications"] for row in rows)
     successful_total = sum(row["successful_applications"] for row in rows)
@@ -186,81 +255,152 @@ def parse_allotment_text(text: str) -> dict[str, Any]:
         return result
 
     compact = re.sub(r"[ \t]+", " ", text)
-    hk_section = _section(
-        compact,
-        r"ALLOTMENT RESULTS DETAILS\s+HONG KONG PUBLIC OFFERING|HONG KONG PUBLIC OFFERING",
-        r"\n\s*INTERNATIONAL OFFERING\b",
-    )
-    intl_section = _section(compact, r"\n\s*INTERNATIONAL OFFERING\b")
 
-    offer_price = _extract_labeled_number(compact, r"Final\s+Offer\s+Price")
-    if offer_price is not None:
-        result["final_offer_price"] = offer_price
+    is_chinese = bool(re.search(r'配发结果|香港公开发售|甲组|乙组|国际配售|公开发售', compact))
 
-    listing_match = re.search(
-        r"Dealings\s+commencement\s+date\s*([A-Z][a-z]{2,9}\s+\d{1,2},\s+\d{4})",
-        compact,
-        re.IGNORECASE,
-    )
-    if not listing_match:
+    if is_chinese:
+        hk_section = _section(
+            compact,
+            r"香\s*港\s*公\s*开\s*发\s*售|公\s*开\s*发\s*售\s*结\s*果",
+            r"\n\s*国\s*际\s*配\s*售\b",
+        )
+        intl_section = _section(compact, r"\n\s*国\s*际\s*配\s*售\b")
+    else:
+        hk_section = _section(
+            compact,
+            r"ALLOTMENT RESULTS DETAILS\s+HONG KONG PUBLIC OFFERING|HONG KONG PUBLIC OFFERING",
+            r"\n\s*INTERNATIONAL OFFERING\b",
+        )
+        intl_section = _section(compact, r"\n\s*INTERNATIONAL OFFERING\b")
+
+    if is_chinese:
+        offer_price = _extract_labeled_number(compact, r"最\s*终\s*发\s*售\s*价|最\s*终\s*发\s*行\s*价")
+        if offer_price is not None:
+            result["final_offer_price"] = offer_price
+
         listing_match = re.search(
-            r"expected\s+to\s+be\s+on\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*"
-            r"([A-Z][a-z]{2,9}\s+\d{1,2},\s+\d{4})",
+            r"(?:上\s*市|开\s*始买\s*卖)\s*日\s*期?\s*[:：]?\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
+            compact,
+        )
+        if listing_match:
+            result["listing_date"] = f"{listing_match.group(1)}-{int(listing_match.group(2)):02d}-{int(listing_match.group(3)):02d}"
+
+        valid = _extract_labeled_number(hk_section or compact, r"有\s*效\s*申\s*请\s*(?:数|数\s*目|份\s*数)")
+        successful = _extract_labeled_number(hk_section or compact, r"成\s*功\s*申\s*请\s*(?:数|数\s*目|人\s*数)")
+        if valid is not None:
+            result["valid_applications"] = int(valid)
+        if successful is not None:
+            result["successful_applications"] = int(successful)
+        if valid and successful is not None:
+            result["overall_success_rate_pct"] = round(successful / valid * 100, 2)
+
+        public_sub = _extract_labeled_number(hk_section or compact, r"认\s*购\s*倍\s*数|超\s*额\s*认\s*购")
+        intl_sub = _extract_labeled_number(intl_section, r"认\s*购\s*倍\s*数|超\s*额\s*认\s*购")
+        placees = _extract_labeled_number(intl_section, r"配\s*售\s*对\s*象\s*(?:数|数\s*目)")
+        if public_sub is not None:
+            result["public_subscription_level"] = public_sub
+        if intl_sub is not None:
+            result["international_subscription_level"] = intl_sub
+        if placees is not None:
+            result["placees_count"] = int(placees)
+
+        reallocation = _extract_labeled_text(
+            hk_section or compact, r"回\s*拨",
+            ("是", "已", "Yes", "No", "否"),
+        )
+        if reallocation:
+            result["reallocation"] = reallocation
+
+        share_patterns_cn = {
+            "initial_hk_offer_shares": (
+                r"香\s*港\s*公\s*开\s*发\s*售\s*初\s*始\s*(?:股\s*份|发\s*售\s*股)\s*数",
+            ),
+            "final_hk_offer_shares": (
+                r"香\s*港\s*公\s*开\s*发\s*售\s*最\s*终\s*(?:股\s*份|发\s*售\s*股)\s*数",
+            ),
+            "final_international_offer_shares": (
+                r"国\s*际\s*配\s*售\s*最\s*终\s*(?:股\s*份|发\s*售\s*股)\s*数",
+            ),
+        }
+        for key, patterns in share_patterns_cn.items():
+            for pattern in patterns:
+                value = _extract_labeled_number(compact, pattern, max_gap=240)
+                if value is not None:
+                    result[key] = int(value)
+                    break
+
+        pool_a = _section(compact, r"\b甲\s*组\b", r"\b乙\s*组\b")
+        pool_b = _section(compact, r"\b乙\s*组\b", r"乙\s*组\s*成\s*功\s*申\s*请\s*人\s*总\s*数|\n\s*截\s*至|\n\s*收\s*款")
+    else:
+        offer_price = _extract_labeled_number(compact, r"Final\s+Offer\s+Price")
+        if offer_price is not None:
+            result["final_offer_price"] = offer_price
+
+        listing_match = re.search(
+            r"Dealings\s+commencement\s+date\s*([A-Z][a-z]{2,9}\s+\d{1,2},\s+\d{4})",
             compact,
             re.IGNORECASE,
         )
-    if listing_match:
-        parsed_date = _parse_english_date(listing_match.group(1))
-        result["listing_date"] = parsed_date or listing_match.group(1)
+        if not listing_match:
+            listing_match = re.search(
+                r"expected\s+to\s+be\s+on\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*"
+                r"([A-Z][a-z]{2,9}\s+\d{1,2},\s+\d{4})",
+                compact,
+                re.IGNORECASE,
+            )
+        if listing_match:
+            parsed_date = _parse_english_date(listing_match.group(1))
+            result["listing_date"] = parsed_date or listing_match.group(1)
 
-    valid = _extract_labeled_number(hk_section or compact, r"No\.\s+of\s+valid\s+applications")
-    successful = _extract_labeled_number(
-        hk_section or compact, r"No\.\s+of\s+successful\s+applications"
-    )
-    if valid is not None:
-        result["valid_applications"] = int(valid)
-    if successful is not None:
-        result["successful_applications"] = int(successful)
-    if valid and successful is not None:
-        result["overall_success_rate_pct"] = round(successful / valid * 100, 2)
+        valid = _extract_labeled_number(hk_section or compact, r"No\.\s+of\s+valid\s+applications")
+        successful = _extract_labeled_number(
+            hk_section or compact, r"No\.\s+of\s+successful\s+applications"
+        )
+        if valid is not None:
+            result["valid_applications"] = int(valid)
+        if successful is not None:
+            result["successful_applications"] = int(successful)
+        if valid and successful is not None:
+            result["overall_success_rate_pct"] = round(successful / valid * 100, 2)
 
-    public_sub = _extract_labeled_number(hk_section or compact, r"Subscription\s+level")
-    intl_sub = _extract_labeled_number(intl_section, r"Subscription\s+Level")
-    placees = _extract_labeled_number(intl_section, r"No\.\s+of\s+placees")
-    if public_sub is not None:
-        result["public_subscription_level"] = public_sub
-    if intl_sub is not None:
-        result["international_subscription_level"] = intl_sub
-    if placees is not None:
-        result["placees_count"] = int(placees)
+        public_sub = _extract_labeled_number(hk_section or compact, r"Subscription\s+level")
+        intl_sub = _extract_labeled_number(intl_section, r"Subscription\s+Level")
+        placees = _extract_labeled_number(intl_section, r"No\.\s+of\s+placees")
+        if public_sub is not None:
+            result["public_subscription_level"] = public_sub
+        if intl_sub is not None:
+            result["international_subscription_level"] = intl_sub
+        if placees is not None:
+            result["placees_count"] = int(placees)
 
-    reallocation = _extract_labeled_text(hk_section or compact, r"Reallocation", ("Yes", "No"))
-    if reallocation:
-        result["reallocation"] = reallocation
+        reallocation = _extract_labeled_text(hk_section or compact, r"Reallocation", ("Yes", "No"))
+        if reallocation:
+            result["reallocation"] = reallocation
 
-    share_patterns = {
-        "initial_hk_offer_shares": (
-            r"No\.\s+of\s+Offer\s+Shares\s+initially\s+available\s+under\s+the\s+Hong\s+Kong\s+Public\s+Offering",
-            r"Number\s+of\s+Hong\s+Kong\s+Offer\s+Shares",
-        ),
-        "final_hk_offer_shares": (
-            r"Final\s+(?:no\.|Number)\s+of\s+Offer\s+Shares\s+(?:under|in)\s+(?:the\s+)?Hong\s+Kong\s+Public\s+Offering",
-            r"Final\s+Number\s+of\s+Offer\s+Shares\s+in\s+Hong\s+Kong\s+Public\s+Offering",
-        ),
-        "final_international_offer_shares": (
-            r"Final\s+(?:no\.|Number)\s+of\s+Offer\s+Shares\s+(?:under|in)\s+(?:the\s+)?International\s+Offering",
-            r"Final\s+Number\s+of\s+Offer\s+Shares\s+in\s+International\s+Offering",
-        ),
-    }
-    for key, patterns in share_patterns.items():
-        for pattern in patterns:
-            value = _extract_labeled_number(compact, pattern, max_gap=240)
-            if value is not None:
-                result[key] = int(value)
-                break
+        share_patterns = {
+            "initial_hk_offer_shares": (
+                r"No\.\s+of\s+Offer\s+Shares\s+initially\s+available\s+under\s+the\s+Hong\s+Kong\s+Public\s+Offering",
+                r"Number\s+of\s+Hong\s+Kong\s+Offer\s+Shares",
+            ),
+            "final_hk_offer_shares": (
+                r"Final\s+(?:no\.|Number)\s+of\s+Offer\s+Shares\s+(?:under|in)\s+(?:the\s+)?Hong\s+Kong\s+Public\s+Offering",
+                r"Final\s+Number\s+of\s+Offer\s+Shares\s+in\s+Hong\s+Kong\s+Public\s+Offering",
+            ),
+            "final_international_offer_shares": (
+                r"Final\s+(?:no\.|Number)\s+of\s+Offer\s+Shares\s+(?:under|in)\s+(?:the\s+)?International\s+Offering",
+                r"Final\s+Number\s+of\s+Offer\s+Shares\s+in\s+International\s+Offering",
+            ),
+        }
+        for key, patterns in share_patterns.items():
+            for pattern in patterns:
+                value = _extract_labeled_number(compact, pattern, max_gap=240)
+                if value is not None:
+                    result[key] = int(value)
+                    break
 
-    pool_a = _section(compact, r"\bPOOL\s+A\b", r"\bPOOL\s+B\b")
-    pool_b = _section(compact, r"\bPOOL\s+B\b", r"Total\s+number\s+of\s+Pool\s+B\s+successful\s+applicants|\n\s*As\s+of\s+the\s+date|\n\s*COLLECTION")
+        pool_a = _section(compact, r"\bPOOL\s+A\b", r"\bPOOL\s+B\b")
+        pool_b = _section(compact, r"\bPOOL\s+B\b", r"Total\s+number\s+of\s+Pool\s+B\s+successful\s+applicants|\n\s*As\s+of\s+the\s+date|\n\s*COLLECTION")
+
     allocation_pools = {}
     parsed_pool_a = _parse_allocation_pool(pool_a, "A")
     parsed_pool_b = _parse_allocation_pool(pool_b, "B")
@@ -299,6 +439,27 @@ def parse_allotment_text(text: str) -> dict[str, Any]:
         result.setdefault("one_lot_successful_applications", first_row.get("successful_applications"))
         result.setdefault("one_lot_success_rate_pct", first_row.get("success_rate_pct"))
 
+    # 中文一手中签率补充提取 (如果尚未获取)
+    if result.get('one_lot_success_rate_pct') is None:
+        cn_one_lot_patterns = [
+            # 一手中籤率 N%
+            re.compile(r'一\s*手\s*(?:中\s*籤|中\s*签|申\s*请)\s*率\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*%', re.IGNORECASE),
+            # 申购N股 中籤率 N%
+            re.compile(r'申\s*[请購]\s*[0-9,]+\s*股[\s\S]{0,60}?(中\s*籤|中\s*签)\s*率\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*%', re.IGNORECASE),
+            # 申请N股 ... N%
+            re.compile(r'申\s*[请購]\s*[0-9,]+\s*[股份][\s\S]{0,80}?([0-9]+(?:\.[0-9]+)?)\s*%', re.IGNORECASE),
+        ]
+        for pat in cn_one_lot_patterns:
+            m = pat.search(hk_section or compact)
+            if m:
+                if m.lastindex == 2:
+                    val = _to_float(m.group(2))
+                else:
+                    val = _to_float(m.group(1))
+                if val is not None:
+                    result['one_lot_success_rate_pct'] = val
+                    break
+
     return result
 
 
@@ -324,7 +485,7 @@ def _parse_jsonp(text: str) -> dict[str, Any]:
         return {}
 
 
-def _fetch_stock_id(stock_code: str) -> Optional[str]:
+def _fetch_stock_id(stock_code: str, lang: str = "EN") -> Optional[str]:
     display_code = _display_stock_code(stock_code)
     if not display_code:
         return None
@@ -333,7 +494,7 @@ def _fetch_stock_id(stock_code: str) -> Optional[str]:
         HKEX_PREFIX_URL,
         params={
             "callback": "callback",
-            "lang": "EN",
+            "lang": lang,
             "market": "SEHK",
             "type": "A",
             "name": display_code,
@@ -380,7 +541,7 @@ def _is_ipo_allotment_row(row: dict[str, Any], stock_code: str) -> bool:
         return False
 
     text = (row.get("text") or "").lower()
-    if "allotment results" not in text:
+    if "allotment results" not in text and "配发结果" not in text:
         return False
 
     non_ipo_keywords = (
@@ -389,6 +550,8 @@ def _is_ipo_allotment_row(row: dict[str, Any], stock_code: str) -> bool:
         "completion of the rights",
         "results of the rights",
         "placing / rights issue",
+        "供股",
+        "公开配售结果",
     )
     if any(keyword in text for keyword in non_ipo_keywords):
         return False
@@ -398,30 +561,35 @@ def _is_ipo_allotment_row(row: dict[str, Any], stock_code: str) -> bool:
         "global offering",
         "public offering",
         "announcement of allotment results",
+        "最终发售价",
+        "全球发售",
+        "公开发售",
+        "配发结果公告",
     )
     return any(keyword in text for keyword in ipo_keywords)
 
 
 def _find_from_title_search(stock_code: str) -> Optional[dict[str, Any]]:
-    stock_id = _fetch_stock_id(stock_code)
-    if not stock_id:
-        return None
-    response = _retry_request(
-        httpx.get,
-        HKEX_TITLE_SEARCH_URL,
-        params={
-            "lang": "EN",
-            "market": "SEHK",
-            "stockId": stock_id,
-            "category": "0",
-        },
-        timeout=30,
-        follow_redirects=True,
-    )
-    for row in _parse_hkex_rows(response.text):
-        if _is_ipo_allotment_row(row, stock_code):
-            row["source"] = "hkex_title_search"
-            return row
+    for lang in ("EN", "ZH"):
+        stock_id = _fetch_stock_id(stock_code, lang=lang)
+        if not stock_id:
+            continue
+        response = _retry_request(
+            httpx.get,
+            HKEX_TITLE_SEARCH_URL,
+            params={
+                "lang": lang,
+                "market": "SEHK",
+                "stockId": stock_id,
+                "category": "0",
+            },
+            timeout=30,
+            follow_redirects=True,
+        )
+        for row in _parse_hkex_rows(response.text):
+            if _is_ipo_allotment_row(row, stock_code):
+                row["source"] = f"hkex_title_search_{lang}"
+                return row
     return None
 
 
@@ -735,13 +903,24 @@ def track_post_listing(
 
 def _is_ended_record(record: dict[str, Any]) -> bool:
     value = (record or {}).get("apply_end_date")
-    if not value:
-        return False
-    text = str(value).split("T", 1)[0].split(" ", 1)[0]
-    try:
-        return datetime.strptime(text, "%Y-%m-%d").date() < date.today()
-    except Exception:
-        return False
+    if value:
+        text = str(value).split("T", 1)[0].split(" ", 1)[0]
+        try:
+            return datetime.strptime(text, "%Y-%m-%d").date() <= date.today()
+        except Exception:
+            pass
+
+    listing_date = (record or {}).get("listing_date")
+    if not listing_date:
+        listing_date = ((record or {}).get("prospectus_info") or {}).get("listing_date")
+    if listing_date:
+        text = str(listing_date).split("T", 1)[0].split(" ", 1)[0]
+        try:
+            return datetime.strptime(text, "%Y-%m-%d").date() <= date.today() + timedelta(days=1)
+        except Exception:
+            pass
+
+    return False
 
 
 def track_ended_ipos(

@@ -174,9 +174,6 @@ def test_consumer_mfg_profitable_pe_driven():
     # 主题分不应过高（consumer 赛道，非主线）
     assert scoring['theme_score'] <= 60, f"消费公司主题分不应过高，实际 {scoring['theme_score']}"
 
-    # 数据质量分应高（财务数据完整）
-    assert scoring['data_quality_score'] >= 60, f"完整财务数据质量分应≥60，实际 {scoring['data_quality_score']}"
-
     print(f"✅ test_consumer_mfg_profitable_pe_driven passed (score={scoring['score']}, "
           f"fundamental={scoring['fundamental_score']}, theme={scoring['theme_score']}, "
           f"valuation={scoring['valuation_score']})")

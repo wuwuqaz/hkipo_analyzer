@@ -69,9 +69,8 @@ class ScoringWeights:
     market_max: int = 5
     cornerstone_max: int = 20
     # 长期评分组合权重
-    long_fundamental_w: float = 0.50
+    long_fundamental_w: float = 0.63
     long_valuation_w: float = 0.22
-    long_data_quality_w: float = 0.13
     long_customer_quality_w: float = 0.12
     long_theme_w: float = 0.03
     long_cash_weak_penalty: int = 4
@@ -80,14 +79,14 @@ class ScoringWeights:
     # 权重配置文件
     live_heat_trade: float = 0.35
     live_heat_fundamental: float = 0.30
+    live_heat_data_quality: float = 0.05
     live_heat_valuation: float = 0.20
     live_heat_theme: float = 0.10
-    live_heat_dq: float = 0.05
     prospectus_trade: float = 0.20
     prospectus_fundamental: float = 0.35
+    prospectus_data_quality: float = 0.10
     prospectus_valuation: float = 0.20
     prospectus_theme: float = 0.15
-    prospectus_dq: float = 0.10
 
     # 客户质量评分阈值
     customer_supply_chain_high: int = 25
@@ -293,6 +292,9 @@ class BusinessBreakdownThresholds:
     new_biz_revenue_ratio_max: float = 0.3
     new_biz_total_share_min: float = 10.0
     main_segment_dominance_pct: float = 70.0
+    gross_margin_high: float = 60.0
+    gross_margin_low: float = 20.0
+    profit_revenue_mismatch_threshold: float = 15.0
 
 
 @dataclass
@@ -311,6 +313,23 @@ class CashFlowThresholds:
     ocf_np_strong: float = 1.0
     ocf_np_fair: float = 0.5
     inventory_days_warning: float = 200.0
+
+
+@dataclass
+class ShareholderThresholds:
+    """Pre-IPO融资与股东分析阈值"""
+    ipo_premium_high: float = 50.0
+    ipo_premium_moderate: float = 20.0
+    controlling_concentrated: float = 30.0
+
+
+@dataclass
+class OrderBacklogThresholds:
+    """订单可见度分析阈值"""
+    order_ratio_strong: float = 2.0
+    order_ratio_moderate: float = 1.0
+    backlog_months_strong: float = 12.0
+    backlog_months_moderate: float = 6.0
 
 
 @dataclass
@@ -434,6 +453,8 @@ class Settings:
     business_breakdown: BusinessBreakdownThresholds = field(default_factory=BusinessBreakdownThresholds)
     geographic: GeographicThresholds = field(default_factory=GeographicThresholds)
     cash_flow: CashFlowThresholds = field(default_factory=CashFlowThresholds)
+    shareholder: ShareholderThresholds = field(default_factory=ShareholderThresholds)
+    order_backlog: OrderBacklogThresholds = field(default_factory=OrderBacklogThresholds)
     cache: CacheConfig = field(default_factory=CacheConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
     file: FileConfig = field(default_factory=FileConfig)

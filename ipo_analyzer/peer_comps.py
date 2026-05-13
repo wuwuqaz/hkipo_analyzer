@@ -546,8 +546,16 @@ def _extract_keywords_subsector(prospectus_info, text, peer_data=None):
     seg_text = " ".join(s.get("name", "") for s in biz.get("segments", []))
     rnd = prospectus_info.get("rnd_pipeline", {}) or {}
     rd_text = rnd.get("pipeline_quality_label", "") or ""
+    hardtech_text = " ".join([
+        str(biz.get("business_model_label", "")),
+        str(biz.get("segment_moat_label", "")),
+        " ".join(rnd.get("hardtech_moat_reasons", []) or []),
+        str(rnd.get("industry_rank", "")),
+        str(rnd.get("market_size_notes", "")),
+    ])
     combined = " ".join([
         text or "", seg_text, rd_text,
+        hardtech_text,
         prospectus_info.get("sector", ""),
         str(biz.get("growth_source", "")),
     ]).lower()
@@ -798,7 +806,7 @@ def _calc_valuation_position(company_ps, peer_median_ps, scarcity, premium):
 
 def _calc_business_line_weighted_peer_ps(prospectus_info, matched_peers, subsector_key):
     """For mixed robotics issuers, value perception and mower lines separately."""
-    if subsector_key != "robotics_visual_perception":
+    if subsector_key not in ("robotics_visual_perception", "robotics_factory_automation"):
         return None
     biz = prospectus_info.get("business_breakdown") or {}
     segments = biz.get("segments") or []
@@ -806,17 +814,35 @@ def _calc_business_line_weighted_peer_ps(prospectus_info, matched_peers, subsect
         return None
 
     groups = {
-        "visual_perception": {
-            "label": "视觉感知业务",
-            "segment_keywords": ("visual", "perception", "sensor", "algorithm"),
-            "peer_tags": ("lidar", "perception", "sensor"),
+        "robot_body": {
+            "label": "机器人本体",
+            "segment_keywords": ("robot body", "industrial robot", "scara", "six-axis", "parallel robot", "wafer handling", "机器人本体", "工业机器人"),
+            "peer_tags": ("industrial robot", "robot body", "robotics", "automation", "cobot"),
         },
-        "robot_lawn_mower": {
-            "label": "割草机器人业务",
-            "segment_keywords": ("lawn", "mower"),
-            "peer_tags": ("mower", "cleaning robot", "smart home"),
+        "robot_solution": {
+            "label": "机器人解决方案",
+            "segment_keywords": ("robotic solution", "automation system", "agv", "amr", "factory automation", "机器人解决方案", "自动化系统", "移动机器人"),
+            "peer_tags": ("automation", "system integration", "agv", "amr", "robotics"),
+        },
+        "robot_component": {
+            "label": "关键部件",
+            "segment_keywords": ("controller", "vision system", "control", "控制器", "视觉系统"),
+            "peer_tags": ("controller", "vision", "sensor", "sensing", "automation"),
         },
     }
+    if subsector_key == "robotics_visual_perception":
+        groups = {
+            "visual_perception": {
+                "label": "视觉感知业务",
+                "segment_keywords": ("visual", "perception", "sensor", "algorithm"),
+                "peer_tags": ("lidar", "perception", "sensor"),
+            },
+            "robot_lawn_mower": {
+                "label": "割草机器人业务",
+                "segment_keywords": ("lawn", "mower"),
+                "peer_tags": ("mower", "cleaning robot", "smart home"),
+            },
+        }
 
     details = []
     weighted_sum = 0.0
@@ -846,14 +872,16 @@ def _calc_business_line_weighted_peer_ps(prospectus_info, matched_peers, subsect
         if not peer_ps_values:
             continue
         group_median = round(median(peer_ps_values), 2) if len(peer_ps_values) >= 2 else round(peer_ps_values[0], 2)
-        weighted_sum += group_median * share
-        weight_total += share
+        if len(peer_ps_values) >= 2:
+            weighted_sum += group_median * share
+            weight_total += share
         details.append({
             "group": group_key,
             "label": cfg["label"],
             "share_pct": round(share, 1),
             "peer_median_ps": group_median,
             "peer_count": len(peer_ps_values),
+            "single_sample": len(peer_ps_values) < 2,
             "peer_names": peer_names[:6],
             "segment_names": matched_segment_names[:6],
         })
@@ -918,6 +946,179 @@ class PeerComparableAnalyzer:
             self._all_peer_names = _collect_all_peer_names(self.peer_data)
         return self._all_peer_names
 
+    def _extract_market_share_data(self, text):
+        if not text:
+            return []
+        results = []
+        seen_segments = set()
+        share_patterns = [
+            r'(?:market\s+share\s+of|accounted\s+for)\s+([\d.]+)\s*%',
+            r'市占率\s*([\d.]+)\s*%',
+            r'市场份额\s*([\d.]+)\s*%',
+        ]
+        for pat in share_patterns:
+            for m in re.finditer(pat, text, re.IGNORECASE):
+                try:
+                    share_pct = float(m.group(1))
+                except (ValueError, IndexError):
+                    continue
+                start = max(0, m.start() - 150)
+                end = min(len(text), m.end() + 50)
+                context = text[start:end]
+                segment = "unknown"
+                seg_pat = re.search(
+                    r'(?:in\s+the\s+|of\s+the\s+|在|)([\w\u4e00-\u9fff\s]{2,40}?)(?:\s+market|市场|行业|sector|segment)',
+                    context, re.IGNORECASE,
+                )
+                if seg_pat:
+                    segment = seg_pat.group(1).strip()
+                source = None
+                if re.search(r'frost\s*&\s*sullivan', context, re.IGNORECASE):
+                    source = "Frost & Sullivan"
+                key = (segment.lower(), share_pct)
+                if key not in seen_segments:
+                    seen_segments.add(key)
+                    results.append({
+                        "segment": segment,
+                        "share_pct": share_pct,
+                        "rank": None,
+                        "source": source,
+                    })
+        rank_patterns = [
+            (r'ranked\s+(\d+)(?:st|nd|rd|th)\s+in', "en"),
+            (r'排名第\s*(\d+)', "zh"),
+        ]
+        for pat, lang in rank_patterns:
+            for m in re.finditer(pat, text, re.IGNORECASE):
+                try:
+                    rank = int(m.group(1))
+                except (ValueError, IndexError):
+                    continue
+                start = max(0, m.start() - 150)
+                end = min(len(text), m.end() + 50)
+                context = text[start:end]
+                segment = "unknown"
+                if lang == "en":
+                    seg_pat = re.search(
+                        r'in\s+the\s+([\w\s]{2,40}?)(?:\s+market|sector|industry)',
+                        context, re.IGNORECASE,
+                    )
+                else:
+                    seg_pat = re.search(
+                        r'在([\u4e00-\u9fff]{2,40}?)(?:市场|行业|领域)',
+                        context,
+                    )
+                if seg_pat:
+                    segment = seg_pat.group(1).strip()
+                source = None
+                if re.search(r'frost\s*&\s*sullivan', context, re.IGNORECASE):
+                    source = "Frost & Sullivan"
+                matched = False
+                for r_item in results:
+                    if r_item["segment"].lower() == segment.lower():
+                        r_item["rank"] = rank
+                        if source and not r_item["source"]:
+                            r_item["source"] = source
+                        matched = True
+                        break
+                if not matched:
+                    key = (segment.lower(), rank)
+                    if key not in seen_segments:
+                        seen_segments.add(key)
+                        results.append({
+                            "segment": segment,
+                            "share_pct": None,
+                            "rank": rank,
+                            "source": source,
+                        })
+        return results
+
+    def _extract_market_size_data(self, text):
+        if not text:
+            return []
+        results = []
+        seen_segments = set()
+        size_patterns = [
+            r'market\s+size[^.]*?(?:RMB|HKD|USD)\s*([\d,]+\.?\d*)\s*(?:billion|million|bn|m)\b',
+            r'市场规模[^.]*?(?:人民币|港币|美元|RMB|HKD|USD)\s*([\d,]+\.?\d*)\s*(?:亿|万亿|十亿|百万|billion|million)\b',
+        ]
+        for pat in size_patterns:
+            for m in re.finditer(pat, text, re.IGNORECASE):
+                raw_num = m.group(1).replace(",", "")
+                try:
+                    num_val = float(raw_num)
+                except (ValueError, IndexError):
+                    continue
+                start = max(0, m.start() - 150)
+                end = min(len(text), m.end() + 50)
+                context = text[start:end]
+                unit_mult = 1.0
+                if re.search(r'billion|bn|亿|十亿', context, re.IGNORECASE):
+                    unit_mult = 1000.0
+                size_million = num_val * unit_mult
+                segment = "unknown"
+                seg_pat = re.search(
+                    r'(?:in\s+the\s+|of\s+the\s+|在|)([\w\u4e00-\u9fff\s]{2,40}?)(?:\s+market|市场|行业|sector|segment)',
+                    context, re.IGNORECASE,
+                )
+                if seg_pat:
+                    segment = seg_pat.group(1).strip()
+                source = None
+                if re.search(r'frost\s*&\s*sullivan', context, re.IGNORECASE):
+                    source = "Frost & Sullivan"
+                key = (segment.lower(), size_million)
+                if key not in seen_segments:
+                    seen_segments.add(key)
+                    results.append({
+                        "segment": segment,
+                        "size_2025_million": size_million,
+                        "cagr_pct": None,
+                        "source": source,
+                    })
+        cagr_patterns = [
+            r'CAGR[^.]*?([\d.]+)\s*%',
+            r'复合年增长率[^.]*?([\d.]+)\s*%',
+            r'年复合增长率[^.]*?([\d.]+)\s*%',
+        ]
+        for pat in cagr_patterns:
+            for m in re.finditer(pat, text, re.IGNORECASE):
+                try:
+                    cagr_val = float(m.group(1))
+                except (ValueError, IndexError):
+                    continue
+                start = max(0, m.start() - 150)
+                end = min(len(text), m.end() + 50)
+                context = text[start:end]
+                segment = "unknown"
+                seg_pat = re.search(
+                    r'(?:in\s+the\s+|of\s+the\s+|在|)([\w\u4e00-\u9fff\s]{2,40}?)(?:\s+market|市场|行业|sector|segment)',
+                    context, re.IGNORECASE,
+                )
+                if seg_pat:
+                    segment = seg_pat.group(1).strip()
+                source = None
+                if re.search(r'frost\s*&\s*sullivan', context, re.IGNORECASE):
+                    source = "Frost & Sullivan"
+                matched = False
+                for r_item in results:
+                    if r_item["segment"].lower() == segment.lower() and r_item["cagr_pct"] is None:
+                        r_item["cagr_pct"] = cagr_val
+                        if source and not r_item["source"]:
+                            r_item["source"] = source
+                        matched = True
+                        break
+                if not matched:
+                    key = (segment.lower(), cagr_val)
+                    if key not in seen_segments:
+                        seen_segments.add(key)
+                        results.append({
+                            "segment": segment,
+                            "size_2025_million": None,
+                            "cagr_pct": cagr_val,
+                            "source": source,
+                        })
+        return results
+
     def analyze(self, prospectus_info, text='', ipo_data=None):
         """执行同行对比分析"""
         result = {
@@ -946,6 +1147,13 @@ class PeerComparableAnalyzer:
             "peer_candidate_filter_warnings": [],
             "valuation_position": "缺失",
             "scarcity_score": 0, "peer_score": 0,
+            "market_share_data": [],
+            "market_size_data": [],
+            "dominant_segment": None,
+            "dominant_share_pct": None,
+            "scarcity_detail": None,
+            "scarcity_specific_point": None,
+            "scarcity_peers_count": None,
             "summary": "", "warnings": [],
             "semantic_id": "peer_comparison",
         }
@@ -1069,7 +1277,7 @@ class PeerComparableAnalyzer:
                 )
 
         # 市值对比（当 PS/PE 不可用或作为补充参考）
-        company_mc = prospectus_info.get("market_cap_hkd_million") or company_ps  # 尽可能使用
+        company_mc = prospectus_info.get("market_cap_hkd_million")  # 尽可能使用
         if company_ps is None and _is_num(company_mc):
             peer_mc = result.get("peer_median_market_cap")
             result["relative_market_cap_pct"] = _calc_company_market_cap_metric(company_mc, peer_mc)
@@ -1142,6 +1350,60 @@ class PeerComparableAnalyzer:
         if self.meta.get("peer_data_is_stale"):
             result["warnings"].append(
                 f"同行数据已过期({self.meta.get('peer_data_age_days', '?')}天)，建议通过同行库管理页更新"
+            )
+
+        try:
+            result["market_share_data"] = self._extract_market_share_data(text)
+        except Exception as e:
+            logger.warning("市场份额提取异常: %s", e)
+
+        try:
+            result["market_size_data"] = self._extract_market_size_data(text)
+        except Exception as e:
+            logger.warning("市场规模提取异常: %s", e)
+
+        dominant = None
+        for ms in result["market_share_data"]:
+            if ms.get("share_pct") is not None:
+                if dominant is None or ms["share_pct"] > dominant["share_pct"]:
+                    dominant = ms
+        if dominant:
+            result["dominant_segment"] = dominant["segment"]
+            result["dominant_share_pct"] = dominant["share_pct"]
+
+        hk_listed = [p for p in matched if _is_hk_peer(p) and p.get("type") == "listed"]
+        result["scarcity_peers_count"] = len(hk_listed) if hk_listed else q_count
+
+        if result["dominant_share_pct"] is not None and result["dominant_share_pct"] >= 50:
+            detail_parts = [f"在{result['dominant_segment']}市场份额达{result['dominant_share_pct']}%"]
+            if dominant and dominant.get("rank") is not None:
+                detail_parts.append(f"排名第{dominant['rank']}")
+            if dominant and dominant.get("source"):
+                detail_parts.append(f"数据来源: {dominant['source']}")
+            subsector_label = sk or ""
+            if subsector_label:
+                detail_parts.append(f"细分赛道: {subsector_label}")
+            result["scarcity_detail"] = " + ".join(detail_parts)
+        elif result["dominant_share_pct"] is not None and result["dominant_share_pct"] >= 20:
+            detail_parts = [f"在{result['dominant_segment']}市场份额{result['dominant_share_pct']}%"]
+            if dominant and dominant.get("rank") is not None:
+                detail_parts.append(f"排名第{dominant['rank']}")
+            subsector_label = sk or ""
+            if subsector_label:
+                detail_parts.append(f"细分赛道: {subsector_label}")
+            result["scarcity_detail"] = " + ".join(detail_parts)
+
+        if result["scarcity_peers_count"] is not None and result["scarcity_peers_count"] <= 3:
+            peer_desc = f"港股可比分量仅{result['scarcity_peers_count']}家"
+            if result["dominant_share_pct"] is not None and result["dominant_share_pct"] >= 20:
+                result["scarcity_specific_point"] = (
+                    f"{peer_desc}，且公司在{result['dominant_segment']}市场份额{result['dominant_share_pct']}%，稀缺性突出"
+                )
+            else:
+                result["scarcity_specific_point"] = f"{peer_desc}，港股中纯粹对标公司很少"
+        elif result["dominant_share_pct"] is not None and result["dominant_share_pct"] >= 50:
+            result["scarcity_specific_point"] = (
+                f"在{result['dominant_segment']}市场份额{result['dominant_share_pct']}%，港股中纯粹对标公司很少"
             )
 
         return result

@@ -772,6 +772,25 @@ div[data-baseweb="select"] span {
   color: var(--text-primary) !important;
 }
 
+div[data-baseweb="select"] > div:first-child,
+div[data-baseweb="select"] > div:first-child * {
+  color: var(--text-primary) !important;
+  opacity: 1 !important;
+}
+
+div[data-baseweb="select"] [class*="placeholder"],
+div[data-baseweb="select"] [class*="Placeholder"] {
+  color: var(--text-secondary) !important;
+  opacity: 1 !important;
+}
+
+div[data-baseweb="select"] [class*="SingleValue"],
+div[data-baseweb="select"] [class*="singleValue"],
+div[data-baseweb="select"] [class*="ValueContainer"] span {
+  color: var(--text-primary) !important;
+  opacity: 1 !important;
+}
+
 .stCheckbox label {
   color: var(--text-secondary) !important;
   font-size: 14px !important;
@@ -811,6 +830,11 @@ section[data-testid="stFileUploader"] button {
   color: var(--text-primary) !important;
   font-family: var(--font-mono) !important;
   font-size: 14px !important;
+}
+
+.stTextInput input::placeholder {
+  color: var(--text-secondary) !important;
+  opacity: 1 !important;
 }
 
 .stTextInput input:focus {

@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 class GeographicExpansionAnalyzer:
     _CHINA_ALIASES = ['Chinese mainland', 'Mainland China', 'PRC', 'China market', "People's Republic of China"]
     _OVERSEAS_ALIASES = ['Overseas', 'International', 'Other countries and regions', 'Outside mainland China', 'Non-PRC', 'Outside the PRC']
+    _HK_ALIASES = ['Hong Kong', 'HK', '香港', 'HKIA']
 
     def _classify_geo_line(self, line_lower):
         is_overseas = False
@@ -30,6 +31,18 @@ class GeographicExpansionAnalyzer:
                 is_overseas = False
         return is_china, is_overseas
 
+    def _classify_geo_line_detailed(self, line_lower):
+        for alias in self._HK_ALIASES:
+            if alias.lower() in line_lower:
+                return 'hong_kong'
+        for alias in self._CHINA_ALIASES:
+            if alias.lower() in line_lower:
+                return 'mainland'
+        for alias in self._OVERSEAS_ALIASES:
+            if alias.lower() in line_lower:
+                return 'other'
+        return None
+
     def analyze(self, prospectus_info, text='', ipo_data=None):
         # 防御：某些调用者把 ipo_data 传到了 text 位置
         if isinstance(text, dict):
@@ -44,6 +57,10 @@ class GeographicExpansionAnalyzer:
             'geographic_table': {},
             'geographic_confidence': 'missing',
             'confidence': 'missing',
+            'hong_kong_revenue_pct': None,
+            'hong_kong_revenue_trend': '缺失',
+            'mainland_revenue_pct': None,
+            'detailed_geo_table': {},
         }
         try:
             geo_pct_data = self._extract_geo_with_pct(text)
@@ -110,6 +127,46 @@ class GeographicExpansionAnalyzer:
                 if overseas_pct >= gt.mid_pct:
                     result['overseas_risks'].extend(['监管/合规风险', '汇率波动风险', '渠道管理风险'])
 
+            detailed_geo = self._extract_detailed_geo_with_pct(text)
+            hk_pcts = detailed_geo.get('hong_kong', {})
+            mainland_pcts = detailed_geo.get('mainland', {})
+            other_pcts = detailed_geo.get('other', {})
+
+            if not hk_pcts:
+                hk_table = extract_segment_table(text, self._HK_ALIASES)
+                for alias in self._HK_ALIASES:
+                    if alias in hk_table:
+                        hk_pcts = hk_table[alias]
+                        break
+
+            if hk_pcts:
+                hk_years = sorted(hk_pcts.keys())
+                hk_latest = hk_years[-1]
+                result['hong_kong_revenue_pct'] = hk_pcts.get(hk_latest)
+                if len(hk_years) >= 2:
+                    hk_prev = hk_years[-2]
+                    hk_prev_val = hk_pcts.get(hk_prev)
+                    hk_latest_val = hk_pcts.get(hk_latest)
+                    if _is_num(hk_prev_val) and _is_num(hk_latest_val):
+                        diff = hk_latest_val - hk_prev_val
+                        if diff > 1:
+                            result['hong_kong_revenue_trend'] = '上升'
+                        elif diff < -1:
+                            result['hong_kong_revenue_trend'] = '下降'
+                        else:
+                            result['hong_kong_revenue_trend'] = '平稳'
+
+            if mainland_pcts:
+                ml_years = sorted(mainland_pcts.keys())
+                ml_latest = ml_years[-1]
+                result['mainland_revenue_pct'] = mainland_pcts.get(ml_latest)
+
+            result['detailed_geo_table'] = {
+                'mainland': mainland_pcts,
+                'hong_kong': hk_pcts,
+                'other': other_pcts,
+            }
+
             if result['china_revenue_latest'] is not None or result['overseas_revenue_pct'] is not None:
                 result['confidence'] = result['geographic_confidence']
         except Exception as e:
@@ -154,6 +211,53 @@ class GeographicExpansionAnalyzer:
                 next_line = lines[j].strip()
                 next_lower = next_line.lower()
                 if self._classify_geo_line(next_lower) != (False, False):
+                    break
+                if 'total' in next_lower:
+                    break
+                for m in re.finditer(r'^(\d[\d,]*\.?\d*)$', next_line):
+                    raw = m.group(1).replace(',', '')
+                    try:
+                        val = float(raw)
+                        nums_after.append(val)
+                    except ValueError:
+                        continue
+
+            pcts = [v for v in nums_after if 0 < v <= 100]
+            amounts = [v for v in nums_after if v > 100]
+
+            if len(pcts) >= 2 and len(amounts) >= 2:
+                if key in result and result[key]:
+                    continue
+                n_pcts = min(len(pcts), len(geo_years), 3)
+                used_years = geo_years[-n_pcts:] if len(geo_years) >= n_pcts else geo_years
+                result[key] = {used_years[yi]: pcts[yi] for yi in range(n_pcts)}
+
+        return result
+
+    def _extract_detailed_geo_with_pct(self, text):
+        lines = text.split('\n')
+        result = {'mainland': {}, 'hong_kong': {}, 'other': {}}
+
+        year_matches = re.findall(r'\b(20\d{2})\b', text)
+        geo_years = sorted({int(y) for y in year_matches if 2015 <= int(y) <= 2030})
+        if len(geo_years) < 2:
+            from datetime import date
+            this_year = date.today().year
+            geo_years = [this_year - 2, this_year - 1, this_year]
+
+        for i, line in enumerate(lines):
+            ll = line.lower().strip()
+            if 'subtotal' in ll or 'total' in ll:
+                continue
+            key = self._classify_geo_line_detailed(ll)
+            if key is None:
+                continue
+
+            nums_after = []
+            for j in range(i + 1, min(i + 15, len(lines))):
+                next_line = lines[j].strip()
+                next_lower = next_line.lower()
+                if self._classify_geo_line_detailed(next_lower) is not None:
                     break
                 if 'total' in next_lower:
                     break

@@ -24,6 +24,8 @@ from ._cashflow import WorkingCapitalCashFlowAnalyzer  # noqa: E402
 from ._capacity import ProductionCapacityAnalyzer  # noqa: E402
 from ._rnd_pipeline import RnDPipelineAnalyzer  # noqa: E402
 from ._risk_factors import RiskFactorAnalyzer  # noqa: E402
+from ._shareholder import ShareholderAnalyzer  # noqa: E402
+from ._order_backlog import OrderBacklogAnalyzer  # noqa: E402
 
 __all__ = [
     "ValuationAnalyzer",
@@ -34,4 +36,6 @@ __all__ = [
     "ProductionCapacityAnalyzer",
     "RnDPipelineAnalyzer",
     "RiskFactorAnalyzer",
+    "ShareholderAnalyzer",
+    "OrderBacklogAnalyzer",
 ]

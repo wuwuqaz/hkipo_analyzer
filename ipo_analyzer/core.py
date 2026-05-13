@@ -21,6 +21,8 @@ from .analyzers import (
     ProductionCapacityAnalyzer,
     RnDPipelineAnalyzer,
     RiskFactorAnalyzer,
+    ShareholderAnalyzer,
+    OrderBacklogAnalyzer,
 )
 from .scoring import ProspectusQualityAnalyzer, SignalComponentAnalyzer, ScoringSystem
 from .peer_comps import PeerComparableAnalyzer
@@ -43,7 +45,7 @@ def _attach_debug_info(ipo_data, pdf_path, prospectus_info, prospectus_text):
     if pdf_path and os.path.exists(pdf_path):
         try:
             ipo_data['pdf_file_size_mb'] = round(os.path.getsize(pdf_path) / 1024 / 1024, 2)
-        except Exception:
+        except OSError:
             ipo_data['pdf_file_size_mb'] = None
     else:
         ipo_data['pdf_file_size_mb'] = None
@@ -88,7 +90,7 @@ def _safe_float(value):
         return None
     try:
         return float(value)
-    except Exception:
+    except (ValueError, TypeError):
         return None
 
 
@@ -128,8 +130,8 @@ def _fetch_margin_data(client, ipo, margin_detail=None):
             try:
                 if ipo_data['public_offer'] > 0:
                     estimated_subscription = ipo_data['margin_total'] / ipo_data['public_offer']
-                    estimated_over = max(0, estimated_subscription - 1)
-            except Exception:
+                    estimated_over = estimated_subscription - 1
+            except (ValueError, TypeError, ZeroDivisionError):
                 estimated_subscription = None
                 estimated_over = None
 
@@ -162,7 +164,7 @@ def _fetch_margin_data(client, ipo, margin_detail=None):
         else:
             market_heat_value = None
 
-        ipo_data['market_heat'] = classify_market_heat(market_heat_value)
+        ipo_data['market_heat'] = classify_market_heat(market_heat_value) or "缺失"
 
         logger.info("  ✓ 孖展资金总计: %s", f"{ipo_data['margin_total']:.2f}亿" if ipo_data['margin_total'] is not None else "--")
         logger.info("  ✓ 集资额（公开）: %s", f"{ipo_data['public_offer']:.2f}亿" if ipo_data['public_offer'] is not None else "--")
@@ -380,7 +382,6 @@ def _apply_final_price_basis(ipo_data, prospectus_info):
 
 
 def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, prospectus_info, prospectus_text):
-    text = prospectus_text  # 统一接口别名
 
     _apply_final_price_basis(ipo_data, prospectus_info)
 
@@ -393,20 +394,26 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
         ('capacity', ProductionCapacityAnalyzer),
         ('rnd_pipeline', RnDPipelineAnalyzer),
         ('risk_factors', RiskFactorAnalyzer),
+        ('shareholder', ShareholderAnalyzer),
+        ('order_backlog', OrderBacklogAnalyzer),
     ]
     for key, analyzer_cls in analyzers:
-        prospectus_info[key] = analyzer_cls().analyze(prospectus_info, text)
+        try:
+            prospectus_info[key] = analyzer_cls().analyze(prospectus_info, prospectus_text or "")
+        except (ValueError, TypeError, KeyError, AttributeError) as e:
+            logger.warning("%s 分析异常: %s", key, e)
+            prospectus_info[key] = {"_error": str(e), "warnings": [f"分析异常: {e}"]}
 
     # 同行对比分析 (在估值之前，为估值提供同行背景)
     try:
-        peer_result = PeerComparableAnalyzer().analyze(prospectus_info, text, ipo_data)
-    except Exception as e:
+        peer_result = PeerComparableAnalyzer().analyze(prospectus_info, prospectus_text, ipo_data)
+    except (ValueError, TypeError, KeyError, AttributeError) as e:
         logger.warning("同行对比分析异常: %s", e)
         peer_result = {"warnings": [f"分析异常: {e}"], "_error": str(e)}
     prospectus_info['peer_comparison'] = peer_result
 
     # 估值分析 (有同行数据可做相对估值)
-    valuation_result = ValuationAnalyzer().analyze(prospectus_info, text, ipo_data)
+    valuation_result = ValuationAnalyzer().analyze(prospectus_info, prospectus_text, ipo_data)
     prospectus_info['valuation'] = valuation_result
 
     signal_result = signal_analyzer.analyze(ipo_data, prospectus_info, prospectus_text)
@@ -475,6 +482,8 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
     ipo_data['ipo_trade_label'] = scoring.get('ipo_trade_label', '')
     ipo_data['long_term_score'] = scoring.get('long_term_score', scoring.get('fundamental_score', 0))
     ipo_data['long_term_label'] = scoring.get('long_term_label', '')
+    ipo_data['fisher_label'] = scoring.get('fisher_label', '')
+    ipo_data['lynch_label'] = scoring.get('lynch_label', '')
     ipo_data['valuation_pressure_label'] = scoring.get('valuation_pressure_label', '')
     ipo_data['subscription_recommendation'] = scoring.get('subscription_recommendation', '')
     ipo_data['recommendation_reasons'] = scoring.get('recommendation_reasons', [])
@@ -488,7 +497,8 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
     ipo_data['trade_score'] = scoring.get('trade_score', 0)
     ipo_data['valuation_score'] = scoring.get('valuation_score', 0)
     ipo_data['theme_score'] = scoring.get('theme_score', 0)
-    ipo_data['data_quality_score'] = scoring.get('data_quality_score', 0)
+    dq_component = signal_result.get('components', {}).get('data_quality', {})
+    ipo_data['data_quality_score'] = min(100, round(dq_component.get('score', 0) / 5 * 100))
     # 权重配置信息
     ipo_data['weight_profile'] = scoring.get('weight_profile')
     ipo_data['debug_info'] = scoring.get('debug_info')
@@ -517,7 +527,7 @@ def _run_scoring_pipeline(ipo_data, prospectus_info, prospectus_text, pdf_path=N
         normalized = IPOData.from_dict(ipo_data)
         if normalized is not None:
             return normalized.to_dict(drop_runtime=False)
-    except Exception as e:
+    except (ValueError, TypeError, KeyError, AttributeError, ImportError) as e:
         logger.warning("IPOData 模型规范化失败: %s，返回原始 dict", e)
     return ipo_data
 
@@ -536,7 +546,7 @@ def _process_ipo(client, downloader, parser, ipo, output_dir, force_refresh=Fals
     if force_refresh and os.path.exists(local_pdf):
         try:
             os.remove(local_pdf)
-        except Exception:
+        except OSError:
             pass
 
     pdf_path = None
@@ -546,7 +556,7 @@ def _process_ipo(client, downloader, parser, ipo, output_dir, force_refresh=Fals
     else:
         try:
             pdf_path = downloader.download_from_hkex(stock_code, company_name)
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, ValueError) as e:
             logger.warning(f"招股书下载异常: {e}")
 
     prospectus_info = {}
@@ -554,7 +564,7 @@ def _process_ipo(client, downloader, parser, ipo, output_dir, force_refresh=Fals
         if not os.path.exists(local_pdf) or force_refresh:
             try:
                 shutil.copy2(pdf_path, local_pdf)
-            except Exception:
+            except OSError:
                 pass
         prospectus_info = parser.parse(stock_code, company_name)
 
@@ -689,7 +699,7 @@ def main():
     pdf_file = os.path.join(temp_dir, f"IPO分析报告_{timestamp}.pdf")
     try:
         export_pdf_report(results, pdf_file)
-    except Exception as e:
+    except (OSError, ValueError, TypeError, ImportError) as e:
         logger.error("✗ PDF生成失败: %s", e)
 
     json_file = os.path.join(temp_dir, f"ipo_live_data_{timestamp}.json")
@@ -703,13 +713,13 @@ def main():
         try:
             if os.path.isfile(old_path) and time.time() - os.path.getmtime(old_path) > SETTINGS.file.temp_file_ttl_days * 86400:
                 os.remove(old_path)
-        except Exception:
+        except OSError:
             pass
 
     try:
         if platform.system() == "Darwin":
             subprocess.run(["open", pdf_file], check=False)
-    except Exception:
+    except (OSError, FileNotFoundError):
         pass
     logger.info("\n" + "="*80)
     logger.info("  分析完成！")
@@ -746,7 +756,7 @@ def analyze_live_ipos(output_dir="temp", force_refresh=False, return_status=Fals
             if os.path.exists(cache_file):
                 try:
                     os.remove(cache_file)
-                except Exception:
+                except OSError:
                     pass
 
         for ipo in live_ipos:
@@ -758,12 +768,12 @@ def analyze_live_ipos(output_dir="temp", force_refresh=False, return_status=Fals
             try:
                 ipo_data = _process_ipo(client, downloader, parser, ipo, output_dir, force_refresh=force_refresh)
                 results.append(ipo_data)
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, ConnectionError, TimeoutError, OSError) as e:
                 logger.error(f"分析 {company_name} 失败: {e}")
                 continue
 
         results.sort(key=lambda x: x.get('score', 0), reverse=True)
-    except Exception as e:
+    except (ValueError, TypeError, ConnectionError, TimeoutError, OSError) as e:
         logger.error(f"获取IPO列表失败: {e}")
         if return_status:
             return _live_status("error", results=results, message=str(e))
@@ -800,7 +810,7 @@ def analyze_single_ipo(stock_code, company_name=None, output_dir="temp"):
         pdf_path = None
         try:
             pdf_path = downloader.download_from_hkex(stock_code, company_name or stock_code)
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, ValueError) as e:
             logger.warning(f"招股书下载异常: {e}")
 
         prospectus_info = {}
@@ -813,7 +823,7 @@ def analyze_single_ipo(stock_code, company_name=None, output_dir="temp"):
 
         prospectus_text = prospectus_info.get('_extracted_text', '') or ""
         return _run_scoring_pipeline(ipo_data, prospectus_info, prospectus_text, pdf_path)
-    except Exception as e:
+    except (ValueError, TypeError, KeyError, ConnectionError, TimeoutError, OSError) as e:
         return {'error': str(e), 'hk_code': stock_code, 'company_name': company_name}
 
 
@@ -839,7 +849,7 @@ def analyze_uploaded_pdf(pdf_path, stock_code=None, company_name=None):
         }
 
         return _run_scoring_pipeline(ipo_data, prospectus_info, prospectus_text, pdf_path)
-    except Exception as e:
+    except (ValueError, TypeError, KeyError, OSError) as e:
         return {'error': str(e)}
 
 
@@ -858,7 +868,12 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
                 "public_offer": 1.23,
                 "actual_over_sub_ratio": 456.7,
                 "forecast_over_sub_ratio": 500.0,
-                "market_heat": "极热"
+                "market_heat": "极热",
+                "live_market_heat": {
+                    "sector_heat_label": "热门",
+                    "sector_flow_label": "活跃",
+                    "sector_momentum_label": "上行"
+                }
             }
         force_refresh: 是否强制刷新缓存
         output_dir: 临时文件输出目录
@@ -912,7 +927,7 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
             downloader = ProspectusDownloader()
             pdf_path_final = downloader.download_from_hkex(stock_code, company_name)
             source_type = 'stock_code_download'
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, ValueError) as e:
             errors.append(f"招股书下载失败: {str(e)}")
             return {
                 "status": "error",
@@ -939,7 +954,7 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
     try:
         parser = ProspectusParser(cache_dir=output_dir)
         prospectus_info = parser.parse_pdf_file(pdf_path_final, stock_code=stock_code, company_name=company_name)
-    except Exception as e:
+    except (OSError, ValueError, TypeError) as e:
         errors.append(f"PDF解析失败: {str(e)}")
         return {
             "status": "error",
@@ -980,10 +995,13 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
             # 加载 post_listing 数据
             if 'post_listing' in record:
                 ipo_data['post_listing'] = record['post_listing']
-                # 如果 post_listing 中有 public_subscription_level 但 actual_over_sub_ratio 为空，填充它
-                psl = record['post_listing'].get('public_subscription_level')
-                if psl and 'actual_over_sub_ratio' not in ipo_data:
-                    ipo_data['actual_over_sub_ratio'] = psl
+                # 如果 post_listing 中有 actual_over_sub_ratio，优先使用
+                post_actual = record['post_listing'].get('final_over_sub_ratio') or record['post_listing'].get('actual_over_sub_ratio')
+                if post_actual and 'actual_over_sub_ratio' not in ipo_data:
+                    try:
+                        ipo_data['actual_over_sub_ratio'] = float(post_actual)
+                    except (ValueError, TypeError):
+                        pass
             break
     
     # 处理历史热度数据
@@ -1015,7 +1033,7 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
             public_val = ipo_data.get('public_offer')
             if _is_num(margin_val) and _is_num(public_val) and public_val > 0:
                 estimated_sub = margin_val / public_val
-                estimated_over = max(0, estimated_sub - 1)
+                estimated_over = estimated_sub - 1
                 ipo_data['over_sub_ratio'] = estimated_over
                 ipo_data['over_sub_ratio_source'] = 'estimated'
                 ipo_data['estimated_subscription_ratio'] = estimated_sub
@@ -1027,6 +1045,34 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
             ipo_data['market_heat'] = historical_market_data['market_heat']
         elif _is_num(ipo_data.get('over_sub_ratio')):
             ipo_data['market_heat'] = classify_market_heat(ipo_data['over_sub_ratio'])
+
+        live_market_heat = historical_market_data.get('live_market_heat')
+        if isinstance(live_market_heat, dict) and live_market_heat:
+            ipo_data['live_market_heat'] = {k: v for k, v in live_market_heat.items() if v not in (None, '')}
+        else:
+            live_market_heat = {}
+            sector_heat_label = historical_market_data.get('sector_heat_label')
+            sector_flow_label = historical_market_data.get('sector_flow_label')
+            sector_momentum_label = historical_market_data.get('sector_momentum_label')
+            sector_heat_detail = historical_market_data.get('sector_heat_detail')
+            sector_flow_detail = historical_market_data.get('sector_flow_detail')
+            sector_momentum_detail = historical_market_data.get('sector_momentum_detail')
+            if any(v not in (None, '') for v in [
+                sector_heat_label, sector_flow_label, sector_momentum_label,
+                sector_heat_detail, sector_flow_detail, sector_momentum_detail
+            ]):
+                live_market_heat = {
+                    'sector_heat_label': sector_heat_label or '缺失',
+                    'sector_flow_label': sector_flow_label or '缺失',
+                    'sector_momentum_label': sector_momentum_label or '缺失',
+                    'sector_heat_detail': sector_heat_detail or '',
+                    'sector_flow_detail': sector_flow_detail or '',
+                    'sector_momentum_detail': sector_momentum_detail or '',
+                    'sector_peer_count': historical_market_data.get('sector_peer_count'),
+                    'sector_index_change_pct': historical_market_data.get('sector_index_change_pct'),
+                    'sector_peer_median_change_pct': historical_market_data.get('sector_peer_median_change_pct'),
+                }
+                ipo_data['live_market_heat'] = {k: v for k, v in live_market_heat.items() if v not in (None, '')}
     else:
         existing_actual_over = ipo_data.get('actual_over_sub_ratio')
         if existing_actual_over is not None:
@@ -1042,7 +1088,7 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
     prospectus_text = prospectus_info.get('_extracted_text', '') or ""
     try:
         result = _run_scoring_pipeline(ipo_data, prospectus_info, prospectus_text, pdf_path_final)
-    except Exception as e:
+    except (ValueError, TypeError, KeyError, AttributeError) as e:
         errors.append(f"评分计算失败: {str(e)}")
         return {
             "status": "error",
@@ -1071,7 +1117,7 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
         record, version_delta = history_store.save_reanalysis(result)
         if version_delta:
             result['version_delta'] = version_delta
-    except Exception as e:
+    except (OSError, ValueError, TypeError) as e:
         logger.warning(f"保存重新分析记录失败: {e}")
 
     status = "ok"

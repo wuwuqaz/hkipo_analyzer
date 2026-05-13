@@ -32,6 +32,8 @@ class ProspectusParser:
         unit = unit_str.lower()
         if 'billion' in unit:
             return value * 1000
+        if 'thousand' in unit:
+            return value / 1000
         return value
 
     @staticmethod
@@ -129,7 +131,7 @@ class ProspectusParser:
                 )
             except Exception:
                 continue
-            if percent and not (0 < value <= 100):
+            if percent and not (-200 < value <= 200):
                 continue
             tokens.append(value)
         return tokens
@@ -219,7 +221,18 @@ class ProspectusParser:
 
     @classmethod
     def _extract_financial_row_values(cls, block_lines, row_idx, year_count):
-        values = []
+        # 优先从匹配行本身提取（中文表格标签与数值同行）
+        match_line_values = cls._numeric_values_from_table_line(
+            (block_lines[row_idx] or '').strip(),
+        )
+        amount_like = [v for v in match_line_values if abs(v) >= 500]
+        if len(amount_like) >= year_count:
+            return amount_like[:year_count]
+        if len(match_line_values) >= year_count:
+            return match_line_values[:year_count]
+
+        # 回退：从后续行扫描（英文表格数值可能在下一行或多行展开）
+        values = list(match_line_values)
         for j in range(row_idx + 1, min(len(block_lines), row_idx + 14)):
             line = (block_lines[j] or '').strip()
             if not line:
@@ -234,7 +247,7 @@ class ProspectusParser:
         if not values:
             return []
 
-        amount_like = [value for value in values if abs(value) >= 500]
+        amount_like = [v for v in values if abs(v) >= 500]
         if len(amount_like) >= year_count:
             return amount_like[:year_count]
 
@@ -340,13 +353,10 @@ class ProspectusParser:
             'summary financial data',
             'summary of our consolidated statements',
             # 中文财报标识
-            '綜合全面收益表',
-            '綜合損益表',
-            '合併損益表',
-            '合併全面收益表',
-            '損益表',
-            '財務資料',
-            '經營業績',
+            '綜合全面收益表', '綜合損益表', '合併損益表',
+            '合併全面收益表', '損益表', '財務資料', '經營業績',
+            '綜合損益及其他全面收益表', '財務摘要', '歷史財務資料',
+            '合併財務狀況表', '綜合財務狀況表',
         ]
         _BREAKDOWN_TOKENS = [
             'key operating data',
@@ -356,18 +366,16 @@ class ProspectusParser:
             'revenue by geographical',
             'revenue by product',
             # 中文分部/明细标识（应避免当作主表）
-            '收益明細',
-            '收入明細',
-            '分部收益',
-            '按地區',
-            '按產品',
+            '收益明細', '收入明細', '分部收益', '按地區', '按產品',
         ]
 
         for start_idx, line in enumerate(lines):
             if not _year_header_re.search(line or ''):
                 continue
 
-            preceding_text = '\n'.join(lines[max(0, start_idx - 12):start_idx]).lower()
+            # 扩大搜索窗口以覆盖中文招股书中表头与财年行距离较远的情况
+            preceding_window = lines[max(0, start_idx - 25):start_idx]
+            preceding_text = '\n'.join(preceding_window).lower()
             is_core_statement = any(token in preceding_text for token in _CORE_STATEMENT_TOKENS)
             is_breakdown_table = any(token in preceding_text for token in _BREAKDOWN_TOKENS)
             if not is_core_statement or is_breakdown_table:
@@ -390,7 +398,7 @@ class ProspectusParser:
                 continue
 
             # 只取表头附近（前25行）做单位检测，避免远处叙述文字中百萬干扰千元判断
-            header_zone = '\n'.join(block_lines[:25])
+            header_zone = '\n'.join(block_lines[:40])
             is_thousand_unit = _unit_re.search(header_zone)
             is_million_unit = _million_unit_re.search(header_zone)
             table_unit = None
@@ -424,7 +432,7 @@ class ProspectusParser:
                         break
 
             revenue_row = table.get('revenue') or {}
-            if len(revenue_row) >= 2 and all(value > 0 for value in revenue_row.values()):
+            if len(revenue_row) >= 2 and all(value >= 0 for value in revenue_row.values()):
                 return table
 
         return {}
@@ -452,7 +460,7 @@ class ProspectusParser:
         for pat, currency, unit in patterns:
             if re.search(pat, text, re.IGNORECASE):
                 return currency, unit
-        return "RMB", "unknown"  # 默认
+        return "HKD", "unknown"  # 默认
 
     def _apply_financial_table_to_info(self, info, fin_table, source, force=False):
         if not fin_table:
@@ -522,27 +530,36 @@ class ProspectusParser:
 
     def _has_financial_loss_context(self, text):
         loss_keywords = [
-            'loss for the year',
-            'loss for the period',
-            'net loss',
+            'loss for the year', 'loss for the period', 'net loss',
             'loss attributable',
+            '年內虧損', '年内亏损', '淨虧損', '净亏损', '虧損淨額', '亏损净额',
         ]
-        # Only search within the financial statement section to avoid false matches
-        # from table of contents, risk factors, or notes
-        fs_start = text.lower().find('consolidated statement of profit or loss')
+        # 中英文财报章节标志
+        _FS_TOKENS = [
+            'consolidated statement of profit or loss',
+            'consolidated statements of profit or loss',
+            '綜合損益表', '合併損益表', '損益表',
+            '綜合全面收益表', '合併全面收益表',
+            '綜合損益及其他全面收益表',
+        ]
+        fs_start = -1
+        text_lower = text.lower()
+        for token in _FS_TOKENS:
+            pos = text_lower.find(token.lower())
+            if pos >= 0:
+                fs_start = pos
+                break
         if fs_start < 0:
-            return False
+            # 回退：在整个文本中搜索（中文招股书可能没有明显的英文章节标识）
+            fs_start = 0
         window_start = max(0, fs_start - 2000)
         window_end = min(len(text), fs_start + 8000)
         window = text[window_start:window_end]
 
         risk_context_patterns = [
-            'risk factor',
-            'may result in',
-            'could result in',
-            'may incur',
-            'may be adversely',
-            'forward-looking',
+            'risk factor', 'may result in', 'could result in',
+            'may incur', 'may be adversely', 'forward-looking',
+            '風險因素', '风险因素',
         ]
         for i, line in enumerate(window.split('\n')):
             lower_line = line.lower()
@@ -568,7 +585,7 @@ class ProspectusParser:
         revenue = info.get('revenue')
         revenue_y1 = info.get('revenue_y1')
         trusted_statement = info.get('financial_table_source') == 'consolidated_statement'
-        if _is_num(revenue) and revenue <= 0:
+        if _is_num(revenue) and revenue < 0:
             info.pop('revenue', None)
             info.pop('revenue_year', None)
             add_flag('收入为非正数，已剔除')
@@ -801,17 +818,23 @@ class ProspectusParser:
 
         self._extract_metric_with_fallback(
             text, 'revenue',
-            ['revenue', 'total revenue', 'sales'],
-            ['revenue', 'total revenue', 'sales', 'turnover'],
+            ['revenue', 'total revenue', 'sales', '收益', '收入', '營業收入', '营业收入'],
+            ['revenue', 'total revenue', 'sales', 'turnover', '收益', '收入', '營業收入', '营业收入'],
             sanity_check=_revenue_sanity,
         )
 
         self._extract_metric_with_fallback(
             text, 'net_profit',
             ['net profit', 'profit for the year', 'profit attributable', 'loss for the year', 'net loss',
-             'profit/(loss) for the year', 'profit for the period', 'loss for the period'],
+             'profit/(loss) for the year', 'profit for the period', 'loss for the period',
+             '净利润', '淨利潤', '純利', '年內利潤', '年內虧損', '年内利润', '年内亏损',
+             '本公司權益股東應佔利潤', '本公司权益股东应占利润', '年度溢利',
+            ],
             ['net profit', 'profit for the year', 'profit attributable', 'loss for the year',
-             'profit/(loss) for the year', 'profit for the period', 'loss for the period'],
+             'profit/(loss) for the year', 'profit for the period', 'loss for the period',
+             '净利润', '淨利潤', '純利', '年內利潤', '年內虧損', '年内利润', '年内亏损',
+             '本公司權益股東應佔利潤', '本公司权益股东应占利润', '年度溢利',
+            ],
             sanity_check=_profit_sanity,
         )
         if 'net_profit' in info:

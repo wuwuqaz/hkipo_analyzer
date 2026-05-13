@@ -38,6 +38,9 @@ class ReanalyzePage:
             actual_over_sub_ratio = st.number_input("实际超购倍数", value=None, format="%.1f")
             forecast_over_sub_ratio = st.number_input("预测超购倍数", value=None, format="%.1f")
             market_heat = st.selectbox("市场热度", ["", "极热", "热门", "温和", "冷清"], index=0)
+            sector_heat_label = st.selectbox("实时热度", ["", "极热", "热门", "温和", "冷清"], index=0)
+            sector_flow_label = st.selectbox("板块资金流", ["", "放量", "活跃", "平稳", "偏弱"], index=0)
+            sector_momentum_label = st.selectbox("板块动能", ["", "强势", "上行", "盘整", "偏弱"], index=0)
 
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -55,6 +58,15 @@ class ReanalyzePage:
                     historical_market_data["forecast_over_sub_ratio"] = forecast_over_sub_ratio
                 if market_heat and market_heat.strip():
                     historical_market_data["market_heat"] = market_heat
+                live_market_heat = {}
+                if sector_heat_label.strip():
+                    live_market_heat["sector_heat_label"] = sector_heat_label
+                if sector_flow_label.strip():
+                    live_market_heat["sector_flow_label"] = sector_flow_label
+                if sector_momentum_label.strip():
+                    live_market_heat["sector_momentum_label"] = sector_momentum_label
+                if live_market_heat:
+                    historical_market_data["live_market_heat"] = live_market_heat
 
             with st.spinner("正在重新分析..."):
                 try:
@@ -113,7 +125,6 @@ class ReanalyzePage:
                 "fundamental_score": "基本面",
                 "valuation_score": "估值",
                 "theme_score": "主题",
-                "data_quality_score": "数据质量",
             }.get(dim, dim)
             dim_color = "#059669" if delta > 0 else ("#DC2626" if delta < 0 else "#64748b")
             dim_sign = "+" if delta > 0 else ""
