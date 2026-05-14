@@ -55,11 +55,16 @@ class HistoryService:
             conn.close()
 
     def recover_stale_jobs(self):
+        now = datetime.now().isoformat()
         conn = self._connect()
         try:
             conn.execute(
                 "UPDATE analyze_jobs SET status = 'failed', error = 'Service restarted during analysis', updated_at = ? WHERE status = 'running'",
-                (datetime.now().isoformat(),),
+                (now,),
+            )
+            conn.execute(
+                "UPDATE analyze_jobs SET status = 'failed', error = 'Service restarted before job started', updated_at = ? WHERE status = 'queued' AND datetime(created_at, '+30 minutes') < datetime('now')",
+                (now,),
             )
             conn.commit()
         finally:
