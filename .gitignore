@@ -25,3 +25,16 @@ output/
 screenshots/
 dogfood-output/
 tmp_*.png
+
+# Storage
+storage/history.db
+storage/history.db-shm
+storage/history.db-wal
+storage/uploads/*.pdf
+storage/results/*.json
+storage/tmp/*
+!storage/tmp/.gitkeep
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
