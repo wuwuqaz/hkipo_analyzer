@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 
+from api.auth import require_api_token
 from api.config import APIConfig
 from api.deps import get_config
 from api.schemas.analyze import (
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analyze", tags=["analyze"])
 
 
-@router.post("/upload", response_model=JobResponse)
+@router.post("/upload", response_model=JobResponse, dependencies=[Depends(require_api_token)])
 async def upload_and_analyze(
     background_tasks: BackgroundTasks,
     pdf: UploadFile = File(...),
@@ -52,7 +53,7 @@ async def upload_and_analyze(
     return JobResponse(job_id=job["job_id"], status=JobStatus.QUEUED, created_at=job["created_at"])
 
 
-@router.post("/reanalyze", response_model=JobResponse)
+@router.post("/reanalyze", response_model=JobResponse, dependencies=[Depends(require_api_token)])
 async def reanalyze(
     request: ReanalyzeRequest,
     config: APIConfig = Depends(get_config),
