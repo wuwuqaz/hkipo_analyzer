@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 def _is_unit_in_thousands(context: str) -> bool:
     """检测财务数据是否以千元为单位。"""
-    return any(kw in context for kw in ("rmb'000", "rmb’000", "in thousands"))
+    return any(kw in context for kw in ("rmb'000", "rmb'000", "in thousands"))
 
 
 def _adjust_for_unit(value: float, context: str) -> float:
@@ -26,6 +26,15 @@ from ._rnd_pipeline import RnDPipelineAnalyzer  # noqa: E402
 from ._risk_factors import RiskFactorAnalyzer  # noqa: E402
 from ._shareholder import ShareholderAnalyzer  # noqa: E402
 from ._order_backlog import OrderBacklogAnalyzer  # noqa: E402
+# InvestSkill 集成框架
+from ._piotroski_f import PiotroskiFAnalyzer  # noqa: E402
+from ._dcf_valuation import DCFValuationAnalyzer  # noqa: E402
+from ._sector_analysis import SectorAnalyzer  # noqa: E402
+from ._company_profile import CompanyProfileAnalyzer  # noqa: E402
+# 质地增强分析器
+from ._management_governance import ManagementGovernanceAnalyzer  # noqa: E402
+from ._balance_sheet import BalanceSheetAnalyzer  # noqa: E402
+from ._profit_sustainability import ProfitSustainabilityAnalyzer  # noqa: E402
 
 __all__ = [
     "ValuationAnalyzer",
@@ -38,4 +47,13 @@ __all__ = [
     "RiskFactorAnalyzer",
     "ShareholderAnalyzer",
     "OrderBacklogAnalyzer",
+    # InvestSkill 集成框架
+    "PiotroskiFAnalyzer",
+    "DCFValuationAnalyzer",
+    "SectorAnalyzer",
+    "CompanyProfileAnalyzer",
+    # 质地增强分析器
+    "ManagementGovernanceAnalyzer",
+    "BalanceSheetAnalyzer",
+    "ProfitSustainabilityAnalyzer",
 ]

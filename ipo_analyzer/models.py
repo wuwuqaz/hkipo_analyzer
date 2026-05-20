@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field, asdict
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 
 # ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ def _drop_underscore(value: Any) -> Any:
         return {
             k: _drop_underscore(v)
             for k, v in value.items()
-            if not k.startswith("_")
+            if not (isinstance(k, str) and k.startswith("_"))
         }
     if isinstance(value, list):
         return [_drop_underscore(item) for item in value]
@@ -55,12 +55,13 @@ def _from_dict(cls, data: dict[str, Any] | None) -> Any:
         val = kwargs[f_name]
         if val is None:
             continue
-        # 处理 Optional[T]
+        # 处理 Optional[T] / Union[T, None]
         origin = getattr(f_type, "__origin__", None)
         if origin is not None:
             args = getattr(f_type, "__args__", ())
-            if origin is type(Optional) or (hasattr(origin, "__name__") and origin.__name__ == "Optional"):
-                f_type = args[0] if args else f_type
+            if origin is Union:
+                non_none_args = [a for a in args if a is not type(None)]
+                f_type = non_none_args[0] if non_none_args else f_type
         # 简单判断是否为 dataclass
         if isinstance(f_type, type) and hasattr(f_type, "__dataclass_fields__") and isinstance(val, dict):
             kwargs[f_name] = _from_dict(f_type, val)
@@ -87,6 +88,7 @@ class ValuationResult:
     confidence: str = "missing"
     valuation_type: str = "absolute_only"
     valuation_framework_type: Optional[str] = None
+    valuation_framework_label: Optional[str] = None
     valuation_profitability_type: Optional[str] = None
     revenue_hkd_million: Optional[float] = None
     market_cap_hkd_million: Optional[float] = None
@@ -407,6 +409,143 @@ class PeerComparisonResult:
         return _from_dict(cls, data)
 
 
+# ============================================================================
+# InvestSkill 集成框架数据模型
+# ============================================================================
+
+@dataclass
+class PiotroskiFResult:
+    """Piotroski F-Score 升级版财务质量评分（针对港股IPO优化）。
+    
+    原版 Piotroski 9分制，港股IPO优化版扩展为多维度评分。
+    """
+    total_score: int = 0
+    max_score: int = 9
+    grade: str = "缺失"
+    
+    # 盈利能力 (0-3)
+    profit_roa: bool = False
+    profit_ocf_positive: bool = False
+    profit_roa_improvement: bool = False
+    profit_score: int = 0
+    
+    # 杠杆/流动性/融资 (0-3)
+    leverage_debt_ratio_drop: bool = False
+    leverage_current_ratio_improve: bool = False
+    leverage_no_new_shares: bool = False
+    leverage_score: int = 0
+    
+    # 运营效率 (0-3)
+    operations_gm_improve: bool = False
+    operations_at_improve: bool = False
+    operations_score: int = 0
+    
+    # IPO特殊维度 (0-2)
+    ipo_cash_runway_ok: bool = False
+    ipo_revenue_growth: bool = False
+    ipo_special_score: int = 0
+    
+    # 详细分析
+    reasons: list[str] = field(default_factory=list)
+    red_flags: list[str] = field(default_factory=list)
+    confidence: str = "partial"
+    
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> Optional[PiotroskiFResult]:
+        return _from_dict(cls, data)
+
+
+@dataclass
+class DCFValuationResult:
+    """DCF 估值结果（基于 InvestSkill 框架）。"""
+    intrinsic_value_hkd: Optional[float] = None
+    offer_price_hkd: Optional[float] = None
+    upside_pct: Optional[float] = None
+    
+    # 三情景分析
+    bear_value_hkd: Optional[float] = None
+    base_value_hkd: Optional[float] = None
+    bull_value_hkd: Optional[float] = None
+    bear_upside_pct: Optional[float] = None
+    base_upside_pct: Optional[float] = None
+    bull_upside_pct: Optional[float] = None
+    
+    # WACC 参数
+    wacc_pct: Optional[float] = None
+    terminal_growth_pct: Optional[float] = None
+    
+    # 估值结论
+    valuation_label: str = "缺失"
+    confidence: str = "low"
+    reasons: list[str] = field(default_factory=list)
+    
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> Optional[DCFValuationResult]:
+        return _from_dict(cls, data)
+
+
+@dataclass
+class SectorAnalysisResult:
+    """行业赛道分析结果（基于 InvestSkill 框架）。"""
+    sector_name: str = ""
+    sector_beta_label: str = "中性"
+    sector_beta_score: int = 50
+    
+    # 行业周期位置
+    cycle_position: str = "未知"
+    cycle_score: int = 50
+    
+    # 政策环境
+    policy_support: str = "中性"
+    policy_score: int = 50
+    
+    # 行业增速
+    sector_growth_label: str = "缺失"
+    sector_growth_pct: Optional[float] = None
+    
+    # 综合分析
+    sector_recommendation: str = "中性"
+    reasons: list[str] = field(default_factory=list)
+    
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> Optional[SectorAnalysisResult]:
+        return _from_dict(cls, data)
+
+
+@dataclass
+class CompanyProfileResult:
+    """公司简介 — 从招股书提取的自然语言摘要 + 结构化标签。"""
+    company_summary: str = ""
+    industry: str = ""
+    main_business: str = ""
+    market_position: str = ""
+    key_products: list[str] = field(default_factory=list)
+    geographic_focus: str = ""
+    founded_year: Optional[int] = None
+    headquarters: str = ""
+    business_model: str = ""
+    customer_type: str = ""
+    customer_industries: str = ""
+    revenue_scale: str = ""
+    confidence: str = "low"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> Optional[CompanyProfileResult]:
+        return _from_dict(cls, data)
+
+
 @dataclass
 class DimensionScore:
     score: int = 0
@@ -536,6 +675,8 @@ class ProspectusInfo:
     net_proceeds_hkd_million: Optional[float] = None
     issuance_ratio_pct: Optional[float] = None
     public_offer_ratio_pct: Optional[float] = None
+    international_offer_ratio_pct: Optional[float] = None
+    board_lot: Optional[int] = None
     public_offer: Optional[float] = None
     total_fund: Optional[float] = None
     listing_date: Optional[str] = None
@@ -602,6 +743,12 @@ class ProspectusInfo:
     stock_quality: Optional[StockQuality] = None
     shareholder: Optional[dict[str, Any]] = None
     order_backlog: Optional[dict[str, Any]] = None
+    # InvestSkill 集成框架
+    piotroski_f: Optional[PiotroskiFResult] = None
+    dcf_valuation: Optional[DCFValuationResult] = None
+    sector_analysis: Optional[SectorAnalysisResult] = None
+    # 公司简介
+    company_profile: Optional[CompanyProfileResult] = None
 
     def to_dict(self, drop_runtime: bool = True) -> dict[str, Any]:
         d = asdict(self)
@@ -626,6 +773,10 @@ class ProspectusInfo:
             "peer_comparison": PeerComparisonResult,
             "advanced_framework": AdvancedFrameworkResult,
             "stock_quality": StockQuality,
+            "piotroski_f": PiotroskiFResult,
+            "dcf_valuation": DCFValuationResult,
+            "sector_analysis": SectorAnalysisResult,
+            "company_profile": CompanyProfileResult,
         }
         kwargs = {}
         for k, v in data.items():
@@ -665,6 +816,15 @@ class IPOData:
     over_sub_ratio_estimated: Optional[float] = None
     over_sub_ratio: Optional[float] = None
     over_sub_ratio_source: str = "missing"
+    public_offer_ratio: Optional[float] = None
+    international_offer_ratio: Optional[float] = None
+    public_offer_lots: Optional[float] = None
+    lot_size: Optional[int] = None
+    board_lot: Optional[int] = None
+    hk_offer_shares: Optional[int] = None
+    global_offer_shares: Optional[int] = None
+    offer_price: Optional[float] = None
+    market_cap_hkd_million: Optional[float] = None
     market_heat: str = ""
     live_market_heat: dict[str, Any] = field(default_factory=dict)
     margin_detail: Optional[dict[str, Any]] = None
@@ -673,6 +833,9 @@ class IPOData:
     score: int = 0
     subscription_score: int = 0
     ipo_trade_score: int = 0
+    strict_ipo_score: int = 0
+    raw_trade_signal_score: int = 0
+    strict_scoring_profile: str = ""
     ipo_trade_label: str = ""
     long_term_score: int = 0
     long_term_label: str = ""
@@ -776,3 +939,52 @@ class IPOData:
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
         kwargs = {k: v for k, v in kwargs.items() if k in valid_keys}
         return cls(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# 新增分析结果模型 — 质地与基本面增强
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ManagementGovernanceResult:
+    """管理层与治理质量分析结果"""
+    management_experience_years: Optional[float] = None
+    founder_ownership_pct: Optional[float] = None
+    independent_director_ratio: Optional[float] = None
+    controlling_shareholder_pct: Optional[float] = None
+    governance_risk_flags: list[str] = field(default_factory=list)
+    auditor_quality: Optional[str] = None
+    management_score: int = 50
+    label: str = "缺失"
+    confidence: str = "missing"
+
+@dataclass
+class BalanceSheetResult:
+    """资产负债结构分析结果"""
+    asset_liability_ratio: Optional[float] = None
+    interest_bearing_debt_ratio: Optional[float] = None
+    current_ratio: Optional[float] = None
+    quick_ratio: Optional[float] = None
+    interest_coverage_ratio: Optional[float] = None
+    short_term_debt: Optional[float] = None
+    long_term_debt: Optional[float] = None
+    total_equity: Optional[float] = None
+    balance_sheet_score: int = 50
+    label: str = "缺失"
+    risk_flags: list[str] = field(default_factory=list)
+    confidence: str = "missing"
+
+@dataclass
+class ProfitSustainabilityResult:
+    """盈利可持续性分析结果"""
+    net_profit: Optional[float] = None
+    non_gaap_net_profit: Optional[float] = None
+    non_recurring_pnl: Optional[float] = None
+    non_recurring_ratio: Optional[float] = None
+    government_subsidy: Optional[float] = None
+    asset_disposal_gain: Optional[float] = None
+    investment_income: Optional[float] = None
+    sustainability_score: int = 50
+    label: str = "缺失"
+    quality_flags: list[str] = field(default_factory=list)
+    confidence: str = "missing"

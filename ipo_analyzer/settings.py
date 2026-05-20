@@ -79,6 +79,28 @@ class ProspectusQualityThresholds:
     cash_runway_good: float = 1.5
     customer_concentration_high: float = 50.0
     customer_concentration_moderate: float = 30.0
+    # === 新增：管理层与治理阈值 ===
+    management_experience_strong: float = 10.0
+    management_experience_good: float = 5.0
+    founder_ownership_healthy_low: float = 15.0
+    founder_ownership_healthy_high: float = 40.0
+    independent_director_min_ratio: float = 0.33
+    controlling_shareholder_warning: float = 70.0
+    # === 新增：资产负债阈值 ===
+    asset_liability_healthy: float = 0.50
+    asset_liability_warning: float = 0.70
+    interest_bearing_debt_healthy: float = 0.20
+    interest_bearing_debt_warning: float = 0.40
+    current_ratio_healthy: float = 2.0
+    current_ratio_warning: float = 1.5
+    quick_ratio_healthy: float = 1.0
+    interest_coverage_healthy: float = 5.0
+    interest_coverage_warning: float = 3.0
+    # === 新增：盈利可持续性阈值 ===
+    non_recurring_ratio_healthy: float = 0.10
+    non_recurring_ratio_warning: float = 0.30
+    government_subsidy_ratio_healthy: float = 0.05
+    government_subsidy_ratio_warning: float = 0.15
 
 
 @dataclass
@@ -331,9 +353,9 @@ class ValuationScoreLimits:
     advanced_mid_high: int = 60
     advanced_mid: int = 45
     # 股票质地标签
-    quality_excellent: int = 70
-    quality_good: int = 45
-    quality_fair: int = 25
+    quality_excellent: int = 80
+    quality_good: int = 55
+    quality_fair: int = 35
     # 市值阈值（亿港元）
     large_market_cap: float = 10000.0
 
