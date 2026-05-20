@@ -25,14 +25,20 @@ class FXConfig:
 
 @dataclass
 class ValuationThresholds:
-    """估值绝对阈值"""
-    pe_expensive: float = 60.0
-    pe_high: float = 40.0
-    pe_moderate: float = 30.0
-    pe_fair: float = 20.0
+    """估值绝对阈值（适配港股市场流动性特征）"""
+    # PE 阈值（港股小盘 IPO 中位数 15-25x，比 A 股更严）
+    pe_expensive: float = 40.0
+    pe_high: float = 30.0
+    pe_moderate: float = 20.0
+    pe_fair: float = 15.0
+    # PS 默认阈值（传统行业）
     ps_expensive: float = 15.0
     ps_high: float = 8.0
     ps_fair: float = 3.0
+    # SaaS/软件/hardtech 行业 PS 阈值（放宽，因高增长/高毛利）
+    ps_expensive_saas: float = 25.0
+    ps_high_saas: float = 15.0
+    ps_fair_saas: float = 8.0
     biotech_revenue_small: float = 200.0
     biotech_revenue_moderate: float = 500.0
     cash_runway_warning: float = 1.5
@@ -58,34 +64,56 @@ class ProspectusQualityThresholds:
     growth_strong: float = 0.30
     growth_good: float = 0.10
     gross_margin_anomaly_max: float = 100.0
+    # 升级版新增：现金流质量阈值
+    ocf_to_revenue_strong: float = 0.20
+    ocf_to_revenue_good: float = 0.10
+    ocf_to_net_profit_strong: float = 1.0
+    ocf_to_net_profit_good: float = 0.5
+    # 升级版新增：护城河深度阈值
+    moat_score_strong: int = 7
+    moat_score_moderate: int = 4
+    scarcity_moat_strong: int = 7
+    scarcity_moat_moderate: int = 4
+    # 升级版新增：财务健康阈值
+    cash_runway_strong: float = 2.5
+    cash_runway_good: float = 1.5
+    customer_concentration_high: float = 50.0
+    customer_concentration_moderate: float = 30.0
 
 
 @dataclass
 class ScoringWeights:
     """ScoringSystem 权重配置"""
-    heat_max: int = 40
+    heat_max: int = 45
     quality_max: int = 55
     scale_max: int = 10
-    market_max: int = 5
     cornerstone_max: int = 20
-    # 长期评分组合权重
-    long_fundamental_w: float = 0.63
-    long_valuation_w: float = 0.22
-    long_customer_quality_w: float = 0.12
-    long_theme_w: float = 0.03
+    # 长期评分组合权重（升级版：增加护城河、财务健康、港股通维度）
+    long_fundamental_w: float = 0.35
+    long_valuation_w: float = 0.25
+    long_moat_competitive_w: float = 0.15
+    long_financial_health_w: float = 0.10
+    long_growth_quality_w: float = 0.05
+    long_stock_connect_w: float = 0.05
+    long_theme_w: float = 0.05
+    long_bonus_cap: int = 8
+    long_valuation_default_score: int = 50
+    long_valuation_missing_penalty: int = 3
     long_cash_weak_penalty: int = 4
     long_cash_runway_penalty: int = 2
+    long_wc_risk_penalty: int = 2
     long_risk_penalty_max: int = 8
+    long_penalty_max_ratio: float = 0.50
     # 权重配置文件
-    live_heat_trade: float = 0.35
-    live_heat_fundamental: float = 0.30
+    live_heat_trade: float = 0.25
+    live_heat_fundamental: float = 0.35
     live_heat_data_quality: float = 0.05
-    live_heat_valuation: float = 0.20
+    live_heat_valuation: float = 0.25
     live_heat_theme: float = 0.10
-    prospectus_trade: float = 0.20
-    prospectus_fundamental: float = 0.35
-    prospectus_data_quality: float = 0.10
-    prospectus_valuation: float = 0.20
+    prospectus_trade: float = 0.15
+    prospectus_fundamental: float = 0.40
+    prospectus_data_quality: float = 0.05
+    prospectus_valuation: float = 0.25
     prospectus_theme: float = 0.15
 
     # 客户质量评分阈值
@@ -97,6 +125,23 @@ class ScoringWeights:
     customer_retention_mid: int = 12
     customer_ndr_high: int = 20
     customer_ndr_mid: int = 12
+
+
+@dataclass
+class BacktestSettings:
+    """回测框架 & 贝叶斯优化配置"""
+    min_samples: int = 10
+    data_quality_threshold: int = 2
+    qualify_threshold: int = 50
+    objective_win_rate_w: float = 0.4
+    objective_expected_return_w: float = 0.4
+    objective_max_drawdown_w: float = 0.2
+    opt_initial_samples: int = 20
+    opt_iterations: int = 30
+    opt_weight_min: float = 0.05
+    opt_weight_max: float = 0.80
+    optimized_weights_path: str = "data/optimized_weights.yaml"
+    backtest_db_path: str = "data/backtest.db"
 
 
 @dataclass
@@ -218,11 +263,20 @@ class PEGThresholds:
 
 @dataclass
 class StockConnectThresholds:
-    """港股通纳入市值阈值（亿港元）"""
-    large_cap: float = 150000.0
-    fast_track: float = 20000.0
-    regular: float = 10000.0
-    small_cap: float = 5000.0
+    """港股通纳入市值阈值（单位：百万港元）
+
+    实际规则：
+    - 入通前提：恒生综合指数成分股
+    - 大型/中型股：无条件纳入（按恒生综指排名比例划分）
+    - 小型股：需过去12个月平均月末市值 ≥ 50亿港元
+    - 快速纳入：上市满1个日历月后可纳入
+    - AH股：H股豁免市值和恒指成分股要求
+    """
+    # 阈值单位：百万港元（1亿港元 = 100 百万港元）
+    small_cap: float = 5000.0      # 50亿港元（小型股门槛）
+    regular: float = 10000.0       # 100亿港元（常规纳入观察）
+    fast_track: float = 20000.0    # 200亿港元（快速纳入观察）
+    large_cap: float = 150000.0    # 1500亿港元（大型股快速纳入）
     score_ah: int = 10
     score_large: int = 10
     score_fast: int = 8
@@ -345,7 +399,7 @@ class HistoryConfig:
 
 @dataclass
 class FileConfig:
-    max_upload_size_mb: int = 50  # 与 .streamlit/config.toml server.maxUploadSize 保持一致
+    max_upload_size_mb: int = 50  # 与前端上传限制保持一致
     temp_file_ttl_days: int = 7
 
 
@@ -411,9 +465,8 @@ class CornerstoneThresholds:
     grade_a: int = 70
     grade_a_strong: int = 80
     grade_b: int = 50
-    # 评分上限（有红旗时）- 提高封顶分数，让顶级机构组合能获得高分
-    score_cap_high_red_flags: int = 70
-    score_cap_low_red_flags: int = 80
+    score_cap_severe_red_flags: int = 60
+    score_cap_normal_red_flags: int = 75
     red_flags_high_count: int = 2
     # SPV - 提高触发阈值，避免单一SPV表述触发红旗
     spv_warning_count: int = 4
@@ -462,6 +515,7 @@ class Settings:
     network: NetworkConfig = field(default_factory=NetworkConfig)
     data_sanitization: DataSanitizationThresholds = field(default_factory=DataSanitizationThresholds)
     cornerstone: CornerstoneThresholds = field(default_factory=CornerstoneThresholds)
+    backtest: BacktestSettings = field(default_factory=BacktestSettings)
 
     def to_dict(self) -> dict[str, Any]:
         from dataclasses import asdict

@@ -107,12 +107,18 @@ def main():
     reanalyze_parser.add_argument("--output-dir", type=str, default="temp", help="输出目录")
     reanalyze_parser.add_argument("--save-json", action="store_true", help="保存JSON结果")
 
+    # backtest 子命令
+    subparsers.add_parser("backtest", help="回测 & 权重优化")
+
     args = parser.parse_args()
 
     if args.command == "reanalyze":
         if not args.code and not args.pdf:
             reanalyze_parser.error("请提供 --code 或 --pdf 参数")
         cmd_reanalyze(args)
+    elif args.command == "backtest":
+        from ipo_analyzer.backtest.cli import main as backtest_main
+        backtest_main()
     else:
         parser.print_help()
         sys.exit(1)

@@ -2,15 +2,7 @@ __pycache__/
 *.pyc
 .DS_Store
 __MACOSX/
-temp/*.pdf
-temp/allotment/
-temp/reanalysis/
-temp/results_cache.json
-temp/ipo_history.json
-temp/*.db
-temp/*.db-shm
-temp/*.db-wal
-temp/*.py
+temp/
 data/backups/
 .env
 *.egg-info/
@@ -25,16 +17,33 @@ output/
 screenshots/
 dogfood-output/
 tmp_*.png
+layout_*.png
+detail_section.png
 
 # Storage
 storage/history.db
 storage/history.db-shm
 storage/history.db-wal
+storage/blogger_monitor.db
+storage/blogger_monitor.db-shm
+storage/blogger_monitor.db-wal
 storage/uploads/*.pdf
 storage/results/*.json
+storage/ipo_history.json
+storage/results_cache.json
 storage/tmp/*
 !storage/tmp/.gitkeep
 
 # Frontend
 frontend/node_modules/
 frontend/.next/
+frontend/*.tsbuildinfo
+.env.local
+.env.production
+.venv/
+venv/
+
+# Backtest
+data/backtest.db
+data/optimized_weights.yaml
+.superpowers/

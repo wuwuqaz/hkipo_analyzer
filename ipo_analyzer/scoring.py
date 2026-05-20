@@ -1,13 +1,21 @@
 """评分系统 — ScoringSystem + 向后兼容的 re-export"""
 
+import re
+
 from .quality_analyzer import ProspectusQualityAnalyzer  # noqa: F401
 from .signal_analyzer import SignalComponentAnalyzer  # noqa: F401
 from .utils import _is_num
 from .settings import SETTINGS
 
+import logging
+logger = logging.getLogger(__name__)
+
+_AH_DUAL_RE = re.compile(r'dual\s+list|a\s*\+\s*h|a股.*h股|h股.*a股|ah上市|a shares?\s+and\s+h shares?', re.IGNORECASE)
+
 
 class ScoringSystem:
     """评分系统"""
+    STRICT_SCORING_PROFILE = "balanced_strict_2026"
 
     @staticmethod
     def _score_band(score, high=70, mid=50, low=35, high_label="高", mid_label="中", low_label="偏弱"):
@@ -40,97 +48,306 @@ class ScoringSystem:
         business = prospectus_info.get('business_breakdown') or {}
         risk_factors = prospectus_info.get('risk_factors') or {}
         stock_quality = prospectus_info.get('stock_quality') or {}
+        peer_comparison = prospectus_info.get('peer_comparison') or {}
+        shareholder = prospectus_info.get('shareholder') or {}
 
-        customer_quality = customer.get('customer_quality_score', 0)
-        fisher_label = stock_quality.get('fisher_label', '缺失')
-        lynch_label = stock_quality.get('lynch_label', '缺失')
         sw = SETTINGS.scoring
+        qt = SETTINGS.prospectus_quality
+
+        if valuation_score <= 0:
+            valuation_score = sw.long_valuation_default_score
+            reasons_val_fallback = ['估值数据缺失，按中性默认值处理']
+
+        moat_competitive_score = 50
+        moat_reasons = []
+        scarcity = peer_comparison.get('scarcity_score', 0) if _is_num(peer_comparison.get('scarcity_score')) else 0
+        dominant_pct = peer_comparison.get('dominant_share_pct')
+        if scarcity >= qt.scarcity_moat_strong:
+            moat_competitive_score = 85
+            moat_reasons.append(f'赛道高度稀缺(scarcity={scarcity}/10)')
+        elif scarcity >= qt.scarcity_moat_moderate:
+            moat_competitive_score = 65
+            moat_reasons.append(f'赛道有一定稀缺性(scarcity={scarcity}/10)')
+        if _is_num(dominant_pct):
+            if dominant_pct >= 30:
+                moat_competitive_score = min(100, moat_competitive_score + 15)
+                moat_reasons.append(f'市场份额领先({dominant_pct:.0f}%)')
+            elif dominant_pct >= 10:
+                moat_competitive_score = min(100, moat_competitive_score + 5)
+
+        segment_moat = business.get('segment_moat_label', '')
+        if segment_moat in ('本体驱动', '方案驱动'):
+            moat_competitive_score = min(100, moat_competitive_score + 5)
+            moat_reasons.append(f'主业护城河明确: {segment_moat}')
+
+        tech_moat = rnd.get('technology_moat_score', 0)
+        if _is_num(tech_moat) and tech_moat >= qt.moat_score_strong:
+            moat_competitive_score = min(100, moat_competitive_score + 10)
+            moat_reasons.append(f'技术壁垒强({tech_moat}/10)')
+
+        financial_health_score = 50
+        health_reasons = []
+        cash_runway = cashflow.get('cash_runway_years')
+        if _is_num(cash_runway):
+            if cash_runway >= qt.cash_runway_strong:
+                financial_health_score = 80
+                health_reasons.append(f'现金跑道充裕({cash_runway:.1f}年)')
+            elif cash_runway >= qt.cash_runway_good:
+                financial_health_score = 65
+                health_reasons.append(f'现金跑道尚可({cash_runway:.1f}年)')
+            elif cash_runway >= 1:
+                financial_health_score = 45
+                health_reasons.append(f'现金跑道偏紧({cash_runway:.1f}年)')
+            else:
+                financial_health_score = 25
+                health_reasons.append(f'现金跑道不足1年')
+
+        working_cap_label = cashflow.get('working_capital_pressure_label', '')
+        if '高' in str(working_cap_label):
+            financial_health_score = max(20, financial_health_score - 15)
+            health_reasons.append('营运资本压力高')
+        if cashflow.get('cash_quality_label') == '弱':
+            financial_health_score = max(20, financial_health_score - 10)
+            health_reasons.append('现金流质量弱')
+
+        growth_quality_score = 50
+        revenue = prospectus_info.get('revenue')
+        revenue_y1 = prospectus_info.get('revenue_y1')
+        growth = None
+        if _is_num(revenue) and _is_num(revenue_y1) and revenue_y1 > 0:
+            growth = (revenue - revenue_y1) / revenue_y1
+        if growth is not None:
+            if growth >= qt.growth_strong:
+                growth_quality_score = 85
+            elif growth >= qt.growth_good:
+                growth_quality_score = 65
+            elif growth >= 0:
+                growth_quality_score = 50
+            elif growth >= -0.1:
+                growth_quality_score = 35
+            else:
+                growth_quality_score = 20
+
+        stock_connect_score = 30
+        market_cap = prospectus_info.get('market_cap_hkd_million')
+        sc = SETTINGS.stock_connect
+        is_ah = _AH_DUAL_RE.search(
+            (prospectus_info.get('_extracted_text', '') or '')[:120000]
+        ) if _AH_DUAL_RE else False
+        if is_ah:
+            stock_connect_score = 95
+        elif _is_num(market_cap) and market_cap >= sc.large_cap:
+            stock_connect_score = 85
+        elif _is_num(market_cap) and market_cap >= sc.fast_track:
+            stock_connect_score = 65
+        elif _is_num(market_cap) and market_cap >= sc.regular:
+            stock_connect_score = 50
+        elif _is_num(market_cap) and market_cap >= sc.small_cap:
+            stock_connect_score = 35
+        else:
+            stock_connect_score = 20
+
         long_raw = (
             fundamental_score * sw.long_fundamental_w
             + valuation_score * sw.long_valuation_w
-            + min(100, customer_quality) * sw.long_customer_quality_w
+            + moat_competitive_score * sw.long_moat_competitive_w
+            + financial_health_score * sw.long_financial_health_w
+            + growth_quality_score * sw.long_growth_quality_w
+            + stock_connect_score * sw.long_stock_connect_w
             + theme_score * sw.long_theme_w
         )
-        moat_score = rnd.get('technology_moat_score', 0)
-        if _is_num(moat_score):
-            if moat_score >= 7:
-                long_raw += 3
-            elif moat_score >= 4:
-                long_raw += 1
-        if business.get('business_model_label') in ('机器人本体为主', '机器人解决方案为主'):
-            long_raw += 1
+
+        bonus = 0
+        fisher_label = stock_quality.get('fisher_label', '缺失')
+        lynch_label = stock_quality.get('lynch_label', '缺失')
         if fisher_label == '适配':
-            long_raw += 2
+            bonus += 3
         elif fisher_label == '部分适配':
-            long_raw += 1
+            bonus += 1
         if lynch_label == '适配':
-            long_raw += 2
+            bonus += 3
         elif lynch_label == '部分适配':
-            long_raw += 1
+            bonus += 1
+
+        business_model_label = business.get('business_model_label', '') or ''
+        if any(kw in business_model_label for kw in ('机器人', 'AI', '自动驾驶', '商业航天', '人形机器人')):
+            bonus += 1
+        if any(kw in business_model_label for kw in ('biotech', '创新药', '生物医药', '基因治疗', '细胞治疗')):
+            bonus += 1
+
+        bonus = min(sw.long_bonus_cap, bonus)
+        long_raw += bonus
 
         penalty = 0
         if cashflow.get('cash_quality_label') == '弱':
             penalty += sw.long_cash_weak_penalty
+
+        runway_months = cashflow.get('cash_runway_months')
+        if _is_num(runway_months) and runway_months < 12:
+            penalty += sw.long_cash_runway_penalty
+
         wc_risks = cashflow.get('working_capital_risks') or []
         if any(('应收' in str(x)) or ('存货' in str(x)) for x in wc_risks):
-            penalty += 1
+            penalty += sw.long_wc_risk_penalty
+
         if _is_num(risk_factors.get('total_penalty')):
             penalty += min(sw.long_risk_penalty_max, risk_factors.get('total_penalty'))
-        if long_raw > 0:
-            max_penalty = round(long_raw * 0.6)
-            penalty = min(penalty, max_penalty)
+
+        max_penalty_ratio = round(long_raw * sw.long_penalty_max_ratio) if long_raw > 0 else 0
+        max_penalty = min(max_penalty_ratio, 15)
+        penalty = min(penalty, max_penalty)
+
+        raw_long_term_score_before_penalty = int(min(100, max(0, round(long_raw))))
         long_raw -= penalty
 
-        ipo_trade_score = int(min(100, max(0, round(trade_score))))
+        raw_trade_signal_score = int(min(100, max(0, round(trade_score))))
         long_term_score = int(min(100, max(0, round(long_raw))))
         valuation_pressure = self._valuation_pressure_label(valuation_score, valuation)
-        ipo_trade_label = self._score_band(ipo_trade_score, high=75, mid=60, low=40, high_label='极高', mid_label='高', low_label='中')
-        long_term_label = self._score_band(long_term_score, high=70, mid=55, low=25, high_label='强', mid_label='中等', low_label='中等偏弱')
+        long_term_label = self._score_band(long_term_score, high=70, mid=55, low=30, high_label='强', mid_label='中等', low_label='中等偏弱')
+
+        strict_raw = (
+            raw_trade_signal_score * 0.40
+            + long_term_score * 0.40
+            + valuation_score * 0.20
+        )
+        strict_cap = 100
+        strict_cap_reasons = []
+        if valuation_pressure == '高':
+            if theme_score < 45:
+                strict_cap = min(strict_cap, 58)
+                strict_cap_reasons.append('估值压力高且赛道/主题弱，严格打新分封顶58')
+            elif fundamental_score < 55:
+                strict_cap = min(strict_cap, 58)
+                strict_cap_reasons.append('估值压力高且基本面不足，严格打新分封顶58')
+            else:
+                strict_cap = min(strict_cap, 64)
+                strict_cap_reasons.append('估值压力高，严格打新分封顶64')
+        if long_term_score < 50:
+            strict_cap = min(strict_cap, 58)
+            strict_cap_reasons.append('长期投资分偏弱，严格打新分封顶58')
+        elif long_term_score < 55:
+            strict_cap = min(strict_cap, 62)
+            strict_cap_reasons.append('长期投资分不足55，严格打新分封顶62')
+        if valuation_score < 40:
+            strict_cap = min(strict_cap, 58)
+            strict_cap_reasons.append('估值分低于40，严格打新分封顶58')
+
+        strict_ipo_score = int(min(strict_cap, max(0, round(strict_raw))))
+        ipo_trade_score = strict_ipo_score
+        ipo_trade_label = self._score_band(ipo_trade_score, high=70, mid=60, low=45, high_label='高', mid_label='中', low_label='偏谨慎')
 
         reasons = []
-        if ipo_trade_score >= 75:
+        if fundamental_score >= 70:
+            reasons.append('基本面扎实，是严格打新评分的主要支撑')
+        elif fundamental_score >= 55:
+            reasons.append('基本面尚可，但仍需结合估值和热度验证')
+        else:
+            reasons.append('基本面偏弱，不能只依赖超购热度')
+
+        if valuation_score >= 65:
+            reasons.append('估值具备一定安全边际')
+        elif valuation_score >= 55:
+            reasons.append('估值大致合理，需继续对比同行')
+        elif valuation_pressure == '高':
+            reasons.append('估值压力高，需谨慎对待定价风险')
+        else:
+            reasons.append('估值吸引力不足，需人工复核')
+
+        if theme_score >= 60:
+            reasons.append('赛道主题和港股通路径对中期关注度有支撑')
+        elif theme_score < 35:
+            reasons.append('赛道热度或稀缺性不足，难以消化高估值')
+
+        if raw_trade_signal_score >= 75:
             reasons.append('公开认购/筹码/资金信号强，首日交易属性突出')
-        elif ipo_trade_score >= 60:
+        elif raw_trade_signal_score >= 60:
             reasons.append('打新交易信号偏强')
         else:
             reasons.append('打新交易信号未形成强共识')
 
+        stock_quality_dimensions = stock_quality.get('dimensions', {})
+        ocf_dim = stock_quality_dimensions.get('ocf_quality', {})
+        if ocf_dim.get('label') == '强':
+            reasons.append('经营现金流质量强，利润含金量高')
+        moat_dim = stock_quality_dimensions.get('moat_depth', {})
+        if moat_dim.get('label') == '强':
+            reasons.append('护城河深度强，具备长期竞争壁垒')
+        health_dim = stock_quality_dimensions.get('financial_health', {})
+        if health_dim.get('label') == '强':
+            reasons.append('财务健康度高，现金跑道充裕')
+
+        if moat_competitive_score >= 70:
+            reasons.append('赛道稀缺+市场份额提供长期护城河')
+        if financial_health_score >= 70:
+            reasons.append('财务结构稳健，中长期经营风险可控')
+        if stock_connect_score >= 60:
+            reasons.append('港股通入通路径清晰，有望获得南下资金覆盖')
+        elif stock_connect_score >= 40:
+            reasons.append('港股通入通路径可期，关注市值增长进度')
+
+        if fisher_label == '适配':
+            reasons.append('Fisher视角下具备较好的长期跟踪条件')
+        elif fisher_label == '部分适配':
+            reasons.append('Fisher视角部分成立，但仍需观察经营质量')
+        if lynch_label == '适配':
+            reasons.append('Lynch视角下具备较好的长线持有条件')
+        elif lynch_label == '部分适配':
+            reasons.append('Lynch视角仅部分成立，估值与盈利仍需观察')
+
+        customer_quality = customer.get('customer_quality_score', 0)
+        if customer_quality == 0 and customer.get('customer_quality_label') == '缺失':
+            customer_quality = 35
         if customer_quality >= 60:
             reasons.append('头部客户验证和复购能力对长期质量有支撑')
-        if _is_num(moat_score) and moat_score >= 4:
-            reasons.append('研发/专利/订单等护城河线索对长期质量有支撑')
-        if fisher_label == '适配':
-            reasons.append('Fisher 视角下具备较好的长期跟踪条件')
-        elif fisher_label == '部分适配':
-            reasons.append('Fisher 视角部分成立，但仍需观察经营质量')
-        if lynch_label == '适配':
-            reasons.append('Lynch 视角下具备较好的长线持有条件')
-        elif lynch_label == '部分适配':
-            reasons.append('Lynch 视角仅部分成立，估值与盈利仍需观察')
+
         if cashflow.get('cash_quality_label') == '弱':
             reasons.append('经营现金流偏弱，需关注营运资金压力')
         if wc_risks:
             reasons.append('营运资本存在库存/应收或月耗现金压力')
         if valuation_pressure in ('中', '高'):
             reasons.append(f'估值压力{valuation_pressure}，不宜只看热度忽略定价')
+        if valuation_score <= sw.long_valuation_default_score + 5:
+            reasons.append('估值数据有局限，建议人工复核估值合理性')
 
-        if ipo_trade_score >= 70 and long_term_score < 55:
-            recommendation = '可打新，但不宜当成长线价值股处理'
-        elif ipo_trade_score >= 70 and long_term_score >= 65 and valuation_pressure != '高':
+        if strict_cap_reasons:
+            for cap_msg in strict_cap_reasons:
+                if cap_msg not in reasons:
+                    reasons.append(cap_msg)
+
+        if ipo_trade_score >= 70 and long_term_score >= 62 and valuation_score >= 55 and valuation_pressure != '高':
             recommendation = '积极申购，可跟踪中线持有条件'
-        elif ipo_trade_score >= 55:
+        elif ipo_trade_score >= 60 and long_term_score >= 55 and valuation_pressure != '高':
+            recommendation = '可小注参与，基本面与估值需继续跟踪'
+        elif raw_trade_signal_score >= 75 and long_term_score >= 55 and valuation_pressure != '高':
             recommendation = '可小注参与，偏首日交易'
+        elif ipo_trade_score >= 55 or raw_trade_signal_score >= 70:
+            recommendation = '谨慎试水'
         else:
             recommendation = '谨慎申购或观望'
 
+        long_term_penalty_reasons_list = [
+            '现金质量弱' if cashflow.get('cash_quality_label') == '弱' else None,
+            f'现金runway不足12个月({runway_months:.1f}月)' if _is_num(runway_months) and runway_months < 12 else None,
+            '营运资本风险' if any(('应收' in str(x)) or ('存货' in str(x)) for x in wc_risks) else None,
+            f'风险因素扣分{risk_factors.get("total_penalty", 0)}' if _is_num(risk_factors.get('total_penalty')) and risk_factors.get('total_penalty') > 0 else None,
+        ]
+        long_term_penalty_reasons_list = [r for r in long_term_penalty_reasons_list if r]
+
         return {
             'ipo_trade_score': ipo_trade_score,
+            'strict_ipo_score': strict_ipo_score,
+            'raw_trade_signal_score': raw_trade_signal_score,
+            'strict_scoring_profile': self.STRICT_SCORING_PROFILE,
             'ipo_trade_label': ipo_trade_label,
             'long_term_score': long_term_score,
+            'raw_long_term_score_before_penalty': raw_long_term_score_before_penalty,
+            'long_term_penalty': penalty,
+            'long_term_penalty_reasons': long_term_penalty_reasons_list,
             'long_term_label': long_term_label,
             'valuation_pressure_label': valuation_pressure,
             'subscription_recommendation': recommendation,
             'recommendation_reasons': reasons[:5],
+            'strict_cap_reasons': strict_cap_reasons,
             'fisher_label': fisher_label,
             'lynch_label': lynch_label,
         }
@@ -160,6 +377,15 @@ class ScoringSystem:
         has_heat = _is_num(over_sub_ratio) and over_sub_ratio_source in ("actual", "forecast", "estimated", "historical_actual", "historical_forecast", "post_listing_actual")
         has_market = _is_num(forecast_over_sub_ratio) or market_heat in ("温和", "热门", "极热")
 
+        optimized = ScoringSystem._try_load_optimized_weights()
+        if optimized:
+            profile_name = 'live_heat' if (has_heat or has_market) else 'prospectus_only'
+            return {
+                'name': f'{profile_name}_optimized',
+                'weights': optimized,
+                'reason': '使用贝叶斯优化权重',
+            }
+
         sw = SETTINGS.scoring
         if has_heat or has_market:
             return {
@@ -185,6 +411,23 @@ class ScoringSystem:
                 },
                 'reason': '未检测到有效热度数据，使用招股书阶段权重',
             }
+
+    @staticmethod
+    def _try_load_optimized_weights():
+        try:
+            import yaml
+            path = SETTINGS.backtest.optimized_weights_path
+            with open(path) as f:
+                opt = yaml.safe_load(f)
+            if opt and opt.get("weights") and isinstance(opt["weights"], dict):
+                w = opt["weights"]
+                required = ["trade", "fundamental", "valuation", "theme", "data_quality"]
+                if all(k in w for k in required):
+                    logger.info("加载优化权重: %s", w)
+                    return w
+        except Exception:
+            pass
+        return None
 
     def _calc_valuation_adjustments(self, ipo, prospectus_info, reasons):
         """计算估值相关的 peer_adj 和 val_penalty，集中管理估值调整逻辑。"""
@@ -219,7 +462,7 @@ class ScoringSystem:
             is_clearly_overvalued = (
                 ('明显偏贵' in str(peer_valuation_pos)) or
                 ('PS辅助(明显偏贵)' in str(peer_valuation_pos)) or
-                (_is_num(relative_ps_premium) and float(relative_ps_premium) > 100)
+                (_is_num(relative_ps_premium) and float(relative_ps_premium) > 80)
             )
             is_somewhat_overvalued = (
                 _is_num(relative_ps_premium) and float(relative_ps_premium) > 50
@@ -238,10 +481,10 @@ class ScoringSystem:
             is_somewhat_overvalued = False
 
         if is_clearly_overvalued:
-            peer_adj = -5
+            peer_adj = -6
             reasons.append("同行估值明显偏贵：公司PS显著高于同行中位数")
         elif is_somewhat_overvalued:
-            peer_adj = -2
+            peer_adj = -3
             reasons.append(f"同行估值偏贵：公司PS高于同行中位数{relative_ps_premium:.0f}%")
         elif _is_num(peer_score_val) and peer_score_val > 0:
             if insufficient_peer_sample:
@@ -424,8 +667,8 @@ class ScoringSystem:
         elif _is_num(cs_score) and cs_score > 0:
             ipo_detail_parts.append('基石一般')
         sc = scoring_result.get('components', {})
-        market_score = sc.get('market', {}).get('score', 0)
-        if market_score >= 4:
+        heat_score = sc.get('heat', {}).get('score', 0)
+        if heat_score >= 40:
             ipo_detail_parts.append('市场情绪偏强')
         if not ipo_detail_parts:
             ipo_detail_parts.append('打新交易数据有限')
@@ -467,14 +710,12 @@ class ScoringSystem:
             'quality': {'score': 0, 'label': '缺失', 'detail': '未获取到招股书关键财务数据'},
             'cornerstone': {'score': 0, 'label': '缺失', 'detail': '未获取到基石分析'},
             'scale': {'score': 0, 'label': '缺失', 'detail': '未获取到公开集资额'},
-            'market': {'score': 0, 'label': '缺失', 'detail': '未获取到市场热度'},
         }
 
         sw = SETTINGS.scoring
         _HEAT_SCORE_MAX = sw.heat_max
         _QUALITY_SCORE_MAX = sw.quality_max
         _SCALE_SCORE_MAX = sw.scale_max
-        _MARKET_SCORE_MAX = sw.market_max
         _CORNERSTONE_SCORE_MAX = sw.cornerstone_max
 
         over_sub = ipo.get('over_sub_ratio')
@@ -536,11 +777,27 @@ class ScoringSystem:
 
         cornerstone_analysis = prospectus_info.get('cornerstone_analysis') or {}
         cornerstone_score = cornerstone_analysis.get('score')
-        cornerstone_analysis.get('label')
         has_cornerstone_section = cornerstone_analysis.get('has_cornerstone_section', False)
         
         if _is_num(cornerstone_score) and has_cornerstone_section:
-            component_score = min(20, round(cornerstone_score / 5))
+            # 改进映射：使用分段映射提高70-90分常见段的区分度
+            if cornerstone_score >= 90:
+                component_score = 19
+            elif cornerstone_score >= 80:
+                component_score = 17
+            elif cornerstone_score >= 70:
+                component_score = 15
+            elif cornerstone_score >= 60:
+                component_score = 12
+            elif cornerstone_score >= 50:
+                component_score = 10
+            elif cornerstone_score >= 40:
+                component_score = 8
+            elif cornerstone_score >= 30:
+                component_score = 6
+            else:
+                component_score = 4
+            component_score = min(20, component_score)
             components['cornerstone']['score'] = component_score
             components['cornerstone']['label'] = cornerstone_analysis.get('label', 'N/A')
             combo = cornerstone_analysis.get('combination_summary')
@@ -579,7 +836,7 @@ class ScoringSystem:
         public_offer_ratio = prospectus_info.get('public_offer_ratio_pct')
         if _is_num(public_offer) and _is_num(public_offer_ratio) and public_offer_ratio > 0:
             total_fund = public_offer / (public_offer_ratio / 100)
-        elif not total_fund:
+        elif total_fund is None:
             total_fund = public_offer
         if total_fund:
             if total_fund > 10:
@@ -598,6 +855,8 @@ class ScoringSystem:
 
         forecast_over = ipo.get('forecast_over_sub_ratio')
         market_heat = ipo.get('market_heat', '')
+        market_bonus = 0
+        market_detail = ""
         if _is_num(forecast_over) and _is_num(over_sub) and over_sub > 0:
             trend_gap = (forecast_over - over_sub) / over_sub
             base_label = {
@@ -608,47 +867,51 @@ class ScoringSystem:
                 'historical_forecast': '历史预测',
             }.get(ipo.get('over_sub_ratio_source'), '可用基准')
             if trend_gap >= 0.3:
-                components['market']['score'] = 5
-                components['market']['label'] = "继续走强"
+                market_bonus = 5
+                market_detail = "趋势继续走强"
             elif trend_gap >= 0.1:
-                components['market']['score'] = 4
-                components['market']['label'] = "偏强"
+                market_bonus = 4
+                market_detail = "趋势偏强"
             elif trend_gap >= -0.1:
-                components['market']['score'] = 3
-                components['market']['label'] = "平稳"
+                market_bonus = 3
+                market_detail = "趋势平稳"
             else:
-                components['market']['score'] = 1
-                components['market']['label'] = "回落"
-            components['market']['detail'] = f"预测超购 {forecast_over:.2f} 倍，较{base_label}变化 {trend_gap*100:.1f}%"
+                market_bonus = 1
+                market_detail = "趋势回落"
+            market_detail += f"，预测超购 {forecast_over:.2f} 倍，较{base_label}变化 {trend_gap*100:.1f}%"
         else:
             if market_heat == "极热":
-                components['market']['score'] = 5
-                components['market']['label'] = "极热"
+                market_bonus = 5
+                market_detail = "市场极热"
                 reasons.append("市场极度火热")
             elif market_heat == "热门":
-                components['market']['score'] = 4
-                components['market']['label'] = "热门"
+                market_bonus = 4
+                market_detail = "市场热门"
                 reasons.append("市场热门")
             elif market_heat == "温和":
-                components['market']['score'] = 3
-                components['market']['label'] = "温和"
-            else:
-                components['market']['score'] = 0
-                components['market']['label'] = "缺失"
-            components['market']['detail'] = f"当前热度 {market_heat}" if market_heat else "未获取到热度"
+                market_bonus = 3
+                market_detail = "市场温和"
+        if market_bonus > 0 and components['heat']['score'] > 0:
+            components['heat']['score'] = min(_HEAT_SCORE_MAX, components['heat']['score'] + market_bonus)
+            if market_detail:
+                components['heat']['detail'] += f"；{market_detail}"
+        elif market_bonus > 0 and components['heat']['score'] == 0:
+            components['heat']['score'] = market_bonus
+            components['heat']['label'] = '市场热度'
+            components['heat']['detail'] = market_detail
 
-        subscription_raw = components['heat']['score'] + components['scale']['score'] + components['market']['score'] + components['cornerstone']['score']
-        subscription_raw_max = _HEAT_SCORE_MAX + _SCALE_SCORE_MAX + _MARKET_SCORE_MAX + _CORNERSTONE_SCORE_MAX
-        subscription_score = min(100, round(subscription_raw / subscription_raw_max * 100))
+        subscription_raw = components['heat']['score'] + components['scale']['score'] + components['cornerstone']['score']
+        subscription_raw_max = _HEAT_SCORE_MAX + _SCALE_SCORE_MAX + _CORNERSTONE_SCORE_MAX
+        subscription_score = min(100, round(subscription_raw / subscription_raw_max * 100)) if subscription_raw_max else 0
         fundamental_score = min(100, round(components['quality']['score'] / _QUALITY_SCORE_MAX * 100))
 
         sc = signal_components or {}
 
         trade_raw = (
             components['heat']['score'] + components['scale']['score']
-            + components['market']['score'] + components['cornerstone']['score']
+            + components['cornerstone']['score']
         )
-        trade_max = _HEAT_SCORE_MAX + _SCALE_SCORE_MAX + _MARKET_SCORE_MAX + _CORNERSTONE_SCORE_MAX
+        trade_max = _HEAT_SCORE_MAX + _SCALE_SCORE_MAX + _CORNERSTONE_SCORE_MAX
         if sc:
             trade_raw += sc.get('real_money', {}).get('score', 0)
             trade_raw += sc.get('float_structure', {}).get('score', 0)
@@ -657,7 +920,16 @@ class ScoringSystem:
 
         val_framework = sc.get('valuation_framework', {}) if sc else {}
         val_raw = val_framework.get('score', 0)
-        valuation_score = min(100, round(val_raw / 20 * 100))
+        val_max = val_framework.get('max_score', 20)
+        # 使用平方根归一化，缓解缺失项导致的分数断崖
+        if val_max > 0 and val_raw > 0:
+            ratio = val_raw / val_max
+            valuation_score = min(100, round((ratio ** 0.75) * 100))
+        elif val_raw == 0:
+            valuation_score = 0
+            reasons.append("估值框架数据缺失，估值维度按0分计")
+        else:
+            valuation_score = 0
 
         theme_raw = 0
         theme_max = 35
@@ -722,8 +994,9 @@ class ScoringSystem:
                 penalty_reason = f"基石红旗扣{penalty_from_normal}分: {[f for f in normal_flags]}"
 
             if severe_flags:
-                score = min(score, 60)
-                cap_reason = f"严重基石问题封顶60: {[f for f in severe_flags]}"
+                cap_value = SETTINGS.cornerstone.score_cap_severe_red_flags
+                score = min(score, cap_value)
+                cap_reason = f"严重基石问题封顶{cap_value}: {[f for f in severe_flags]}"
                 if penalty_reason:
                     penalty_reason += f"; {cap_reason}"
                 else:
@@ -745,8 +1018,28 @@ class ScoringSystem:
             'valuation_score': valuation_score,
             'theme_score': theme_score,
             'ipo_trade_score': strategy_scores['ipo_trade_score'],
+            'strict_ipo_score': strategy_scores['strict_ipo_score'],
+            'raw_trade_signal_score': strategy_scores['raw_trade_signal_score'],
+            'strict_scoring_profile': strategy_scores['strict_scoring_profile'],
+            'strict_cap_reasons': strategy_scores.get('strict_cap_reasons', []),
             'long_term_score': strategy_scores['long_term_score'],
+            'raw_long_term_score_before_penalty': strategy_scores.get('raw_long_term_score_before_penalty'),
+            'long_term_penalty': strategy_scores.get('long_term_penalty'),
+            'long_term_penalty_reasons': [r for r in strategy_scores.get('long_term_penalty_reasons', []) if r],
         }
+
+        # 为 components 补充 100 分制归一化分数，使维度拆解与评分概览量纲一致
+        _COMPONENT_MAXS = {
+            'heat': _HEAT_SCORE_MAX,
+            'quality': _QUALITY_SCORE_MAX,
+            'scale': _SCALE_SCORE_MAX,
+            'cornerstone': _CORNERSTONE_SCORE_MAX,
+        }
+        for ckey, cmax in _COMPONENT_MAXS.items():
+            if ckey in components:
+                raw = components[ckey].get('score', 0)
+                components[ckey]['max_score'] = cmax
+                components[ckey]['normalized_score'] = min(100, round(raw / cmax * 100)) if cmax else 0
 
         scoring_result = {
             'score': min(100, max(0, score)),
@@ -756,6 +1049,9 @@ class ScoringSystem:
             'valuation_score': valuation_score,
             'theme_score': theme_score,
             **strategy_scores,
+            'raw_trade_signal_score': strategy_scores['raw_trade_signal_score'],
+            'strict_ipo_score': strategy_scores['strict_ipo_score'],
+            'strict_scoring_profile': strategy_scores['strict_scoring_profile'],
             'reasons': reasons,
             'components': components,
             'weight_profile': weight_profile,
@@ -772,6 +1068,9 @@ class ScoringSystem:
                 'weight_profile': weight_profile,
                 'heat_score': components['heat']['score'],
                 'trade_score': trade_score,
+                'raw_trade_signal_score': strategy_scores['raw_trade_signal_score'],
+                'strict_ipo_score': strategy_scores['strict_ipo_score'],
+                'strict_scoring_profile': strategy_scores['strict_scoring_profile'],
                 'cornerstone_red_flags': cornerstone_red_flags,
                 'final_score_before_cap': final_score_before_cap,
                 'final_score_after_cap': final_score_after_cap,
