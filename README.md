@@ -131,6 +131,22 @@ hkipo_analyzer/
 
 ## 更新日志
 
+### 0.5.4-alpha — 2026-05-22
+
+- **refactor: 评分系统管道化重构**：将 `ScoringSystem` (~1200行) 拆分为类型安全、职责清晰的评分管道
+  - 新建 `ipo_analyzer/scoring/` 子包，含 6 个独立组件：
+    - `AnalyzerOutputAdapter`：分析器 dict → 强类型 `ScoringInput`
+    - `DimensionScorer`：五维原始分计算（trade/fundamental/valuation/theme/data_quality）
+    - `AdjustmentEngine`：集中管理 peer/valuation/pricing_gap/risk/cornerstone 调整项
+    - `StrategyScorer`：long_term_score / strict_ipo_score 策略评分
+    - `Recommender`：推荐/原因/等级评定（与分数计算解耦）
+    - `ScoringPipeline`：串联所有组件，每步自动记录 `ScoreTrace`
+  - 新增核心类型契约：`ScoringInput`、`DimensionScores`、`Adjustments`、`StrategyScores`、`ScoringResult`、`ScoreTrace`、`WeightProfile`
+  - 保留 `scoring.py` 作为兼容薄层，现有调用方零改动
+  - `settings.py` 新增 `DimensionThresholds` 和 `AdjustmentThresholds`
+  - `is_biotech()` 统一提取至 `_utils.py`，替代散落在 valuation/scoring/quality/signal 四处的重复判断
+  - 新增 7 个测试文件、46 个测试用例全部通过（含 8 个原有回归测试）
+
 ### 0.5.0-alpha — 2026-05-13
 - **feat: 新增 `blogger_monitor` 子包**：自动搜索和分析港股新股打新博主观点，提供市场情绪参考
   - `models.py`：SearchResultModel、RelevanceResultModel、BloggerOpinionModel、ConsensusResultModel（统一 Pydantic v2）
