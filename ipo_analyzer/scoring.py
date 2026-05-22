@@ -10,12 +10,18 @@ from .settings import SETTINGS
 import logging
 logger = logging.getLogger(__name__)
 
+from ipo_analyzer.scoring import ScoringPipeline, AnalyzerOutputAdapter
+
 _AH_DUAL_RE = re.compile(r'dual\s+list|a\s*\+\s*h|a股.*h股|h股.*a股|ah上市|a shares?\s+and\s+h shares?', re.IGNORECASE)
 
 
 class ScoringSystem:
     """评分系统"""
     STRICT_SCORING_PROFILE = "balanced_strict_2026"
+
+    def __init__(self):
+        self.pipeline = ScoringPipeline()
+        self.adapter = AnalyzerOutputAdapter()
 
     @staticmethod
     def _score_band(score, high=70, mid=50, low=35, high_label="高", mid_label="中", low_label="偏弱"):
@@ -1079,5 +1085,16 @@ class ScoringSystem:
         }
 
         scoring_result['dimension_grades'] = self._calculate_dimension_grades(scoring_result, prospectus_info, ipo)
+
+        # === 新管道委托（兼容层）===
+        try:
+            stock_code = ipo.get("hk_code", "") if isinstance(ipo, dict) else getattr(ipo, "hk_code", "")
+            company_name = ipo.get("company_name", "") if isinstance(ipo, dict) else getattr(ipo, "company_name", "")
+            inp = self.adapter.adapt(stock_code, company_name, prospectus_info)
+            new_result = self.pipeline.run(inp)
+            scoring_result["score_trace_structured"] = new_result.score_trace.to_flat_dict()
+            scoring_result["weight_profile"] = new_result.weight_profile
+        except Exception as e:
+            scoring_result["_pipeline_error"] = str(e)
 
         return scoring_result

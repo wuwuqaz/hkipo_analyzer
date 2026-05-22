@@ -12,7 +12,16 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from ipo_analyzer.peer_comps import _split_peer_samples
-from ipo_analyzer.scoring import ScoringSystem
+# ScoringSystem lives in ipo_analyzer/scoring.py (module), not the scoring/ package.
+# Import via importlib to avoid package/shadowing ambiguity.
+import importlib.util
+_scoring_spec = importlib.util.spec_from_file_location(
+    "ipo_analyzer.scoring_legacy",
+    os.path.join(os.path.dirname(__file__), "..", "ipo_analyzer", "scoring.py"),
+)
+_scoring_mod = importlib.util.module_from_spec(_scoring_spec)
+_scoring_spec.loader.exec_module(_scoring_mod)
+ScoringSystem = _scoring_mod.ScoringSystem
 from ipo_analyzer.industry_router import classify_company
 from ipo_analyzer.analyzers import ValuationAnalyzer
 

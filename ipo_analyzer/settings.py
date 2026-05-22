@@ -150,6 +150,34 @@ class ScoringWeights:
 
 
 @dataclass
+class DimensionThresholds:
+    """维度评分内部阈值"""
+    heat_max: float = 45.0
+    scale_max: float = 10.0
+    cornerstone_max: float = 20.0
+    real_money_max: float = 20.0
+    float_max: float = 15.0
+    sponsor_max: float = 10.0
+    greenshoe_max: float = 5.0
+    clawback_max: float = 5.0
+
+
+@dataclass
+class AdjustmentThresholds:
+    """调整项阈值"""
+    peer_excellent_bonus: float = 6.0
+    peer_overvalued_penalty: float = -6.0
+    val_expensive_penalty: float = -5.0
+    val_high_penalty: float = -3.0
+    val_cheap_bonus: float = 2.0
+    risk_severe_categories: tuple = ("legal", "regulatory", "accounting")
+    risk_severe_bonus: float = 2.0
+    risk_max_penalty: float = 20.0
+    cornerstone_redflag_penalty_each: float = 3.0
+    cornerstone_redflag_max: float = 15.0
+
+
+@dataclass
 class BacktestSettings:
     """回测框架 & 贝叶斯优化配置"""
     min_samples: int = 10
@@ -538,6 +566,8 @@ class Settings:
     data_sanitization: DataSanitizationThresholds = field(default_factory=DataSanitizationThresholds)
     cornerstone: CornerstoneThresholds = field(default_factory=CornerstoneThresholds)
     backtest: BacktestSettings = field(default_factory=BacktestSettings)
+    dimension: DimensionThresholds = field(default_factory=DimensionThresholds)
+    adjustment: AdjustmentThresholds = field(default_factory=AdjustmentThresholds)
 
     def to_dict(self) -> dict[str, Any]:
         from dataclasses import asdict
