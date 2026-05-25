@@ -7,6 +7,7 @@ from .quality_analyzer import ProspectusQualityAnalyzer  # noqa: F401
 from .signal_analyzer import SignalComponentAnalyzer  # noqa: F401
 from .utils import _is_num
 from .settings import SETTINGS
+from ._threadsafe_cache import ThreadSafeLRUCache
 
 import logging
 logger = logging.getLogger(__name__)
@@ -15,8 +16,7 @@ from ipo_analyzer.scoring import ScoringPipeline, AnalyzerOutputAdapter
 
 _AH_DUAL_RE = re.compile(r'dual\s+list|a\s*\+\s*h|a股.*h股|h股.*a股|ah上市|a shares?\s+and\s+h shares?', re.IGNORECASE)
 
-_optimized_weights_cache: Optional[dict] = None
-_optimized_weights_cache_time: float = 0.0
+_optimized_weights_cache = ThreadSafeLRUCache(maxsize=8)
 
 
 class ScoringSystem:
@@ -464,9 +464,9 @@ class ScoringSystem:
         except (OSError, FileNotFoundError):
             return None
 
-        global _optimized_weights_cache, _optimized_weights_cache_time
-        if mtime == _optimized_weights_cache_time and _optimized_weights_cache:
-            return _optimized_weights_cache
+        cached = _optimized_weights_cache.get("weights")
+        if cached is not None:
+            return cached
 
         try:
             import yaml
@@ -477,8 +477,7 @@ class ScoringSystem:
                 required = ["trade", "fundamental", "valuation", "theme", "data_quality"]
                 if all(k in w for k in required):
                     logger.info("加载优化权重: %s", w)
-                    _optimized_weights_cache = w
-                    _optimized_weights_cache_time = mtime
+                    _optimized_weights_cache.put("weights", w)
                     return w
         except Exception:
             pass
