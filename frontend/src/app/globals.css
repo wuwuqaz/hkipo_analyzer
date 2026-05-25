@@ -26,12 +26,14 @@
 }
 
 html {
+  overflow-x: hidden;
   background:
     radial-gradient(circle at top, rgba(54, 191, 250, 0.2), transparent 30%),
     linear-gradient(180deg, #0c1a2f 0%, #07111f 55%, #030812 100%);
 }
 
 body {
+  overflow-x: hidden;
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), "IBM Plex Sans", sans-serif;

@@ -1,8 +1,6 @@
 import re
 import logging
 from ..utils import _is_num, extract_text_excerpts
-from ..settings import SETTINGS
-from . import _adjust_for_unit
 logger = logging.getLogger(__name__)
 
 
@@ -51,7 +49,6 @@ class ShareholderAnalyzer:
                 last_round = rounds[-1]
                 cost_per_share = last_round.get('cost_per_share')
                 offer_price = prospectus_info.get('offer_price')
-                fin_currency = prospectus_info.get('financial_currency', 'RMB')
 
                 if _is_num(cost_per_share) and cost_per_share > 0 and _is_num(offer_price) and offer_price > 0:
                     premium = (offer_price - cost_per_share) / cost_per_share * 100

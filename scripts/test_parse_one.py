@@ -136,7 +136,7 @@ if info.get('sector') not in ('healthcare', 'medical', 'biotech', 'pharmaceutica
         assertion_failures.append(f"FAIL: Non-healthcare sector should not have VBP risk, but score={biz.get('vbp_risk_score')}")
         print(f"  ❌ VBP风险误判: 非医疗行业不应有VBP风险 (score={biz.get('vbp_risk_score')})")
     else:
-        print(f"  ✅ 非医疗行业无VBP/DRG/DIP风险")
+        print("  ✅ 非医疗行业无VBP/DRG/DIP风险")
 
 print()
 print("=" * 60)

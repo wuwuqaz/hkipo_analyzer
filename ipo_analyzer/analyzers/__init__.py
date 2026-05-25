@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 def _is_unit_in_thousands(context: str) -> bool:
     """检测财务数据是否以千元为单位。"""
-    return any(kw in context for kw in ("rmb'000", "rmb'000", "in thousands"))
+    return any(kw in context for kw in ("rmb'000", "rmb'000", "in thousands", "人民幣千元", "人民币千元", "以千元計", "以千元计"))
 
 
 def _adjust_for_unit(value: float, context: str) -> float:
@@ -35,6 +35,8 @@ from ._company_profile import CompanyProfileAnalyzer  # noqa: E402
 from ._management_governance import ManagementGovernanceAnalyzer  # noqa: E402
 from ._balance_sheet import BalanceSheetAnalyzer  # noqa: E402
 from ._profit_sustainability import ProfitSustainabilityAnalyzer  # noqa: E402
+from ._sponsor_track_record import SponsorTrackRecordAnalyzer  # noqa: E402
+from ._investment_thesis import InvestmentThesisAnalyzer  # noqa: E402
 
 __all__ = [
     "ValuationAnalyzer",
@@ -56,4 +58,7 @@ __all__ = [
     "ManagementGovernanceAnalyzer",
     "BalanceSheetAnalyzer",
     "ProfitSustainabilityAnalyzer",
+    # 保荐人战绩
+    "SponsorTrackRecordAnalyzer",
+    "InvestmentThesisAnalyzer",
 ]

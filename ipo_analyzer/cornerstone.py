@@ -1,8 +1,109 @@
 import os
 import re
+import logging
 
 from .utils import _contains_any, _infer_sector
 from .settings import SETTINGS
+
+logger = logging.getLogger(__name__)
+
+# ---- 基石分析器预编译正则 ----
+_CRE_CONTROL = re.compile(r'[\x00-\x1f\x7f-\x9f\u0002]+')
+_CRE_WHITESPACE = re.compile(r'\s+')
+_CRE_LEADING_PARENS = re.compile(r'^\([0-9]+\)\s*')
+_CRE_NUMBER = re.compile(r'([0-9,]+(?:\.[0-9]+)?)')
+_CRE_PARENS_ONLY = re.compile(r'\([0-9]+\)')
+_CRE_NUMERIC_CELL = re.compile(r'(?:US\$|HK\$|US|HK|\$)?[0-9][0-9,]*(?:\.[0-9]+)?%?(?:\([0-9]+\))?')
+_CRE_PARENS_CAPTURE = re.compile(r'\([0-9]+\)(.+)')
+_CRE_CURRENCY_PREFIX = re.compile(r'^(?:US\$|HK\$|US|HK|\$)')
+_CRE_STRIP_PARENS = re.compile(r'\([0-9]+\)$')
+_CRE_HAS_LETTER = re.compile(r'[a-zA-Z]')
+_CRE_CURRENCY_START = re.compile(r'^(?:US\$|HK\$|\$)')
+_CRE_SECTION_HEADER = re.compile(r'\n\n([A-Z][A-Za-z\s]{3,60})\s*\n')
+_CRE_CN_QUOTED = re.compile(r'"([^"]+)"')
+_CRE_CN_QUOTED2 = re.compile(r'「([^」]+)」')
+_CRE_FOR_AND_ON_BEHALF = re.compile(r'\s+for and on behalf of\s+', re.IGNORECASE)
+_CRE_ALL_PARENS = re.compile(r'\([^()]*\)')
+
+# flush_row 噪音检测预编译（原在函数内每次编译）
+_CRE_FLUSH_PARENS_END = re.compile(r'\([0-9]+\)$')
+_CRE_FLUSH_CLEAN_PARENS = re.compile(r'\([0-9]+\)')
+_CRE_FLUSH_NON_ALPHA = re.compile(r'[^a-z0-9%$.\s]+')
+_CRE_FLUSH_WHITESPACE = re.compile(r'\s+')
+_CRE_FLUSH_FULL_DIGITS = re.compile(r'\d{1,3}')
+_CRE_FLUSH_AMOUNT = re.compile(r'amount\d*')
+_CRE_FLUSH_GENERIC = re.compile(r'\(?[a-z\s]+\)?\s*limited\)?')
+
+# 预编译负面语境模式
+_CRE_NEGATIVE_CTX_1 = re.compile(r'(?:not\s+include|not\s+included|excluding|without|absence\s+of|no\s+)\s*[^,.]{0,60}?', re.IGNORECASE)
+_CRE_NEGATIVE_CTX_2 = re.compile(r'(?:未见|无|没有|不含|不包括|未纳入|未包含|除外|排除)[^，。,\.]{0,30}?')
+_CRE_NEGATIVE_CORNERSTONE_MENTION = re.compile(
+    r'(?:'
+    r'\b(?:no|without)\s+(?:any\s+)?cornerstone\s+investors?\b|'
+    r'\b(?:did|does|do|has|have|had|will)\s+not\s+'
+    r'(?:introduce|appoint|identify|include|have|enter\s+into|entered\s+into|bring\s+in)\s+'
+    r'(?:any\s+)?cornerstone\b|'
+    r'\b(?:has|have|had)\s+no\s+cornerstone\b|'
+    r'\bno\s+cornerstone\s+investment\s+agreement\b|'
+    r'\bnot\s+entered\s+into\s+(?:any\s+)?cornerstone\s+investment\s+agreement\b|'
+    r'(?:无|没有|未引入|未设有|不设|未订立|并无)[^。；;\n]{0,40}?基石(?:投资者|投资协议)?'
+    r')',
+    re.IGNORECASE,
+)
+
+# 预编译_at_end_marker节尾搜索
+_CRE_SECTION_FOOTER = re.compile(r'([IVX]+)\s*\n?$')
+
+# 预编译_extract_cornerstone_pct模式
+_CRE_CORNERSTONE_KEYWORD_PCT = re.compile(r'cornerstone investors?.{0,200}?([0-9]+(?:\.[0-9]+)?)%', re.IGNORECASE | re.DOTALL)
+_CRE_PCT_PATTERNS = [re.compile(p, re.IGNORECASE | re.DOTALL) for p in [
+    r'represent(?:s|ing)? approximately ([0-9]+(?:\.[0-9]+)?)%',
+    r'([0-9]+(?:\.[0-9]+)?)% of (?:the|our) (?:offer|global offering|placing) shares',
+    r'([0-9]+(?:\.[0-9]+)?)% of the total offer shares',
+]]
+_CRE_SHARE_PCT_PATTERNS = [re.compile(p, re.IGNORECASE | re.DOTALL) for p in [
+    r'([0-9,]+(?:\.[0-9]+)?)\s*shares?.{0,120}?represent(?:s|ing)? approximately ([0-9]+(?:\.[0-9]+)?)%',
+    r'([0-9,]+(?:\.[0-9]+)?)\s*shares?.{0,120}?out of ([0-9,]+(?:\.[0-9]+)?)\s*shares?',
+]]
+
+# 预编译_extract_cornerstone_by_regex投资者匹配
+_CRE_INVESTOR_REGEX = re.compile(
+    r'([A-Z][A-Za-z\s]{5,60}(?:Limited|Ltd|Capital|Fund|Investment|Partners?|Corporation|Inc\.))\s+'
+    r'([0-9,]+(?:\.[0-9]+)?)\s+'
+    r'([0-9,]+(?:\.[0-9]+)?)\s+'
+    r'([0-9,.]+(?:\.[0-9]+)?)\s+'
+    r'([0-9,.]+(?:\.[0-9]+)?)',
+)
+
+# 预编译表头前缀模式（_strip_header_from_name）
+_HEADER_PREFIX_PATTERNS = [re.compile(p, re.IGNORECASE) for p in [
+    r'Number\s+of\s+Offer\s+Shares\s+to\s+be\s+(?:acquired|subscribed)',
+    r'Approximate\s+%\s+of\s+(?:the\s+)?issued\s+share\s+capital',
+    r'Approximate\s+%\s+of\s+(?:the\s+)?Offer\s+(?:Shares|capital|Capital)',
+    r'Appropriate\s+%\s+of\s+(?:the\s+)?(?:total\s+)?issued\s+share\s+capital',
+    r'Appropriate\s+%\s+of\s+(?:the\s+)?Offer\s+(?:Shares|capital|Capital)',
+    r'Appropriate\s+%\s+of\s+(?:the\s+)?total',
+    r'%\s+of\s+Shares\s+in\s+issue',
+    r'%\s+of\s+(?:the\s+)?issued\s+share\s+capital',
+    r'%\s+of\s+Offer\s+Shares',
+    r'%\s+of\s+(?:the\s+)?Offer\s+(?:Shares|capital|Capital)',
+    r'%\s+of\s+(?:the\s+)?Offer\b',
+    r'%\s+of\s+Shares\b',
+    r'%\s+of\b',
+    r'%\s+(?:Approximate|Appropriate)\b',
+    r'%\s+',
+    r'Subscription\s+amount',
+    r'Investment\s+amount',
+    r'Total\s+investment\s+amount',
+    r'Cornerstone\s+Investor',
+    r'to\s+be\s+(?:subscribed|acquired)',
+    r'Shares\s+to\s+be',
+    r'Number\s+of',
+    r'of\s+(?:the\s+)?Offer\b',
+    r'Investment\s+',
+    r'Subscription\s+',
+    r'Amount\s+',
+]]
 
 
 def _load_investor_profiles():
@@ -24,6 +125,179 @@ def _load_investor_profiles():
 
 
 class CornerstoneAnalyzer:
+    def test_is_noise(line):
+        import re
+        _CRE_FLUSH_WHITESPACE = re.compile(r'\s+')
+        _CRE_FLUSH_NON_ALPHA = re.compile(r'[^a-zA-Z0-9\$%\-().,]')
+        _CRE_FLUSH_CLEAN_PARENS = re.compile(r'\(.*?\)')
+        _CRE_FLUSH_GENERIC = re.compile(r'\(?[a-z\s]+\)?\s*limited\)?')
+        _CRE_FLUSH_FULL_DIGITS = re.compile(r'^[\d\s,.$%\-]+$')
+        _CRE_FLUSH_AMOUNT = re.compile(r'^[\d\s,.]+\s*(million|millions|m|mn|b|bn|billion)s?$')
+        _CRE_FLUSH_PARENS_END = re.compile(r'\([0-9]+\)$')
+        _HEADER_WORD_SET = frozenset([
+            'number', 'of', 'offer', 'shares', 'to', 'be', 'acquired', 'subscribed',
+            'approximate', 'appropriate', 'subscription', 'investment', 'amount', 'total',
+            'cornerstone', 'investor', 'assuming', 'exercised', 'option', 'completion',
+            'global', 'immediately', 'upon', 'issued', 'share', 'capital', 'the',
+            'in', 'full', 'not', 'is', 'offering', 'allotment', 'over-allotment',
+            'adjustment', 'size', 'based', 'on', 'price', 'millions', 'usd', 'hk$',
+            'us$', 'u.s.', 'hk', 'down', 'nearest', 'whole', 'board', 'lot',
+            'following', 'rounded', 'subject', 'rounding', 'note', 'notes',
+            'issue', '%', 'upon', 'completion',
+        ])
+        _INVESTOR_KEYWORDS = frozenset([
+            'partners', 'capital', 'management', 'investments', 'fund', 'venture',
+            'asset', 'group', 'corporation', 'holdings', 'plc', 'inc', 'corp',
+            'limited', 'ltd', 'ltd.', 'l.p.', 'lp', 'llc', 'co', 'co.',
+            'international', 'global', 'scsp', 'sarl', 'pte', 'trust',
+            'foundation', 'pension', 'university', 'hospital', 'healthcare',
+            'biotech', 'pharma', 'pharmaceutical', 'laboratory', 'venture',
+            'ventures', 'private', 'equity', 'securities', 'financial',
+            'action', 'amr', 'hua', 'yuan', 'orient', 'junestar', 'danyuan',
+        ])
+        _NOISE_KW = [
+            'the table below sets forth details of the cornerstone',
+            'the table below sets out details of the cornerstone',
+            'the tables below set forth',
+            'the tables below set out',
+            'cornerstone investor',
+            'total investment amount',
+            'number of offer shares',
+            'approximate % of the offer shares',
+            'approximate % of the issued share capital',
+            'appropriate % of the total',
+            'appropriate % of the offer',
+            '(usd in millions)',
+            'based on the offer price',
+            'assuming the over-allotment',
+            'assuming the offer size',
+            'option is not exercised',
+            'option is exercised',
+            'offer shares to be acquired',
+            'immediately upon',
+            'completion of the global offering',
+            '(in hk$)',
+            'us$in',
+            'hk$in',
+            'note ',
+            'subject to rounding',
+            'notes:',
+            'appropriate %',
+            'of the total',
+            'issued share capital',
+            'completion of',
+            'assuming the',
+            'offer size adjustment',
+            'over-allotment option',
+        ]
+        _TABLE_KWS = ('appropriate', 'assuming', 'over-allotment', 'allotment',
+                        'offer size', 'adjustment option', 'exercised', 'not exercised',
+                        'completion of', 'global offering', 'issued share capital',
+                        'approximate %', 'of the total', 'immediately upon',
+                        'offer shares', 'subscription amount', 'number of',
+                        'option is', 'fully exercised', 'in full',
+                        'offer size adjustment', 'over-allotment option')
+        _REPEAT_KWS = ('issued share', 'capital', 'immediately', 'upon', 'appropriate', 'approximate')
+        _NOISE_EXACT = {
+            'total', 'investment', 'amount', 'subscription', 'subscription amount',
+            'number of', 'number of offer', 'offer', 'shares', 'offer shares',
+            'shares to be acquired', 'approximate', '%', '% of the', '% of our',
+            '% of total', '% of the total', 'issued share', 'share capital',
+            'capital', 'total issued', 'issued', 'immediately', 'upon',
+            'completion of', 'the global', 'offering', 'global offering',
+            '(usd in', 'usd in', 'millions)', 'millions', '($u.s. in',
+            '$u.s. in', '(in hk$)', 'in hk$', 'assuming', 'the over',
+            'allotment', 'option is', 'not', 'exercised', 'fully',
+            'cornerstone investor', 'amount1', 'shares rounded',
+            'down to nearest', 'whole board lot', 'of 500 h shares',
+            'of 200 h shares', 'approximate % of total',
+            'approximate % of h shares', 'approximate % of the',
+            'approximate % of our', 'number of offer shares',
+            'in issue immediately', 'following the completion of',
+            'the global offering', 'shares in issue immediately',
+            'cornerstone investors', 'esop', 'employee share option',
+            'employee stock ownership', 'pre ipo', 'pre-ipo',
+            'appropriate', 'appropriate %', 'total issued share',
+            'share capital immediately', 'immediately upon',
+            'cornerstone', 'investor', 'investment amount',
+            'offer price', 'global offering', 'offer size',
+            'over-allotment', 'over allotment',
+            'number', 'acquired', 'subscribed', 'to be',
+            'of offer', 'of the offer', '% of offer',
+            'shares to be', 'offer size adjustment',
+            '(us$in', '(hk$in', 'us$in', 'hk$in',
+        }
+        ll = line.lower()
+        if sum(1 for kw in _TABLE_KWS if kw in ll) >= 2:
+            return True
+        for kw in _REPEAT_KWS:
+            if ll.count(kw) >= 2:
+                return True
+        if 'set out in this prospectus' in ll:
+            return True
+        if 'cornerstone' in ll and 'number of' in ll and 'offer' in ll:
+            return True
+        if 'investment amount' in ll and 'offer shares' in ll:
+            return True
+        if ll.count('shares offering') >= 2:
+            return True
+        if ll.count('millions)') >= 2:
+            return True
+        if 'us$ in' in ll or 'hk$ in' in ll:
+            return True
+        words = ll.split()
+        if 1 <= len(words) <= 5:
+            cleaned_words = [w for w in (_CRE_FLUSH_PARENS_END.sub('', w) for w in words) if w]
+            if cleaned_words and all(w in _HEADER_WORD_SET for w in cleaned_words):
+                if not any(w in _INVESTOR_KEYWORDS for w in cleaned_words):
+                    return True
+        compact = _CRE_FLUSH_WHITESPACE.sub(' ', _CRE_FLUSH_NON_ALPHA.sub(' ', _CRE_FLUSH_CLEAN_PARENS.sub('', ll))).strip()
+        if compact.startswith('total') and not any(kw in compact for kw in ['fund', 'capital', 'asset', 'management']):
+            return True
+        if _CRE_FLUSH_FULL_DIGITS.fullmatch(compact):
+            return True
+        if compact.startswith('based on the offer price'):
+            return True
+        if _CRE_FLUSH_AMOUNT.fullmatch(compact):
+            return True
+        if compact in _NOISE_EXACT or ll in _NOISE_EXACT or any(kw in ll for kw in _NOISE_KW):
+            return True
+        if compact in ('investment amount', 'number of offer shares', 'offer shares', 'issued share capital',
+                       'share capital', 'approximate', 'investment', 'amount', 'shares',
+                       'cornerstone investor', 'cornerstone investors', 'cornerstone', 'investor'):
+            return True
+        if 'million' in compact and ('hk' in compact or 'usd' in compact or 'us' in compact or '$' in ll):
+            if 'limited' not in compact and not any(kw in compact for kw in ['partners', 'capital', 'management', 'fund']):
+                return True
+        table_header_kws = ('usd', 'us$', 'hk$', 'u.s.', 'amount', 'shares', 'offer', 'approximate', '%', 'million')
+        header_hits = sum(1 for kw in table_header_kws if kw in compact)
+        if header_hits >= 3 and 'limited' not in compact:
+            return True
+        if ('us$' in compact or 'usd' in compact or 'hk$' in compact) and ('offer' in compact or 'shares' in compact) and 'limited' not in compact:
+            return True
+        if 'shares' in compact and 'capital' in compact and 'million' in compact and 'limited' not in compact:
+            return True
+        if 'million' in compact and 'shares' in compact and len(compact.split()) <= 3 and 'limited' not in compact:
+            return True
+        _TABLE_KWS_NOSPACE = (
+            'assuming', 'over-allotment', 'allotment', 'offersize', 'adjustmentoption',
+            'exercised', 'notexercised', 'completionof', 'globaloffering',
+            'issuedshare', 'sharecapital', 'approximate', 'appropriate', 'ofthetotal',
+            'immediatelyupon', 'offershares', 'subscriptionamount', 'numberof',
+            'optionis', 'fullyexercised', 'infull', 'offersizeadjustment',
+            'over-allotmentoption', 'investmentamount', 'cornerstoneinvestor',
+            'thetablebelow', 'setsforth', 'detailsofthe',
+            'oftheoffer', 'theglobal', 'us$in', 'hk$in',
+        )
+        table_kw_hits = sum(ll.count(kw) for kw in _TABLE_KWS_NOSPACE)
+        if table_kw_hits >= 3:
+            return True
+        if _CRE_FLUSH_GENERIC.fullmatch(compact) and len(compact.split()) <= 4 and not any(kw in compact for kw in _INVESTOR_KEYWORDS):
+            return True
+        if 'esop' in compact or 'employee share' in compact or 'employee stock' in compact:
+            return True
+        return False
+
     """基石投资者信号分析"""
 
     TIER_BASE_SCORE = {
@@ -188,6 +462,22 @@ class CornerstoneAnalyzer:
             'sector_tags': ['hardtech'],
         },
         {
+            'name': 'Jane Street',
+            'tier': 'S',
+            'category': '量化做市商',
+            'aliases': ['jane street', 'jane street capital', 'jane street group'],
+            'role_note': '全球最大做市商之一，2024-2025港股基石最活跃外资，资金体量和定价锚效应极强',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': 'Xiaomi',
+            'tier': 'S',
+            'category': '强产业战略投资者',
+            'aliases': ['xiaomi', '小米', '小米集团'],
+            'role_note': '强产业生态基石，硬件/AIoT/汽车生态协同价值高',
+            'sector_tags': ['hardtech', 'consumer'],
+        },
+        {
             'name': 'Hillhouse/HHLR',
             'tier': 'A',
             'category': '一线PE/VC/成长基金',
@@ -288,7 +578,7 @@ class CornerstoneAnalyzer:
             'tier': 'A',
             'category': '一线PE/VC/成长基金',
             'aliases': ['greenwoods', 'greenwoods asset', '景林', '景林资产', 'greenwoods investment'],
-            'role_note': '中国头部私募基金，2025年港股基石参投最活跃机构(14次)',
+            'role_note': '中国头部私募基金，2025-2026年港股基石参投最活跃机构之一',
             'sector_tags': ['all'],
         },
         {
@@ -439,7 +729,7 @@ class CornerstoneAnalyzer:
             'name': 'ICBC Credit Suisse/ICBC Wealth',
             'tier': 'A',
             'category': '知名中资长线/保险/公募',
-            'aliases': ['icbcubs', 'icbc wealth', 'icbc credit suisse', '工银瑞信', '工银理财'],
+            'aliases': ['icbcubs', 'icbc wealth', 'icbc credit suisse', 'icbc asset management', '工银瑞信', '工银理财', '工银资管'],
             'role_note': '银行系/公募长线资金，稳定性较好',
             'sector_tags': ['all'],
         },
@@ -457,6 +747,78 @@ class CornerstoneAnalyzer:
             'category': '大型投行/资管平台',
             'aliases': ['mirae', '未来资产', '未來資產'],
             'role_note': '亚洲大型金融/资管平台，具备区域资金背书',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': 'Citadel Securities',
+            'tier': 'A',
+            'category': '量化做市商',
+            'aliases': ['citadel securities', 'citadel', '城堡证券'],
+            'role_note': '全球最大做市商之一，港股基石参投活跃，定价锚效应较强',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': 'Point72',
+            'tier': 'A',
+            'category': '全球多策略对冲基金',
+            'aliases': ['point72', 'point 72', 'point72 asset management'],
+            'role_note': '全球大型多策略对冲基金，港股基石参投',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': 'D1 Capital Partners',
+            'tier': 'A',
+            'category': '全球多策略对冲基金',
+            'aliases': ['d1 capital', 'd1 capital partners', 'd1'],
+            'role_note': '全球大型对冲基金，港股基石参投',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': '汇添富基金',
+            'tier': 'A',
+            'category': '知名中资长线/保险/公募',
+            'aliases': ['china universal am', 'china universal asset management', '汇添富', '汇添富基金'],
+            'role_note': '头部中资公募，2025-2026年港股基石参投活跃',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': '南方基金',
+            'tier': 'A',
+            'category': '知名中资长线/保险/公募',
+            'aliases': ['southern fund', 'southern asset management', '南方基金', '南方'],
+            'role_note': '头部中资公募，国内资金认可度较好',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': '中欧基金',
+            'tier': 'A',
+            'category': '知名中资长线/保险/公募',
+            'aliases': ['zhongou fund', 'china europe fund', 'lombarda china fund', '中欧基金', '中欧'],
+            'role_note': '头部中资公募，主动管理能力较强',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': '泰康人寿',
+            'tier': 'A',
+            'category': '保险资金',
+            'aliases': ['taikang life', 'taikang life insurance', '泰康人寿', '泰康人寿保险'],
+            'role_note': '头部保险资金，2025-2026年险资入场港股基石代表，长线属性强',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': '平安人寿',
+            'tier': 'A',
+            'category': '保险资金',
+            'aliases': ['ping an life', 'ping an life insurance', '平安人寿', '平安人寿保险', '中国平安人寿'],
+            'role_note': '头部保险资金，2025-2026年险资入场港股基石代表，长线属性强',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': '中信证券投资',
+            'tier': 'A',
+            'category': '券商直投平台',
+            'aliases': ['citic securities investment', 'citic investment', '中信证券投资', '中信建投投资'],
+            'role_note': '头部券商直投平台，研究/承销资源协同',
             'sector_tags': ['all'],
         },
         {
@@ -508,6 +870,70 @@ class CornerstoneAnalyzer:
             'sector_tags': ['all'],
         },
         {
+            'name': 'AMR Action Fund',
+            'tier': 'S',
+            'category': '新型抗生素专业基金',
+            'aliases': ['amr action fund', 'amr action', '抗微生物药物耐药性'],
+            'role_note': '全球唯一专注新型抗生素研发的顶级产业基金，由多家跨国药企联合发起，对管线技术含金量背书极强',
+            'sector_tags': ['healthcare'],
+        },
+        {
+            'name': 'Wellcome Trust',
+            'tier': 'S',
+            'category': '医疗专业基金/慈善基金',
+            'aliases': ['wellcome trust', 'wellcome'],
+            'role_note': '全球最大生物医学研究慈善基金，医疗领域权威背书',
+            'sector_tags': ['healthcare'],
+        },
+        {
+            'name': 'Novo Holdings',
+            'tier': 'S',
+            'category': '医疗专业基金',
+            'aliases': ['novo holdings', 'novo nordisk foundation', '诺和诺德基金会', '诺和控股'],
+            'role_note': '诺和诺德基金会旗下投资平台，全球最大医疗产业基金之一',
+            'sector_tags': ['healthcare'],
+        },
+        {
+            'name': 'Fosun Pharma',
+            'tier': 'A',
+            'category': '强产业战略投资者',
+            'aliases': ['fosun pharma', '复星医药', '复星'],
+            'role_note': '国内头部医药集团，产业协同和管线判断力强',
+            'sector_tags': ['healthcare'],
+        },
+        {
+            'name': 'CICC Capital',
+            'tier': 'A',
+            'category': '大型投行/资管平台',
+            'aliases': ['cicc capital', '中金资本', 'cicc'],
+            'role_note': '国内头部券商直投平台，研究/承销资源协同',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': 'Suzhou SIP / 苏州工业园区',
+            'tier': 'A',
+            'category': '知名中资长线/国资基金',
+            'aliases': ['suzhou sip', 'suzhou industrial park', '苏州工业园区', '工业园区', 'sip', 'suzhou yuanhe', '元禾控股', '元禾', 'suzhou工业园'],
+            'role_note': '苏州工业园区国资，深度参与Biotech/创新药投资（投过信达、药明康德等）',
+            'sector_tags': ['healthcare', 'hardtech'],
+        },
+        {
+            'name': 'Cinda/东方资产',
+            'tier': 'A',
+            'category': '知名中资长线/国资基金',
+            'aliases': ['cinda', 'orient asset', 'china cinda', '信达资产', '东方资产', '中国信达', '中国东方资产'],
+            'role_note': '央企背景金融AMC平台，资金实力雄厚，产业认可度强',
+            'sector_tags': ['all'],
+        },
+        {
+            'name': '国投创新',
+            'tier': 'A',
+            'category': '知名中资长线/国资基金',
+            'aliases': ['sdic innovation', '国投创新', '国家开发投资集团'],
+            'role_note': '国家级产业投资基金，央企背景，产业和政策双重认可',
+            'sector_tags': ['hardtech', 'healthcare'],
+        },
+        {
             'name': '不透明SPV/家办/券商关联资金',
             'tier': '弱',
             'category': '不透明基金/关系型资金',
@@ -518,10 +944,19 @@ class CornerstoneAnalyzer:
     ]
 
     # 章节锚点：用于判断是否存在基石投资者章节
+    # 高优先级锚点：表格引导句 / 大写章节标题（最精确，避免正文引用误匹配）
+    CORNERSTONE_ANCHORS_HIGH = [
+        'the table below sets forth details of the cornerstone',
+        'the tables below set forth details of the cornerstone',
+        'the table below sets forth details of the cornerstone investment',
+        'the cornerstone investors\n',
+        'the cornerstone placing\n',
+        'cornerstone investor\n',
+    ]
+    # 标准锚点（fallback）
     CORNERSTONE_ANCHORS = [
         'cornerstone investors',
         'cornerstone placing',
-        'cornerstone investor',
         'cornerstone investment agreement',
         '基石投资者',
         '基石投資者',
@@ -551,11 +986,24 @@ class CornerstoneAnalyzer:
     ]
 
     def _find_section_anchor(self, text, anchors):
-        """在 text 中查找 anchors 的最早出现位置，返回 (idx, anchor) 或 (-1, None)"""
+        """在 text 中查找 anchors 的最早出现位置，返回 (idx, anchor) 或 (-1, None)。
+        优先匹配独立成行的锚点（前后有换行符或段落边界），减少正文引用误匹配。"""
         lower_text = text.lower()
         best_idx = -1
         best_anchor = None
         for anchor in anchors:
+            if anchor.endswith('\n'):
+                # 带换行符的锚点：优先匹配独立成行
+                idx = lower_text.find(anchor)
+                if idx >= 0:
+                    # 验证前面是否是行首/换行符/空格（允许大写前缀如 "THE "）
+                    prev_char = text[idx - 1] if idx > 0 else '\n'
+                    if prev_char in '\n\r ' or idx == 0:
+                        if best_idx < 0 or idx < best_idx:
+                            best_idx = idx
+                            best_anchor = anchor
+                continue
+            # 普通锚点
             idx = text.find(anchor) if any(ord(c) > 127 for c in anchor) else lower_text.find(anchor)
             if idx >= 0 and (best_idx < 0 or idx < best_idx):
                 best_idx = idx
@@ -564,37 +1012,89 @@ class CornerstoneAnalyzer:
 
     def _cornerstone_context(self, text):
         """返回 (context, has_cornerstone_section)。
-        如果没有找到基石锚点，不再 fallback 到全文扫描。
-        优先查找正文章节中的锚点，跳过目录页（TOC）的匹配。
-        找到真正的章节边界，确保覆盖所有基石信息。"""
-        idx, anchor = self._find_section_anchor(text, self.CORNERSTONE_ANCHORS)
+        优先使用高优先级锚点（表格引导句 / 独立成行标题），避免正文引用误匹配。
+        若首个匹配附近无表格特征，自动 fallback 到下一个匹配。
+        跳过目录页（TOC），找到真正的章节边界。"""
+        #  helpers: 判断锚点附近是否有基石表格特征
+        def _has_table_features(t, pos):
+            window = t[pos:pos + 3000].lower()
+            return any(marker in window for marker in [
+                'the table below sets forth details of the cornerstone',
+                'the tables below set forth details of the cornerstone',
+                'number of offer shares',
+                'investment amount',
+                'cornerstone placing',
+            ])
+
+        def _is_negative_cornerstone_mention(full_text, pos):
+            start = max(0, pos - 180)
+            end = min(len(full_text), pos + 260)
+            window = _CRE_WHITESPACE.sub(' ', full_text[start:end]).strip()
+            return bool(_CRE_NEGATIVE_CORNERSTONE_MENTION.search(window))
+
+        def _find_best_anchor(full_text, anchors_list, search_start=0):
+            """返回 (abs_idx, anchor) 或 (-1, None)。优先匹配带表格特征的锚点。"""
+            candidates = []
+            search_text = full_text[search_start:]
+            for anchor in anchors_list:
+                if anchor.endswith('\n'):
+                    pos = search_text.lower().find(anchor)
+                    while pos >= 0:
+                        abs_pos = search_start + pos
+                        prev_char = full_text[abs_pos - 1] if abs_pos > 0 else '\n'
+                        if prev_char in '\n\r ' or abs_pos == 0:
+                            candidates.append((abs_pos, anchor))
+                        # 继续搜索下一个
+                        pos = search_text.lower().find(anchor, pos + 1)
+                else:
+                    pos = search_text.find(anchor) if any(ord(c) > 127 for c in anchor) else search_text.lower().find(anchor)
+                    while pos >= 0:
+                        candidates.append((search_start + pos, anchor))
+                        pos = search_text.find(anchor, pos + 1) if any(ord(c) > 127 for c in anchor) else search_text.lower().find(anchor, pos + 1)
+            if not candidates:
+                return -1, None
+            # 先按位置排序；优先选择有表格特征且位置合理的
+            candidates.sort(key=lambda x: x[0])
+            candidates = [
+                (abs_pos, anchor)
+                for abs_pos, anchor in candidates
+                if not _is_negative_cornerstone_mention(full_text, abs_pos)
+            ]
+            if not candidates:
+                return -1, None
+            for abs_pos, anchor in candidates:
+                if _has_table_features(full_text, abs_pos):
+                    return abs_pos, anchor
+            # 都没有表格特征，返回第一个
+            return candidates[0]
+
+        idx, anchor = _find_best_anchor(text, self.CORNERSTONE_ANCHORS_HIGH)
+        if idx < 0:
+            idx, anchor = _find_best_anchor(text, self.CORNERSTONE_ANCHORS)
         if idx < 0:
             return "", False
 
-        # 对于短文本（如测试用例），直接使用锚点位置
         if len(text) < 10000:
             context = text[idx:idx + 120000]
             return context, True
 
-        # 检查是否在目录页（TOC）附近 - TOC 通常在文档前 10% 位置
         toc_region_end = len(text) // 10
         if idx < toc_region_end:
-            # 跳过 TOC 区域，搜索正文章节
-            remaining_text = text[toc_region_end:]
-            idx2, anchor2 = self._find_section_anchor(remaining_text, self.CORNERSTONE_ANCHORS)
+            idx2, anchor2 = _find_best_anchor(text, self.CORNERSTONE_ANCHORS_HIGH, search_start=toc_region_end)
+            if idx2 < 0:
+                idx2, anchor2 = _find_best_anchor(text, self.CORNERSTONE_ANCHORS, search_start=toc_region_end)
             if idx2 >= 0:
-                idx = toc_region_end + idx2
+                idx = idx2
+            else:
+                return "", False
 
-        # 检查找到的位置是否在目录页
         lines_before = text[:idx].count('\n')
-        if lines_before < 100:
+        min_lines_for_body = min(100, len(text) // 500)
+        if lines_before < min_lines_for_body:
             return "", False
 
-        # 找到章节结束位置 - 搜索下一个同级别章节锚点或下一个大标题
         end_idx = self._find_section_end(text, idx)
-
-        # 确保 context 至少覆盖 500000 字符，以包含所有基石投资者
-        context = text[idx:max(end_idx, idx + 500000)]
+        context = text[idx:min(end_idx, idx + 800000)]
         return context, True
 
     @staticmethod
@@ -612,7 +1112,7 @@ class CornerstoneAnalyzer:
                 blank_seen = True
                 continue
             blank_seen = False
-            compact_lines.append(re.sub(r'\s+', ' ', line))
+            compact_lines.append(_CRE_WHITESPACE.sub(' ', line))
         excerpt = "\n".join(compact_lines).strip()
         if len(excerpt) <= max_chars:
             return excerpt
@@ -627,7 +1127,7 @@ class CornerstoneAnalyzer:
             'LOCK-UP', 'LOCK UP',
             'ADDITIONAL INFORMATION', 'STATUTORY AND GENERAL INFORMATION',
             'APPENDIX', 'DEFINITIONS',
-            'SHARE CAPITAL', 'FUTURE PLANS', 'USE OF PROCEEDS',
+            'FUTURE PLANS', 'USE OF PROCEEDS',
         ]
 
         # 搜索最近的有效结束位置
@@ -685,7 +1185,7 @@ class CornerstoneAnalyzer:
             next_block = text.find('\n\n', start + len(anchor))
             if next_block > start:
                 # 再往后找下一个可能的标题行
-                for m in re.finditer(r'\n\n([A-Z][A-Za-z\s]{3,60})\s*\n', text[next_block:]):
+                for m in _CRE_SECTION_HEADER.finditer(text[next_block:]):
                     end = min(end, next_block + m.start())
                     break
             exclusion_ranges.append((start, end))
@@ -704,15 +1204,30 @@ class CornerstoneAnalyzer:
         return [
             self._profile_match_payload_with_source(profile)
             for profile in profiles
-            if profile.get('tier') in ('S', 'A')
+            if profile.get('tier') in ('S', 'A', 'B')
         ]
+
+    # 负面语境关键词：如果投资者名出现在这些语境中，视为"未见/无"
+    _NEGATIVE_CTX_PATTERNS = [_CRE_NEGATIVE_CTX_1, _CRE_NEGATIVE_CTX_2]
+
+    def _is_in_negative_context(self, context, hit_idx, alias):
+        """检查投资者名是否出现在负面语境中（如"未见GIC"）。"""
+        window_start = max(0, hit_idx - 80)
+        window_end = min(len(context), hit_idx + len(alias) + 80)
+        window = context[window_start:window_end].lower()
+        for pattern in self._NEGATIVE_CTX_PATTERNS:
+            if pattern.search(window):
+                return True
+        return False
 
     def _matched_profiles_with_exclusion(self, context, full_text="", context_start_idx=0):
         """匹配投资者档案，排除落在 pre-IPO/股东章节中的命中。
+        同时排除出现在负面语境中的命中（如"未见GIC"）。
         返回的 profile dict 中带有 _source 字段。"""
         if not context:
             return []
         matched = []
+        absent_high_quality = []
         seen = set()
         for profile in self.INVESTOR_PROFILES:
             aliases = profile.get('aliases', [])
@@ -732,6 +1247,16 @@ class CornerstoneAnalyzer:
                 absolute_idx = context_start_idx + hit_idx
                 if self._is_in_excluded_section(full_text, absolute_idx):
                     source = 'pre_ipo_section'
+            # 检查是否在负面语境中
+            if self._is_in_negative_context(context, hit_idx, hit_alias):
+                if profile.get('tier') in ('S', 'A'):
+                    absent_high_quality.append({
+                        'name': profile['name'],
+                        'tier': profile['tier'],
+                        'category': profile.get('category'),
+                        'reason': '出现在负面语境（未见/无/不包括）',
+                    })
+                continue
             key = profile['name']
             if key in seen:
                 continue
@@ -740,6 +1265,8 @@ class CornerstoneAnalyzer:
             profile_copy['_source'] = source
             matched.append(profile_copy)
         matched.sort(key=lambda item: {'S': 0, 'A': 1, 'B': 2, '弱': 3}.get(item.get('tier'), 4))
+        # 将 absent_high_quality 附加到返回结果的上下文（通过类变量临时传递，后续清理）
+        self._last_absent_high_quality = absent_high_quality
         return matched
 
     @staticmethod
@@ -761,7 +1288,7 @@ class CornerstoneAnalyzer:
             'role_note': profile.get('role_note'),
         }
 
-    TIER_SORT_ORDER = {'S': 0, 'A': 1, 'B': 2, '弱': 3}
+    TIER_SORT_ORDER = {'S': 0, 'A': 1, 'B': 2, '弱': 3, '未知': 4}
 
     def _match_profiles(self, text, best_only=False):
         if not text:
@@ -788,16 +1315,13 @@ class CornerstoneAnalyzer:
         return self._match_profiles(text, best_only=False)
 
     def _effective_tier_score(self, tier, offer_pct=None):
+        """获取 tier 基础分数，不再根据认购占比降级（五维模型已有 subscription_strength 维度）"""
         effective_tier = tier or '未知'
-        if tier == 'S' and offer_pct is not None and offer_pct < 1:
-            effective_tier = 'A'
-        elif tier == 'A' and offer_pct is not None and offer_pct < 1:
-            effective_tier = 'B'
         return self.TIER_BASE_SCORE.get(effective_tier, self.TIER_BASE_SCORE['未知'])
 
     INDEPENDENCE_RULES = [
-        (['主权', '养老金', '全球顶级长线资管'], (95, '独立长线')),
-        (['大型投行/资管', '医疗专业基金', '中资长线'], (82, '独立机构')),
+        (['主权', '养老金', '全球顶级长线资管', '量化做市商'], (95, '独立长线')),
+        (['大型投行/资管', '医疗专业基金', '中资长线', '保险资金', '券商直投'], (82, '独立机构')),
         (['PE/VC', '成长基金'], (72, '专业财务投资')),
         (['客户', '供应商', '关系型'], (35, '独立性弱')),
         (['地方', '区域'], (58, '独立性一般')),
@@ -819,7 +1343,7 @@ class CornerstoneAnalyzer:
             return 45, '未知'
         tags = profile.get('sector_tags') or []
         category = profile.get('category', '')
-        if 'all' in tags or '主权' in category or '全球顶级长线资管' in category:
+        if 'all' in tags or '主权' in category or '全球顶级长线资管' in category or '量化做市商' in category or '保险资金' in category:
             return 78, '通用强背书'
         if sector and sector in tags:
             return 90, '赛道强匹配'
@@ -841,23 +1365,22 @@ class CornerstoneAnalyzer:
     def _normalize_cornerstone_line(line):
         if line is None:
             return ""
-        line = re.sub(r'[\x00-\x1f\x7f-\x9f\u0002]+', ' ', line)
-        line = line.replace(' ', ' ')
-        line = re.sub(r'\s+', ' ', line)
+        line = _CRE_CONTROL.sub(' ', line)
+        line = line.replace('  ', ' ')
+        line = _CRE_WHITESPACE.sub(' ', line)
         return line.strip(' \t\r\n-–—')
 
     @staticmethod
     def _parse_all_numbers(text):
-        """Extract all numbers from text, handling footnote markers like (1)"""
         if not text:
             return []
         text = text.strip()
-        text = re.sub(r'^\([0-9]+\)\s*', '', text)
+        text = _CRE_LEADING_PARENS.sub('', text)
         parts = text.split()
         numbers = []
         for part in parts:
-            cleaned = re.sub(r'^\([0-9]+\)\s*', '', part)
-            match = re.search(r'([0-9,]+(?:\.[0-9]+)?)', cleaned)
+            cleaned = _CRE_LEADING_PARENS.sub('', part)
+            match = _CRE_NUMBER.search(cleaned)
             if match:
                 num_str = match.group(1).replace(',', '')
                 try:
@@ -871,9 +1394,11 @@ class CornerstoneAnalyzer:
         if not line:
             return False
         text = line.strip().replace(' ', '')
-        if re.match(r'\([0-9]+\)', text):
+        if _CRE_PARENS_ONLY.fullmatch(text):
             return True
-        return bool(re.fullmatch(r'[0-9][0-9,]*(?:\.[0-9]+)?%?(?:\([0-9]+\))?', text))
+        if _CRE_NUMERIC_CELL.fullmatch(text):
+            return True
+        return False
 
     @staticmethod
     def _parse_cornerstone_number(text):
@@ -881,11 +1406,13 @@ class CornerstoneAnalyzer:
             return None
         text = text.strip()
         
-        match = re.match(r'\([0-9]+\)(.+)', text)
+        match = _CRE_PARENS_CAPTURE.match(text)
         if match:
             text = match.group(1)
         
-        match = re.search(r'([0-9,]+(?:\.[0-9]+)?)', text)
+        text = _CRE_CURRENCY_PREFIX.sub('', text)
+        
+        match = _CRE_NUMBER.search(text)
         if not match:
             return None
         num_str = match.group(1)
@@ -928,13 +1455,14 @@ class CornerstoneAnalyzer:
                 'investment_currency': None,
                 'investment_amount_m': None,
                 'investment_amount_hkd_m': None,
-                'total_investment_amount_hkd_m': None,
-                'total_investment_amount_usd_m': None,
+                'investment_amount_usd_m': None,
             }
 
         currency, unit = self._detect_cornerstone_amount_context(table_text)
         amount_m = raw_amount
-        if (unit == 'raw' or currency == 'HKD') and abs(raw_amount) > 10000:
+        # 如果数字很大（>10000），无论单位标记是什么，都除以 1,000,000
+        # 因为 PDF 转文本后，"(USD in millions)" 可能只是表格标题，实际数据可能是原始金额
+        if abs(raw_amount) > 10000:
             amount_m = raw_amount / 1_000_000
 
         hkd_m = None
@@ -949,24 +1477,28 @@ class CornerstoneAnalyzer:
             'investment_currency': currency,
             'investment_amount_m': amount_m,
             'investment_amount_hkd_m': hkd_m,
-            'total_investment_amount_hkd_m': hkd_m,
-            'total_investment_amount_usd_m': usd_m,
+            'investment_amount_usd_m': usd_m,
         }
 
     def _cornerstone_short_name(self, name):
         if not name:
             return ""
-        match = re.search(r'“([^”]+)”', name)
+        match = _CRE_CN_QUOTED.search(name)
         if not match:
-            match = re.search(r'"([^"]+)"', name)
+            match = _CRE_CN_QUOTED.search(name)
         if match:
             return self._normalize_cornerstone_line(match.group(1))
 
         lowered = name.lower()
         if ' for and on behalf of ' in lowered:
-            name = re.split(r'\s+for and on behalf of\s+', name, maxsplit=1, flags=re.IGNORECASE)[0]
+            parts = _CRE_FOR_AND_ON_BEHALF.split(name, maxsplit=1)
+            if len(parts) == 2:
+                backend = self._normalize_cornerstone_line(parts[1])
+                if backend:
+                    return backend
+                name = parts[0]
 
-        name = re.sub(r'\([^()]*\)', ' ', name)
+        name = _CRE_ALL_PARENS.sub(' ', name)
         name = self._normalize_cornerstone_line(name)
         return name
 
@@ -981,10 +1513,17 @@ class CornerstoneAnalyzer:
             'the tables below set forth the details of the cornerstone placing',
             'the cornerstone investors\nthe table below',
             'the cornerstone investors\r\nthe table below',
+            'the table below sets forth details of the cornerstone investment',
+            '下表載列基石配售的詳情',
+            '下表載列基石投資者的詳情',
+            '下表反映緊隨全球發售完成後',
         ]
         fallback_markers = [
             'the cornerstone investors',
             'cornerstone investors',
+            '基石投資者',
+            '基石投资者',
+            '基石配售',
         ]
         start_idx = -1
         for marker in priority_markers:
@@ -1003,6 +1542,7 @@ class CornerstoneAnalyzer:
 
         end_markers = [
             'notes:',
+            'the information about our cornerstone investors',
         ]
         end_idx = len(context)
         for marker in end_markers:
@@ -1014,26 +1554,53 @@ class CornerstoneAnalyzer:
         lines = [self._normalize_cornerstone_line(line) for line in table_text.splitlines()]
         lines = [line for line in lines if line]
 
+        # 更严格的噪声过滤
+        _HEADER_WORD_SET = frozenset([
+            'number', 'of', 'offer', 'shares', 'to', 'be', 'acquired', 'subscribed',
+            'approximate', 'appropriate', 'subscription', 'investment', 'amount', 'total',
+            'cornerstone', 'investor', 'assuming', 'exercised', 'option', 'completion',
+            'global', 'immediately', 'upon', 'issued', 'share', 'capital', 'the',
+            'in', 'full', 'not', 'is', 'offering', 'allotment', 'over-allotment',
+            'adjustment', 'size', 'based', 'on', 'price', 'millions', 'usd', 'hk$',
+            'us$', 'u.s.', 'hk', 'down', 'nearest', 'whole', 'board', 'lot',
+            'following', 'rounded', 'subject', 'rounding', 'note', 'notes',
+            'issue', '%', 'upon', 'completion',
+        ])
+
         _NOISE_KW = [
-            'the table below sets forth details of the cornerstone placing',
+            'the table below sets forth details of the cornerstone',
+            'the table below sets out details of the cornerstone',
             'the tables below set forth',
+            'the tables below set out',
             'cornerstone investor',
             'total investment amount',
             'number of offer shares',
             'approximate % of the offer shares',
             'approximate % of the issued share capital',
+            'appropriate % of the total',
+            'appropriate % of the offer',
             '(usd in millions)',
             'based on the offer price',
             'assuming the over-allotment',
+            'assuming the offer size',
             'option is not exercised',
             'option is exercised',
             'offer shares to be acquired',
             'immediately upon',
             'completion of the global offering',
             '(in hk$)',
+            'us$in',
+            'hk$in',
             'note ',
             'subject to rounding',
             'notes:',
+            'appropriate %',
+            'of the total',
+            'issued share capital',
+            'completion of',
+            'assuming the',
+            'offer size adjustment',
+            'over-allotment option',
         ]
         _NOISE_EXACT = {
             'total', 'investment', 'amount', 'subscription', 'subscription amount',
@@ -1052,87 +1619,537 @@ class CornerstoneAnalyzer:
             'approximate % of our', 'number of offer shares',
             'in issue immediately', 'following the completion of',
             'the global offering', 'shares in issue immediately',
-            'cornerstone investors',
+            'cornerstone investors', 'esop', 'employee share option',
+            'employee stock ownership', 'pre ipo', 'pre-ipo',
+            'appropriate', 'appropriate %', 'total issued share',
+            'share capital immediately', 'immediately upon',
+            'cornerstone', 'investor', 'investment amount',
+            'offer price', 'global offering', 'offer size',
+            'over-allotment', 'over allotment',
+            'number', 'acquired', 'subscribed', 'to be',
+            'of offer', 'of the offer', '% of offer',
+            'shares to be', 'offer size adjustment',
+            '(us$in', '(hk$in', 'us$in', 'hk$in',
         }
+
+        _TABLE_KWS = ('appropriate', 'assuming', 'over-allotment', 'allotment', 
+                        'offer size', 'adjustment option', 'exercised', 'not exercised',
+                        'completion of', 'global offering', 'issued share capital',
+                        'approximate %', 'of the total', 'immediately upon',
+                        'offer shares', 'subscription amount', 'number of',
+                        'option is', 'fully exercised', 'in full',
+                        'offer size adjustment', 'over-allotment option')
+
+        _REPEAT_KWS = ('issued share', 'capital', 'immediately', 'upon', 'appropriate', 'approximate')
+
+        _INVESTOR_KEYWORDS = frozenset([
+            'partners', 'capital', 'management', 'investments', 'fund', 'venture',
+            'asset', 'group', 'corporation', 'holdings', 'plc', 'inc', 'corp',
+            'limited', 'ltd', 'ltd.', 'l.p.', 'lp', 'llc', 'co', 'co.',
+            'international', 'global', 'scsp', 'sarl', 'pte', 'trust',
+            'foundation', 'pension', 'university', 'hospital', 'healthcare',
+            'biotech', 'pharma', 'pharmaceutical', 'laboratory', 'venture',
+            'ventures', 'private', 'equity', 'securities', 'financial',
+            'action', 'amr', 'hua', 'yuan', 'orient', 'junestar', 'danyuan',
+        ])
 
         def _is_noise(line):
             ll = line.lower()
-            compact = re.sub(r'\([0-9]+\)', '', ll)
-            compact = re.sub(r'[^a-z0-9%$.\s]+', ' ', compact)
-            compact = re.sub(r'\s+', ' ', compact).strip()
-            if re.fullmatch(r'\d{1,3}', compact):
+            if sum(1 for kw in _TABLE_KWS if kw in ll) >= 2:
+                return True
+            
+            for kw in _REPEAT_KWS:
+                if ll.count(kw) >= 2:
+                    return True
+            
+            if 'set out in this prospectus' in ll:
+                return True
+            
+            if 'cornerstone' in ll and 'number of' in ll and 'offer' in ll:
+                return True
+            
+            if 'investment amount' in ll and 'offer shares' in ll:
+                return True
+            
+            if ll.count('shares offering') >= 2:
+                return True
+            
+            if ll.count('millions)') >= 2:
+                return True
+            
+            if 'us$ in' in ll or 'hk$ in' in ll:
+                return True
+            
+            # 短行表格标题检测
+            words = ll.split()
+            if 1 <= len(words) <= 5:
+                cleaned_words = [w for w in (_CRE_FLUSH_PARENS_END.sub('', w) for w in words) if w]
+                if cleaned_words and all(w in _HEADER_WORD_SET for w in cleaned_words):
+                    # 如果短词全是标题词，但其中也包含投资者关键词（如 Global、Capital），
+                    # 则不当作纯噪声 — 它可能是名字的一部分
+                    if not any(w in _INVESTOR_KEYWORDS for w in cleaned_words):
+                        return True
+            
+            compact = _CRE_FLUSH_WHITESPACE.sub(' ', _CRE_FLUSH_NON_ALPHA.sub(' ', _CRE_FLUSH_CLEAN_PARENS.sub('', ll))).strip()
+            
+            if compact.startswith('total') and not any(kw in compact for kw in ['fund', 'capital', 'asset', 'management']):
+                return True
+            if _CRE_FLUSH_FULL_DIGITS.fullmatch(compact):
                 return True
             if compact.startswith('based on the offer price'):
                 return True
-            if re.fullmatch(r'amount\d*', compact):
+            if _CRE_FLUSH_AMOUNT.fullmatch(compact):
                 return True
-            return compact in _NOISE_EXACT or ll in _NOISE_EXACT or any(kw in ll for kw in _NOISE_KW)
+            if compact in _NOISE_EXACT or ll in _NOISE_EXACT or any(kw in ll for kw in _NOISE_KW):
+                return True
+            if compact in ('investment amount', 'number of offer shares', 'offer shares', 'issued share capital',
+                           'share capital', 'approximate', 'investment', 'amount', 'shares',
+                           'cornerstone investor', 'cornerstone investors', 'cornerstone', 'investor'):
+                return True
+            if 'million' in compact and ('hk' in compact or 'usd' in compact or 'us' in compact or '$' in ll):
+                if 'limited' not in compact and not any(kw in compact for kw in ['partners', 'capital', 'management', 'fund']):
+                    return True
+            table_header_kws = ('usd', 'us$', 'hk$', 'u.s.', 'amount', 'shares', 'offer', 'approximate', '%', 'million')
+            header_hits = sum(1 for kw in table_header_kws if kw in compact)
+            if header_hits >= 3 and 'limited' not in compact:
+                return True
+            if ('us$' in compact or 'usd' in compact or 'hk$' in compact) and ('offer' in compact or 'shares' in compact) and 'limited' not in compact:
+                return True
+            if 'shares' in compact and 'capital' in compact and 'million' in compact and 'limited' not in compact:
+                return True
+            if 'million' in compact and 'shares' in compact and len(compact.split()) <= 3 and 'limited' not in compact:
+                return True
+            # 连写表格标题检测（PDF去空格后，列标题连成一行）
+            _TABLE_KWS_NOSPACE = (
+                'assuming', 'over-allotment', 'allotment', 'offersize', 'adjustmentoption',
+                'exercised', 'notexercised', 'completionof', 'globaloffering',
+                'issuedshare', 'sharecapital', 'approximate', 'appropriate', 'ofthetotal',
+                'immediatelyupon', 'offershares', 'subscriptionamount', 'numberof',
+                'optionis', 'fullyexercised', 'infull', 'offersizeadjustment',
+                'over-allotmentoption', 'investmentamount', 'cornerstoneinvestor',
+                'thetablebelow', 'setsforth', 'detailsofthe',
+                'oftheoffer', 'theglobal', 'us$in', 'hk$in',
+            )
+            table_kw_hits = sum(ll.count(kw) for kw in _TABLE_KWS_NOSPACE)
+            if table_kw_hits >= 3:
+                return True
+
+            if _CRE_FLUSH_GENERIC.fullmatch(compact) and len(compact.split()) <= 4 and not any(kw in compact for kw in _INVESTOR_KEYWORDS):
+                return True
+            if 'esop' in compact or 'employee share' in compact or 'employee stock' in compact:
+                return True
+            return False
+
+        def _split_line_to_name_and_numbers(line):
+            tokens = line.split()
+            if not tokens:
+                return None, []
+
+            start_idx = 0
+            if tokens and _CRE_PARENS_ONLY.fullmatch(tokens[0]):
+                start_idx = 1
+
+            effective_tokens = tokens[start_idx:]
+            if not effective_tokens:
+                return None, []
+
+            number_tokens = []
+            name_tokens = []
+            found_number = False
+            for i in range(len(effective_tokens) - 1, -1, -1):
+                t = effective_tokens[i]
+                is_strict_numeric = self._is_numeric_cell(t)
+                has_letters = bool(_CRE_HAS_LETTER.search(t))
+                parsed_num = None if has_letters else self._parse_cornerstone_number(t)
+                
+                if is_strict_numeric or (parsed_num is not None and not has_letters):
+                    number_tokens.insert(0, t)
+                    found_number = True
+                elif found_number:
+                    if t.endswith(')') and has_letters and _CRE_PARENS_ONLY.search(t):
+                        name_tokens = effective_tokens[:i + 1]
+                        break
+                    elif not t.endswith(')'):
+                        name_tokens = effective_tokens[:i + 1]
+                        break
+                elif not found_number and has_letters and t.endswith(')') and _CRE_PARENS_ONLY.search(t):
+                    # 还没找到数字，但遇到名字+括号（如 Partners(4)），当作名字的一部分
+                    continue
+
+            # 启发式：小数字可能是名字的一部分（如 "Big Bend 77"）
+            # 但排除以下情况：
+            # - 包含 % 的数字（百分比）
+            # - 小数（如 10.0，通常是金额）
+            if len(number_tokens) >= 2:
+                first_raw = number_tokens[0]
+                first_num = self._parse_cornerstone_number(first_raw)
+                second_num = self._parse_cornerstone_number(number_tokens[1])
+                if first_num is not None and second_num is not None:
+                    # 排除百分比和小数
+                    has_pct = '%' in first_raw
+                    is_decimal = '.' in first_raw and first_num < 1000
+                    if not has_pct and not is_decimal and first_num < 1000 and second_num > first_num * 10:
+                        name_tokens.append(number_tokens.pop(0))
+
+            if not name_tokens and found_number:
+                return None, number_tokens
+            if not found_number:
+                return line, []
+
+            return ' '.join(name_tokens), number_tokens
 
         rows = []
         name_buffer = []
         numeric_buffer = []
+        pending_flush = False  # 标记是否有待flush的混合行
+
+        def _strip_header_from_name(raw_name):
+             name = raw_name
+             for pattern in _HEADER_PREFIX_PATTERNS:
+                 match = pattern.match(name)
+                 while match and match.end() > 0:
+                     name = name[match.end():].strip()
+                     if not name:
+                         break
+                     match = pattern.match(name)
+             while name:
+                 first_word = name.split()[0]
+                 clean_first = _CRE_STRIP_PARENS.sub('', first_word).lower()
+                 if clean_first in _HEADER_WORD_SET:
+                     name = ' '.join(name.split()[1:]).strip()
+                     if not name:
+                         break
+                 else:
+                     break
+             return name
 
         def flush_row():
-            nonlocal name_buffer, numeric_buffer
-            if not name_buffer or len(numeric_buffer) < 4:
+            nonlocal name_buffer, numeric_buffer, pending_flush
+            logger.debug("cornerstone flush_row name_buf=%s numeric_count=%s", [p[:30] for p in name_buffer], len(numeric_buffer))
+            if not name_buffer or len(numeric_buffer) < 3:
                 name_buffer = []
                 numeric_buffer = []
+                pending_flush = False
                 return
 
             cleaned_name_lines = []
             for part in name_buffer:
                 if not _is_noise(part) or (part.lower() == 'capital' and cleaned_name_lines):
                     cleaned_name_lines.append(part)
+                elif cleaned_name_lines and len(part.split()) <= 4:
+                    # name_buffer 中已有有效内容，短词可能是名字续行部分
+                    # （如 SCSp、Limited、Global 等被 _is_noise 误判的组件）
+                    part_lower = part.lower()
+                    if any(kw in part_lower for kw in _INVESTOR_KEYWORDS):
+                        cleaned_name_lines.append(part)
 
             name = self._normalize_cornerstone_line(' '.join(cleaned_name_lines))
             if not name:
                 name_buffer = []
                 numeric_buffer = []
+                pending_flush = False
                 return
 
-            issued_share_pct_source = numeric_buffer[3]
-            if len(numeric_buffer) >= 8:
-                issued_share_pct_source = numeric_buffer[-2]
+            name = _strip_header_from_name(name)
+            if not name or len(name) > 80:
+                name_buffer = []
+                numeric_buffer = []
+                pending_flush = False
+                return
+
+            name_lower = name.lower()
+            bad_keywords = ['appropriate', 'assuming', 'completion', 'global offering', 
+                           'issued share', 'share capital', 'over-allotment', 'offer size']
+            if sum(1 for kw in bad_keywords if kw in name_lower) >= 2:
+                name_buffer = []
+                numeric_buffer = []
+                pending_flush = False
+                return
+
+            nums = [self._parse_cornerstone_number(n) for n in numeric_buffer]
+            nums = [n for n in nums if n is not None]
+
+            if len(nums) < 3:
+                name_buffer = []
+                numeric_buffer = []
+                pending_flush = False
+                return
+
+            num_to_raw = {}
+            for raw in numeric_buffer:
+                parsed = self._parse_cornerstone_number(raw)
+                if parsed is not None:
+                    if parsed not in num_to_raw:
+                        num_to_raw[parsed] = raw
+
+            # 智能列序识别
+            # 1. 优先识别原始文本中带 % 的数字为百分比
+            pct_indices = [i for i, raw in enumerate(numeric_buffer) if '%' in raw]
+            pcts = []
+            pct1_val = None
+            pct2_val = None
+
+            if len(pct_indices) >= 2:
+                pct1_val = nums[pct_indices[0]] if pct_indices[0] < len(nums) else None
+                pct2_val = nums[pct_indices[1]] if pct_indices[1] < len(nums) else None
+                if pct1_val is not None:
+                    pcts.append(pct1_val)
+                if pct2_val is not None:
+                    pcts.append(pct2_val)
+            else:
+                # 利用股数列位置识别百分比
+                # 股数特征：大整数(>1000)，在金额之后、百分比之前
+                large_int_indices = [(i, n) for i, n in enumerate(nums) if n == int(n) and n > 1000]
+                
+                shares_idx = None
+                shares_val = None
+                
+                if len(large_int_indices) >= 2:
+                    # 多个大整数：第一个是金额（如277,000,000），第二个是股数
+                    shares_idx = large_int_indices[1][0]
+                    shares_val = large_int_indices[1][1]
+                elif len(large_int_indices) == 1:
+                    shares_idx = large_int_indices[0][0]
+                    shares_val = large_int_indices[0][1]
+                
+                if shares_idx is not None:
+                    # 股数列之后的数字中，0 < n <= 100 的是百分比
+                    pct_after_shares = [(i, n) for i, n in enumerate(nums) 
+                                       if i > shares_idx and 0 < n <= 100]
+                    if len(pct_after_shares) >= 2:
+                        pct1_val = pct_after_shares[0][1]
+                        pct2_val = pct_after_shares[1][1]
+                        pcts.append(pct1_val)
+                        pcts.append(pct2_val)
+                    elif len(pct_after_shares) == 1:
+                        pct1_val = pct_after_shares[0][1]
+                        pcts.append(pct1_val)
+                else:
+                    # 没有大整数，回退到数值范围识别
+                    potential_pcts = [(i, n) for i, n in enumerate(nums) if 0 < n <= 100]
+                    if len(potential_pcts) >= 2:
+                        pct1_val = potential_pcts[0][1]
+                        pct2_val = potential_pcts[1][1]
+                        pcts.append(pct1_val)
+                        pcts.append(pct2_val)
+                    elif len(potential_pcts) == 1:
+                        pct1_val = potential_pcts[0][1]
+                        pcts.append(pct1_val)
+
+            # 确定股数和金额
+            non_pcts = [n for n in nums if n not in pcts]
+
+            # 识别金额列：原始文本包含货币前缀（US$, HK$, $）
+            currency_raw_indices = [i for i, raw in enumerate(numeric_buffer) if _CRE_CURRENCY_START.match(raw.strip())]
+            currency_vals = [nums[i] for i in currency_raw_indices if i < len(nums)]
+
+            # 利用股数列位置确定金额和股数
+            large_int_indices = [(i, n) for i, n in enumerate(nums) if n == int(n) and n > 1000]
+            
+            amount_val = None
+            shares_val = None
+            
+            if currency_vals:
+                amount_val = currency_vals[0]
+                if len(large_int_indices) >= 1:
+                    shares_candidates = [n for i, n in large_int_indices if n != amount_val]
+                    shares_val = max(shares_candidates) if shares_candidates else None
+                else:
+                    remaining = [n for n in non_pcts if n != amount_val]
+                    shares_val = max(remaining) if remaining else None
+            elif len(large_int_indices) >= 2:
+                amount_val = large_int_indices[0][1]
+                shares_val = large_int_indices[1][1]
+            elif len(large_int_indices) == 1:
+                shares_val = large_int_indices[0][1]
+                amount_candidates = [n for n in non_pcts if n != shares_val and n not in pcts]
+                amount_val = amount_candidates[0] if amount_candidates else None
+            elif len(non_pcts) >= 3:
+                shares_val = max(non_pcts)
+                amount_val = non_pcts[0] if non_pcts[0] != shares_val else non_pcts[1]
+            elif len(non_pcts) == 2:
+                if non_pcts[0] > non_pcts[1] * 10:
+                    shares_val, amount_val = non_pcts[0], non_pcts[1]
+                else:
+                    amount_val, shares_val = non_pcts[0], non_pcts[1]
+            elif len(non_pcts) == 1:
+                amount_val = non_pcts[0]
+                shares_val = None
+
+            if amount_val is not None and shares_val is not None:
+                if amount_val > 1_000_000 and shares_val < 1000:
+                    amount_val, shares_val = shares_val, amount_val
+                elif amount_val > 100_000 and shares_val < 100:
+                    amount_val, shares_val = shares_val, amount_val
+
+            amount_raw = num_to_raw.get(amount_val, numeric_buffer[0]) if amount_val is not None else numeric_buffer[0]
 
             row = {
                 'name': name,
                 'short_name': self._cornerstone_short_name(name),
-                'offer_shares': int(self._parse_cornerstone_number(numeric_buffer[1]) or 0),
-                'offer_shares_pct': self._parse_cornerstone_number(numeric_buffer[2]),
-                'issued_share_pct': self._parse_cornerstone_number(issued_share_pct_source),
+                'offer_shares': int(shares_val or 0),
+                'offer_shares_pct': pct1_val,
+                'issued_share_pct': pct2_val,
             }
-            row.update(self._cornerstone_amount_fields(numeric_buffer[0], table_text))
+            row.update(self._cornerstone_amount_fields(amount_raw, table_text))
             if (
                 row['investment_amount_m'] is not None
                 and row['offer_shares'] > 0
                 and row['offer_shares_pct'] is not None
-                and row['issued_share_pct'] is not None
                 and 0 < row['offer_shares_pct'] <= 100
-                and 0 <= row['issued_share_pct'] <= 100
             ):
-                rows.append(row)
+                if row['issued_share_pct'] is None or 0 <= row['issued_share_pct'] <= 100:
+                    rows.append(row)
             name_buffer = []
             numeric_buffer = []
+            pending_flush = False
 
         for line in lines:
             lower_line = line.lower()
+            if line.strip() in ("Fund,", "SCSp(cid:2) (cid:2) (cid:2)", "HuaYuan", "AMRAction"):
+                logger.debug(
+                    "cornerstone trace line=%s noise=%s nb=%s num=%s pending=%s",
+                    line.strip()[:20],
+                    _is_noise(line),
+                    name_buffer,
+                    len(numeric_buffer),
+                    pending_flush,
+                )
             if _is_noise(line):
                 if lower_line == 'capital' and name_buffer and not numeric_buffer:
-                    name_buffer.append(line)
+                    prev_name_lower = ' '.join(name_buffer).lower()
+                    investor_kws = list(_INVESTOR_KEYWORDS)
+                    prev_has_investor_kw = any(kw in prev_name_lower for kw in investor_kws)
+                    if prev_has_investor_kw:
+                        name_buffer.append(line)
                     continue
-                if len(numeric_buffer) >= 4:
+                if pending_flush or len(numeric_buffer) >= 4:
                     flush_row()
                 elif numeric_buffer:
                     name_buffer = []
                     numeric_buffer = []
+                    pending_flush = False
+                continue
+
+            # 尝试将一行分割为名字+数字
+            name_part, number_parts = _split_line_to_name_and_numbers(line)
+            if name_part and number_parts and len(number_parts) >= 3:
+                if pending_flush:
+                    # 已经有待flush的行，当前是新投资者
+                    flush_row()
+                elif name_buffer and not numeric_buffer:
+                    # 如果 name_buffer 中的内容看起来都是噪声，清空它
+                    if all(_is_noise(p) for p in name_buffer):
+                        name_buffer = []
+                    # 前面有名字但没有数字，当前行包含完整的名字+数字
+                    # 检查前面的名字是否是当前名字的一部分（续行）
+                    prev_name = ' '.join(name_buffer).lower().strip()
+                    curr_name = name_part.lower().strip()
+                    # 判断前面是否是续行：如果包含投资者关键词，认为是续行
+                    investor_keywords = list(_INVESTOR_KEYWORDS)
+                    prev_has_investor_kw = any(kw in prev_name for kw in investor_keywords)
+                    curr_has_investor_kw = any(kw in curr_name for kw in investor_keywords)
+                    # 如果前面名字包含投资者关键词，且当前名字也包含，认为是续行
+                    if prev_has_investor_kw and curr_has_investor_kw and prev_name != curr_name:
+                        # 续行：保留前面的名字并追加当前名字
+                        name_buffer.append(name_part)
+                    elif len(name_buffer) <= 2 and prev_name and prev_name != curr_name and not prev_has_investor_kw:
+                        # 前面可能是上一个投资者的残余，清空
+                        name_buffer = [name_part]
+                    elif any(not _is_noise(p) for p in name_buffer):
+                        name_buffer.append(name_part)
+                    else:
+                        name_buffer = [name_part]
+                    numeric_buffer = number_parts
+                    if 'for and on behalf' in name_part.lower():
+                        continue
+                    flush_row()
+                    continue
+                
+                # 新混合行
+                name_buffer = [name_part]
+                numeric_buffer = number_parts
+                pending_flush = True
+                if 'for and on behalf' in name_part.lower():
+                    continue
+                # 不立即flush，等待看是否有续行
                 continue
 
             if self._is_numeric_cell(line):
                 if name_buffer:
                     numeric_buffer.append(line)
+                    pending_flush = True
                 continue
 
-            if numeric_buffer:
+            # 纯名字行
+            if pending_flush and name_buffer and numeric_buffer:
+                # 有待flush的行，当前是纯名字行
+                # 检查是否是续行（如 "Fund, L.P."）
+                line_tokens = line.split()
+                has_numbers = any(self._is_numeric_cell(t) or self._parse_cornerstone_number(t) is not None for t in line_tokens)
+                line_lower = line.lower()
+                
+                # 检查 name_buffer 是否已经包含完整的投资者名字
+                current_name = ' '.join(name_buffer).lower()
+                # 包含明确的公司后缀（如 Limited, Ltd, L.P., PLC）或知名单字机构名
+                well_known_single_names = ['blackrock', 'temasek', 'gic', 'qia', 'adia', 'cppib', 'kia']
+                has_complete_name = (
+                    any(kw in current_name for kw in ['limited', 'ltd', 'l.p.', 'lp', 'plc', 'inc.', 'corp.', 'corporation'])
+                    or any(kw == current_name.strip() for kw in well_known_single_names)
+                )
+                
+                # 检查 name_buffer 是否在等待 for and on behalf 的续行
+                waiting_for_behalf = 'for and on behalf' in current_name
+                
+                # 检查当前行是否明显是新投资者
+                # 新投资者通常有2个或更多token，且包含投资者类型关键词
+                is_new_investor = (
+                    len(line_tokens) >= 2
+                    and any(kw in line_lower for kw in ['capital', 'asset', 'management', 'investments', 'star', 'group', 'corporation', 'ventures'])
+                    and not line_lower.startswith('fund')
+                    and not line_lower.startswith('scsp')
+                )
+                
+                # 检查当前行是否看起来是续行
+                # 续行通常很短（<=4个token），且不包含数字
+                # 但如果包含 footnote 标记（如 ў），可能更长
+                has_footnote = any(c in line for c in ['ў', '©', '®', '™'])
+                looks_like_continuation = (
+                    (len(line_tokens) <= 4 or has_footnote)
+                    and not has_numbers
+                    and not _is_noise(line)
+                )
+                
+                # 如果 numeric_buffer 已经有足够数据（>=6个数字），
+                # 下一个名字行应该被当作新投资者
+                has_sufficient_data = len(numeric_buffer) >= 6
+                
+                # 如果在等待 for and on behalf 的续行，且名字还不完整，优先当作续行
+                if waiting_for_behalf and not has_complete_name:
+                    name_buffer.append(line)
+                elif looks_like_continuation and not has_complete_name:
+                    name_buffer.append(line)
+                elif is_new_investor:
+                    flush_row()
+                    name_buffer = [line]
+                elif has_sufficient_data:
+                    flush_row()
+                    name_buffer = [line]
+                else:
+                    flush_row()
+                    name_buffer = [line]
+                continue
+            elif numeric_buffer:
+                if name_buffer:
+                    if len(numeric_buffer) >= 3:
+                        flush_row()
+                        name_buffer = [line]
+                        continue
+                    name_buffer.append(line)
+                    last_name = ' '.join(name_buffer).lower()
+                    if any(suffix in last_name for suffix in ['limited', 'ltd', 'l.p.', 'plc', 'inc.', 'corp.', 'corporation']):
+                        flush_row()
+                    continue
                 if len(numeric_buffer) >= 4:
                     flush_row()
                 else:
@@ -1156,46 +2173,38 @@ class CornerstoneAnalyzer:
         rows = []
         lines = table_text.split('\n')
         combined = ' '.join(line.strip() for line in lines if line.strip())
-        combined = re.sub(r'[\x00-\x1f\x7f-\x9f]+', ' ', combined)
-        combined = re.sub(r'\s+', ' ', combined)
+        combined = _CRE_CONTROL.sub(' ', combined)
+        combined = _CRE_WHITESPACE.sub(' ', combined)
 
-        investor_patterns = [
-            r'([A-Z][A-Za-z\s]{5,60}(?:Limited|Ltd|Capital|Fund|Investment|Partners?|Corporation|Inc\.))\s+'
-            r'([0-9,]+(?:\.[0-9]+)?)\s+'
-            r'([0-9,]+(?:\.[0-9]+)?)\s+'
-            r'([0-9,.]+(?:\.[0-9]+)?)\s+'
-            r'([0-9,.]+(?:\.[0-9]+)?)',
-        ]
-        for pattern in investor_patterns:
-            for m in re.finditer(pattern, combined):
-                try:
-                    name = m.group(1).strip()
-                    shares = int(float(m.group(3).replace(',', '')))
-                    pct1 = float(m.group(4).replace(',', ''))
-                    pct2 = float(m.group(5).replace(',', ''))
-                    amount_fields = self._cornerstone_amount_fields(m.group(2), table_text)
-                    if amount_fields.get('investment_amount_m') and shares > 1000 and 0 < pct1 <= 100:
-                        row = {
-                            'name': name,
-                            'short_name': name,
-                            'offer_shares': shares,
-                            'offer_shares_pct': pct1,
-                            'issued_share_pct': pct2 if pct2 <= 100 else None,
-                        }
-                        row.update(amount_fields)
-                        rows.append(row)
-                except (ValueError, IndexError):
-                    continue
-            if rows:
-                seen_names = set()
-                deduped = []
-                for r in rows:
-                    name_key = r.get('short_name', r.get('name', '')).strip().lower()
-                    if name_key and name_key not in seen_names:
-                        seen_names.add(name_key)
-                        deduped.append(r)
-                rows = deduped
-                break
+        for m in _CRE_INVESTOR_REGEX.finditer(combined):
+            try:
+                name = m.group(1).strip()
+                shares = int(float(m.group(3).replace(',', '')))
+                pct1 = float(m.group(4).replace(',', ''))
+                pct2 = float(m.group(5).replace(',', ''))
+                amount_fields = self._cornerstone_amount_fields(m.group(2), table_text)
+                if amount_fields.get('investment_amount_m') and shares > 1000 and 0 < pct1 <= 100:
+                    row = {
+                        'name': name,
+                        'short_name': name,
+                        'offer_shares': shares,
+                        'offer_shares_pct': pct1,
+                        'issued_share_pct': pct2 if pct2 <= 100 else None,
+                    }
+                    row.update(amount_fields)
+                    rows.append(row)
+            except (ValueError, IndexError):
+                continue
+
+        if rows:
+            seen_names = set()
+            deduped = []
+            for r in rows:
+                name_key = r.get('short_name', r.get('name', '')).strip().lower()
+                if name_key and name_key not in seen_names:
+                    seen_names.add(name_key)
+                    deduped.append(r)
+            rows = deduped
         return rows
 
     def _extract_cornerstone_detail_window(self, context, anchor, stop_anchors=None, window_size=2200):
@@ -1334,23 +2343,16 @@ class CornerstoneAnalyzer:
         candidates = []
         priority_candidates = []
         
-        cornerstone_keyword_pattern = r'cornerstone investors?.{0,500}?([0-9]+(?:\.[0-9]+)?)%'
-        for match in re.finditer(cornerstone_keyword_pattern, context, re.IGNORECASE | re.DOTALL):
+        for match in _CRE_CORNERSTONE_KEYWORD_PCT.finditer(context):
             try:
                 pct = float(match.group(1))
             except Exception:
                 continue
             if 1 <= pct <= 95:
                 priority_candidates.append(pct)
-        
-        direct_patterns = [
-            r'represent(?:s|ing)? approximately ([0-9]+(?:\.[0-9]+)?)%',
-            r'([0-9]+(?:\.[0-9]+)?)% of (?:the|our) (?:offer|global offering|placing) shares',
-            r'([0-9]+(?:\.[0-9]+)?)% of the total offer shares',
-        ]
 
-        for pattern in direct_patterns:
-            for match in re.finditer(pattern, context, re.IGNORECASE | re.DOTALL):
+        for pattern in _CRE_PCT_PATTERNS:
+            for match in pattern.finditer(context):
                 try:
                     pct = float(match.group(1))
                 except Exception:
@@ -1365,15 +2367,10 @@ class CornerstoneAnalyzer:
                     else:
                         candidates.append(pct)
 
-        share_patterns = [
-            r'([0-9,]+(?:\.[0-9]+)?)\s*shares?.{0,120}?represent(?:s|ing)? approximately ([0-9]+(?:\.[0-9]+)?)%',
-            r'([0-9,]+(?:\.[0-9]+)?)\s*shares?.{0,120}?out of ([0-9,]+(?:\.[0-9]+)?)\s*shares?',
-        ]
-
-        for pattern in share_patterns:
-            for match in re.finditer(pattern, context, re.IGNORECASE | re.DOTALL):
+        for pattern in _CRE_SHARE_PCT_PATTERNS:
+            for match in pattern.finditer(context):
                 try:
-                    if 'out of' in pattern:
+                    if pattern is _CRE_SHARE_PCT_PATTERNS[1]:
                         numerator = float(match.group(1).replace(',', ''))
                         denominator = float(match.group(2).replace(',', ''))
                         if denominator > 0:
@@ -1393,10 +2390,26 @@ class CornerstoneAnalyzer:
                     else:
                         candidates.append(pct)
 
+        # 中文招股书 fallback：检测总计行或"占发售股份"附近的百分比
+        if not priority_candidates and not candidates:
+            cn_patterns = [
+                re.compile(r'(?:總計|总计|合计|總額)[\s\S]{0,500}?([0-9]+(?:\.[0-9]+)?)%', re.DOTALL),
+                re.compile(r'(?:佔發售股份|占发售股份|佔發售|占发售)[\s\S]{0,300}?([0-9]+(?:\.[0-9]+)?)%', re.DOTALL),
+            ]
+            for pattern in cn_patterns:
+                for match in pattern.finditer(context):
+                    try:
+                        pct = float(match.group(1))
+                    except Exception:
+                        continue
+                    if 1 <= pct <= 95:
+                        priority_candidates.append(pct)
+
         if priority_candidates:
-            return round(max(priority_candidates), 2)
+            # 优先取第一个高置信匹配（避免范围值取最大导致过度乐观）
+            return round(priority_candidates[0], 2)
         elif candidates:
-            return round(max(candidates), 2)
+            return round(candidates[0], 2)
         else:
             return None
 
@@ -1411,10 +2424,22 @@ class CornerstoneAnalyzer:
                 '清池', '奥博'
             ])
         if sector == 'hardtech':
+            healthcare_hits = any(keyword in lower_context for keyword in [
+                'healthcare', 'medical', 'biotech', 'pharmaceutical', 'clinical',
+                'drug', 'patient', 'diagnosis',
+            ])
+            hardtech_hits = any(keyword in lower_context for keyword in [
+                'semiconductor', 'chip', 'wafer', 'foundry', 'robot', 'robotics',
+                'automation', 'industrial', 'manufacturing', 'ai chip', 'gpu',
+                '科技', '创新', '半导体', '机器人',
+            ])
+            if hardtech_hits:
+                return True
+            if healthcare_hits:
+                return False
             return any(keyword in lower_context for keyword in [
-                'technology', 'tech', 'innovation', 'semiconductor', 'venture', 'science',
-                'industrial', 'robot', 'robotics', 'automation', 'ai', 'high-tech',
-                '科技', '创新', '半导体', '机器人'
+                'technology', 'tech', 'innovation', 'venture', 'science',
+                'high-tech',
             ])
         if sector == 'consumer':
             return any(keyword in lower_context for keyword in [
@@ -1423,12 +2448,17 @@ class CornerstoneAnalyzer:
         return None
 
     def _spv_risk_flags(self, context):
+        """检测 SPV/空壳风险，但排除港股招股书标准法律用语"""
         lower_context = context.lower()
         hits = []
         patterns = [
-            ('BVI/开曼注册主体较多', ['british virgin islands', 'bvi', 'cayman islands', '开曼']),
-            ('出现 SPV / 特殊目的载体表述', ['special purpose vehicle', 'spv']),
-            ('疑似临近 IPO 新设主体', ['newly incorporated', 'recently incorporated', 'incorporated on']),
+            ('BVI注册主体较多', ['british virgin islands', 'bvi incorporated', 'bvi company', 'bvi limited']),
+            ('出现 SPV / 特殊目的载体表述', ['special purpose vehicle', 'spv ', '(spv)', 'spv,', 'spv.', 'special purpose']),
+            # 移除 "incorporated on"：这是港股基石描述标准法律用语
+            # 改为只检测明确的新设/临近IPO信号
+            ('疑似临近 IPO 新设主体', ['newly incorporated', 'recently incorporated',
+                                       'incorporated shortly before', 'incorporated for the purpose',
+                                       'incorporated specifically']),
             ('出资结构披露较单薄', ['single limited partner', 'sole limited partner', 'one limited partner']),
         ]
         for label, keywords in patterns:
@@ -1479,7 +2509,7 @@ class CornerstoneAnalyzer:
                 'tier': tier,
                 'category': item.get('category') or (profile.get('category') if profile else '未知'),
                 'role_note': item.get('role_note') or (profile.get('role_note') if profile else ''),
-                'tier_score': self._effective_tier_score(tier),
+                'tier_score': self._effective_tier_score(tier, item.get('offer_shares_pct')),
                 'independence_score': independence_score,
                 'independence_label': independence_label,
                 'sector_fit_score': sector_fit_score,
@@ -1498,31 +2528,53 @@ class CornerstoneAnalyzer:
             groups.append('国际主权/养老金')
         if any('全球顶级长线资管' in cat for cat in categories):
             groups.append('顶级资管')
+        if any('量化做市商' in cat for cat in categories):
+            groups.append('量化做市商')
         if any('医疗专业基金' in cat for cat in categories):
             groups.append('医疗基金')
         if any('国资' in cat for cat in categories):
             groups.append('国家队')
         if any('中资长线' in cat or '公募' in cat for cat in categories):
             groups.append('国内公募/长线资金')
+        if any('保险资金' in cat for cat in categories):
+            groups.append('保险长线资金')
         if any('PE/VC' in cat or '成长基金' in cat for cat in categories):
             groups.append('一线PE/VC')
         if any('产业战略' in cat for cat in categories):
             groups.append('产业资本')
+        if any('券商直投' in cat for cat in categories):
+            groups.append('券商直投')
         if not groups:
             groups.append('普通财务基石')
+
+        # 添加基石总数和 tier 分布，避免少量基石也能给出看似丰富的组合标签
+        tier_counts = {}
+        for row in rows:
+            tier = row.get('tier', '未知')
+            tier_counts[tier] = tier_counts.get(tier, 0) + 1
+        total = len(rows)
+        tier_info = f"共{total}家基石"
+        if total > 0:
+            tier_parts = []
+            for t in ('S', 'A', 'B', '弱'):
+                if t in tier_counts:
+                    tier_parts.append(f"{t}级{tier_counts[t]}")
+            if tier_parts:
+                tier_info += f"({'+'.join(tier_parts)})"
 
         missing = []
         if not any('主权' in cat or '养老金' in cat for cat in categories):
             missing.append('无国际主权')
         if not any('产业战略' in cat for cat in categories):
             missing.append('无产业药企/客户型战略基石')
-        return " + ".join(groups) + ("；" + "、".join(missing) if missing else "")
+        return f"{tier_info}；{' + '.join(groups)}" + ("；" + "、".join(missing) if missing else "")
 
     def _build_v2_result(self, cornerstone_rows, matched, cornerstone_pct, sector, sector_match, spv_flags):
         profile_rows = self._v2_profile_rows(cornerstone_rows, matched, sector)
         row_weights = []
         for row in profile_rows:
-            weight = row.get('offer_shares_pct') or row.get('investment_amount_hkd_m') or 1
+            pct = row.get('offer_shares_pct')
+            weight = pct if pct is not None and pct > 0 else 1
             row_weights.append((row, weight))
 
         ct = SETTINGS.cornerstone
@@ -1544,7 +2596,10 @@ class CornerstoneAnalyzer:
             subscription_detail = f'基石占比{cornerstone_pct:.1f}%，未触发极端红旗'
         else:
             subscription_score = ct.score_extreme
-            subscription_detail = f'基石占比{cornerstone_pct:.1f}%，结构偏极端'
+            if cornerstone_pct < ct.pct_acceptable_low:
+                subscription_detail = f'基石占比{cornerstone_pct:.1f}%，低于{ct.pct_acceptable_low:.0f}%安全线，机构参与度不足'
+            else:
+                subscription_detail = f'基石占比{cornerstone_pct:.1f}%，超过{ct.pct_acceptable_high:.0f}%上限，流通盘过小'
 
         has_long_money = any(row.get('tier') == 'S' or '长线' in row.get('category', '') or '主权' in row.get('category', '') for row in profile_rows)
         has_weak = any(row.get('tier') == '弱' for row in profile_rows)
@@ -1633,7 +2688,7 @@ class CornerstoneAnalyzer:
         if red_flags:
             has_severe = any(any(severe in str(rf).lower() for severe in ct.severe_cornerstone_flags) for rf in red_flags)
             if has_severe:
-                score = min(score, ct.score_cap_low_red_flags)
+                score = min(score, ct.score_cap_severe_red_flags)
             else:
                 penalty = min(10, len(red_flags) * 3)
                 score = max(0, score - penalty)
@@ -1733,6 +2788,13 @@ class CornerstoneAnalyzer:
         result['source_excerpt'] = self._source_excerpt(context)
         # 保留所有 matched_investors（含 pre_ipo_section），但分开标记
         result['all_matched_investors'] = matched
+        # 添加负面语境中识别到的高质量投资者（如"未见GIC"）
+        absent_hq = getattr(self, '_last_absent_high_quality', [])
+        result['absent_high_quality_investors'] = absent_hq
+        if absent_hq:
+            result['concerns'] = result.get('concerns', []) + [
+                f"负面语境识别到高质量投资者缺席: {', '.join(a['name'] for a in absent_hq)}"
+            ]
         return result
 
 

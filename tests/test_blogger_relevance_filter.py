@@ -98,6 +98,25 @@ class TestShortContentFiltered:
         assert result.is_relevant is False
         assert "长度不足" in result.reason
 
+    def test_short_but_strong_ipo_context_can_pass(self):
+        cfg = BloggerMonitorConfig(
+            ipo_keywords=["IPO", "打新", "申购", "新股"],
+            opinion_keywords=["看好", "建议", "分析"],
+            min_content_length=500,
+        )
+        f = RelevanceFilter(cfg)
+        article = SearchResultModel(
+            title="测试公司 IPO 打新分析",
+            url="https://example.com/article",
+            snippet="测试公司(09999) IPO 申购建议",
+            content="测试公司(09999) IPO 打新分析，建议申购，核心看点是估值和赛道。",
+            published_at=None,
+            source_domain="example.com",
+        )
+        result = f.filter(article, "09999", "测试公司")
+        assert result.is_relevant is True
+        assert result.relevance_score > 0.0
+
 
 class TestRelevanceScore:
     def test_score_increases_with_opinion(self, relevance_filter):

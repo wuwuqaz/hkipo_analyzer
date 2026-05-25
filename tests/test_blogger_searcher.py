@@ -119,3 +119,72 @@ class TestSearchSingleKeyword:
         with patch.object(searcher, "_get_tavily_client", return_value=mock_client):
             results = searcher._search_tavily("测试公司 IPO")
         assert results == []
+
+
+class FakeDDGS:
+    backend_results = {}
+    queries = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def text(self, keyword, **kwargs):
+        backend = kwargs.get("backend", "auto")
+        self.__class__.queries.append((keyword, backend))
+        return list(self.__class__.backend_results.get((keyword, backend), []))
+
+
+class TestDuckDuckGoFallback:
+    def test_prefers_html_backend_when_auto_is_empty(self):
+        cfg = BloggerMonitorConfig(
+            tavily_api_key="",
+            keyword_templates=["{company_name}"],
+            max_results_per_keyword=5,
+        )
+        searcher = BloggerSearcher(cfg)
+        FakeDDGS.backend_results = {
+            ("测试公司", "html"): [
+                {"title": "测试文章", "href": "https://example.com/a", "body": "内容"}
+            ],
+            ("测试公司", "lite"): [],
+            ("测试公司", "auto"): [],
+        }
+        FakeDDGS.queries = []
+
+        with patch.object(BloggerSearcher, "_get_ddgs_class", return_value=FakeDDGS):
+            results = searcher._search_duckduckgo("测试公司")
+
+        assert len(results) == 1
+        assert results[0].title == "测试文章"
+        assert FakeDDGS.queries[0] == ("测试公司", "html")
+
+    def test_tries_site_filtered_queries_when_plain_query_is_empty(self):
+        cfg = BloggerMonitorConfig(
+            tavily_api_key="",
+            keyword_templates=["{company_name}"],
+            max_results_per_keyword=5,
+            site_filters=["xueqiu.com"],
+        )
+        searcher = BloggerSearcher(cfg)
+        FakeDDGS.backend_results = {
+            ("测试公司", "html"): [],
+            ("测试公司", "lite"): [],
+            ("测试公司", "auto"): [],
+            ("site:xueqiu.com 测试公司", "html"): [
+                {"title": "雪球文章", "href": "https://xueqiu.com/post", "body": "内容"}
+            ],
+        }
+        FakeDDGS.queries = []
+
+        with patch.object(BloggerSearcher, "_get_ddgs_class", return_value=FakeDDGS):
+            results = searcher._search_duckduckgo("测试公司")
+
+        assert len(results) == 1
+        assert results[0].source_domain == "xueqiu.com"
+        assert ("site:xueqiu.com 测试公司", "html") in FakeDDGS.queries

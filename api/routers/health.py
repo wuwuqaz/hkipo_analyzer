@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from api.deps import get_config, get_db
 from api.config import APIConfig
+from ipo_analyzer import __version__ as IPO_ANALYZER_VERSION
 
 router = APIRouter(prefix="/api", tags=["health"])
 
@@ -54,7 +55,7 @@ def version_check():
         pass
 
     return VersionResponse(
-        app_version="0.1.0",
+        app_version=IPO_ANALYZER_VERSION,
         python_version=f"{platform.python_version()} ({sys.implementation.name})",
         ipo_analyzer_version=ipo_analyzer_version,
     )

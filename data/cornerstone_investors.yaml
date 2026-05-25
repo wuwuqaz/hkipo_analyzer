@@ -1,8 +1,8 @@
 meta:
   model_version: cornerstone_v2_2026_05
-  last_updated: '2026-05-09'
+  last_updated: '2026-05-16'
   description: 基石投资者数据库 — 用于港股IPO基石质量评估
-  total_investors: 60
+  total_investors: 71
 investors:
 - name: GIC
   tier: S
@@ -202,6 +202,27 @@ investors:
   role_note: 产业链龙头背书，订单/生态协同价值高
   sector_tags:
   - hardtech
+- name: Jane Street
+  tier: S
+  category: 量化做市商
+  aliases:
+  - jane street
+  - jane street capital
+  - jane street group
+  role_note: 全球最大做市商之一，2024-2025港股基石最活跃外资，资金体量和定价锚效应极强
+  sector_tags:
+  - all
+- name: Xiaomi
+  tier: S
+  category: 强产业战略投资者
+  aliases:
+  - xiaomi
+  - 小米
+  - 小米集团
+  role_note: 强产业生态基石，硬件/AIoT/汽车生态协同价值高
+  sector_tags:
+  - hardtech
+  - consumer
 - name: Hillhouse/HHLR
   tier: A
   category: 一线PE/VC/成长基金
@@ -333,7 +354,7 @@ investors:
   - 景林
   - 景林资产
   - greenwoods investment
-  role_note: 中国头部私募基金，2025年港股基石参投最活跃机构(14次)
+  role_note: 中国头部私募基金，2025-2026年港股基石参投最活跃机构之一
   sector_tags:
   - all
 - name: 高毅资产
@@ -477,6 +498,8 @@ investors:
   aliases:
   - morgan stanley investment management
   - morgan stanley im
+  - morgan stanley & co
+  - morgan stanley international
   - 摩根士丹利投资管理
   role_note: 国际大型资管平台
   sector_tags:
@@ -544,8 +567,10 @@ investors:
   - icbcubs
   - icbc wealth
   - icbc credit suisse
+  - icbc asset management
   - 工银瑞信
   - 工银理财
+  - 工银资管
   role_note: 银行系/公募长线资金，稳定性较好
   sector_tags:
   - all
@@ -566,6 +591,104 @@ investors:
   - 未来资产
   - 未來資產
   role_note: 亚洲大型金融/资管平台，具备区域资金背书
+  sector_tags:
+  - all
+- name: Citadel Securities
+  tier: A
+  category: 量化做市商
+  aliases:
+  - citadel securities
+  - citadel
+  - 城堡证券
+  role_note: 全球最大做市商之一，港股基石参投活跃，定价锚效应较强
+  sector_tags:
+  - all
+- name: Point72
+  tier: A
+  category: 全球多策略对冲基金
+  aliases:
+  - point72
+  - point 72
+  - point72 asset management
+  role_note: 全球大型多策略对冲基金，港股基石参投
+  sector_tags:
+  - all
+- name: D1 Capital Partners
+  tier: A
+  category: 全球多策略对冲基金
+  aliases:
+  - d1 capital
+  - d1 capital partners
+  - d1
+  role_note: 全球大型对冲基金，港股基石参投
+  sector_tags:
+  - all
+- name: 汇添富基金
+  tier: A
+  category: 知名中资长线/保险/公募
+  aliases:
+  - china universal am
+  - china universal asset management
+  - 汇添富
+  - 汇添富基金
+  role_note: 头部中资公募，2025-2026年港股基石参投活跃
+  sector_tags:
+  - all
+- name: 南方基金
+  tier: A
+  category: 知名中资长线/保险/公募
+  aliases:
+  - southern fund
+  - southern asset management
+  - 南方基金
+  - 南方
+  role_note: 头部中资公募，国内资金认可度较好
+  sector_tags:
+  - all
+- name: 中欧基金
+  tier: A
+  category: 知名中资长线/保险/公募
+  aliases:
+  - zhongou fund
+  - china europe fund
+  - lombarda china fund
+  - 中欧基金
+  - 中欧
+  role_note: 头部中资公募，主动管理能力较强
+  sector_tags:
+  - all
+- name: 泰康人寿
+  tier: A
+  category: 保险资金
+  aliases:
+  - taikang life
+  - taikang life insurance
+  - 泰康人寿
+  - 泰康人寿保险
+  role_note: 头部保险资金，2025-2026年险资入场港股基石代表，长线属性强
+  sector_tags:
+  - all
+- name: 平安人寿
+  tier: A
+  category: 保险资金
+  aliases:
+  - ping an life
+  - ping an life insurance
+  - 平安人寿
+  - 平安人寿保险
+  - 中国平安人寿
+  role_note: 头部保险资金，2025-2026年险资入场港股基石代表，长线属性强
+  sector_tags:
+  - all
+- name: 中信证券投资
+  tier: A
+  category: 券商直投平台
+  aliases:
+  - citic securities investment
+  - citic investment
+  - 中信证券投资
+  - 中信建投投资
+  role_note: 头部券商直投平台，研究/承销资源协同
   sector_tags:
   - all
 - name: Huadeng Technology/华登国际

@@ -43,7 +43,6 @@ class ProspectusQualityAnalyzer:
         """经营现金流质量分析 — 评估OCF对净利润和收入的覆盖度"""
         cf = prospectus_info.get('cashflow', {}) or {}
         net_profit = prospectus_info.get('net_profit')
-        revenue = prospectus_info.get('revenue')
         ocf = cf.get('operating_cash_flow')
         ocf_to_revenue = cf.get('ocf_to_revenue')
         ocf_to_net_profit = cf.get('ocf_to_net_profit')
@@ -146,7 +145,6 @@ class ProspectusQualityAnalyzer:
     def _analyze_financial_health(cls, prospectus_info):
         """财务健康度分析 — 现金跑道、营运资本、融资依赖"""
         cf = prospectus_info.get('cashflow', {}) or {}
-        cs = prospectus_info.get('customer_supplier', {}) or {}
         profitable = prospectus_info.get('profitable')
         qt = SETTINGS.prospectus_quality
         score = 0
@@ -599,7 +597,7 @@ class ProspectusQualityAnalyzer:
                 fisher_points += 1
                 fisher_reasons.append('管理层治理优秀')
             elif mg.get('label') == '良好':
-                reasons.append(f"管理层治理良好")
+                reasons.append("管理层治理良好")
                 fisher_points += 0.5
             dimensions['management_governance'] = {
                 'label': mg.get('label', '缺失'),
@@ -630,14 +628,15 @@ class ProspectusQualityAnalyzer:
         if ps.get('sustainability_score') and ps.get('confidence') != 'missing':
             ps_score = ps['sustainability_score']
             score += round(ps_score * 0.10)  # 权重10%
-            if ps.get('non_recurring_ratio', 0) > 0.3:
-                reasons.append(f"非经常性损益占比{ps['non_recurring_ratio']*100:.1f}%，盈利可持续性存疑")
+            non_recurring_ratio = ps.get('non_recurring_ratio')
+            if _is_num(non_recurring_ratio) and non_recurring_ratio > 0.3:
+                reasons.append(f"非经常性损益占比{non_recurring_ratio*100:.1f}%，盈利可持续性存疑")
                 lynch_reasons.append('盈利依赖非经常性损益')
-            elif ps.get('non_recurring_ratio') is not None:
-                reasons.append(f"非经常性占比{ps['non_recurring_ratio']*100:.1f}%")
+            elif _is_num(non_recurring_ratio):
+                reasons.append(f"非经常性占比{non_recurring_ratio*100:.1f}%")
             dimensions['profit_sustainability'] = {
                 'label': ps.get('label', '缺失'),
-                'detail': f"非经常性占比{ps.get('non_recurring_ratio')*100:.1f}%" if ps.get('non_recurring_ratio') is not None else "非经常性占比--",
+                'detail': f"非经常性占比{non_recurring_ratio*100:.1f}%" if _is_num(non_recurring_ratio) else "非经常性占比--",
             }
             if ps.get('label') in ('可持续', '基本可持续'):
                 fisher_points += 1

@@ -294,7 +294,12 @@ def export_pdf_report(results, output_file):
             prospectus_info.get('results_date')
             cornerstone_total_hkd = prospectus_info.get('cornerstone_investment_hkd_million')
             cornerstone_total_usd = prospectus_info.get('cornerstone_investment_usd_million')
-            cornerstone_offer_ratio_pct = prospectus_info.get('cornerstone_offer_ratio_pct') or cornerstone_analysis.get('cornerstone_pct')
+            cornerstone_pct_text = cornerstone_analysis.get('cornerstone_pct')
+            cornerstone_pct_table = prospectus_info.get('cornerstone_offer_ratio_pct')
+            if _is_num(cornerstone_pct_text) and _is_num(cornerstone_pct_table) and abs(cornerstone_pct_text - cornerstone_pct_table) > 10:
+                cornerstone_offer_ratio_pct = cornerstone_pct_text
+            else:
+                cornerstone_offer_ratio_pct = cornerstone_pct_table or cornerstone_analysis.get('cornerstone_pct')
             valuation = prospectus_info.get('valuation', {}) or {}
             cashflow = prospectus_info.get('cashflow', {}) or {}
             global_offer_shares = prospectus_info.get('global_offer_shares')
@@ -612,6 +617,90 @@ def export_pdf_report(results, output_file):
             ]))
             return tbl
 
+        def build_investment_thesis_section(ipo):
+            prospectus_info = ipo.get('prospectus_info', {}) or {}
+            thesis = ipo.get('investment_thesis') or prospectus_info.get('investment_thesis') or {}
+            if not isinstance(thesis, dict) or not thesis:
+                return None
+
+            def _txt(value, limit=160):
+                text = re.sub(r'\s+', ' ', str(value or '')).strip()
+                if len(text) > limit:
+                    text = text[:limit - 3] + '...'
+                return xml_escape(text)
+
+            tone = thesis.get('overall_tone') or '--'
+            conclusion = thesis.get('one_line_conclusion') or thesis.get('conclusion') or '--'
+            short_case = thesis.get('short_seller_case') or {}
+            target = short_case.get('target_price_range_hkd') if isinstance(short_case, dict) else None
+            target_text = '--'
+            if isinstance(target, (list, tuple)) and len(target) >= 2 and all(_is_num(x) for x in target[:2]):
+                target_text = f"HK${target[0]:.2f}-{target[1]:.2f}"
+
+            rows = [
+                [
+                    Paragraph("<b>投研结论</b>", styles["TableHeader"]),
+                    Paragraph("<b>一句话判断</b>", styles["TableHeader"]),
+                    Paragraph("<b>做空重估区间</b>", styles["TableHeader"]),
+                ],
+                [
+                    Paragraph(f"<b>{_txt(tone, 20)}</b>", styles["Value"]),
+                    Paragraph(_txt(conclusion, 180), styles["Value"]),
+                    Paragraph(_txt(target_text, 36), styles["Value"]),
+                ],
+            ]
+
+            def _bullets(title, items, limit=3):
+                if not items:
+                    return None
+                if isinstance(items, dict):
+                    items = items.get('bear_points') or items.get('items') or []
+                if not isinstance(items, list):
+                    return None
+                text = "<br/>".join(f"• {_txt(item, 96)}" for item in items[:limit])
+                return [Paragraph(f"<b>{_txt(title, 16)}</b>", styles["Label"]), Paragraph(text or "--", styles["MutedValue"])]
+
+            detail_rows = []
+            for title, items in (
+                ("基本面诊断", thesis.get('fundamental_diagnosis')),
+                ("商业模式", thesis.get('business_model_takeaways')),
+                ("估值要点", thesis.get('valuation_takeaways')),
+                ("做空视角", short_case.get('bear_points') if isinstance(short_case, dict) else None),
+                ("反证指标", thesis.get('invalidation_signals')),
+            ):
+                row = _bullets(title, items)
+                if row:
+                    detail_rows.append(row)
+
+            table = Table(rows, colWidths=[80, 330, 100], hAlign="LEFT")
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_C['brand'])),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor(_C['slate_200'])),
+                ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor(_C['slate_200'])),
+                ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor(_C['blue_bg'])),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]))
+
+            if not detail_rows:
+                return table
+            detail = Table(detail_rows[:5], colWidths=[78, 432], hAlign="LEFT")
+            detail.setStyle(TableStyle([
+                ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor(_C['slate_200'])),
+                ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor(_C['slate_200'])),
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor(_C['slate_50'])),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]))
+            return Table([[table], [detail]], colWidths=[510], hAlign="LEFT")
+
         avg_score = sum(item.get('ipo_trade_score', item.get('trade_score', item.get('score', 0))) for item in results) / len(results)
         best_item = max(results, key=lambda item: item.get('ipo_trade_score', item.get('trade_score', item.get('score', 0))))
         prospectus_count = sum(1 for item in results if item.get('prospectus_info'))
@@ -763,6 +852,11 @@ def export_pdf_report(results, output_file):
         ipo_elements.append(prospectus_info_table)
         ipo_elements.append(Spacer(1, 10))
 
+        thesis_section = build_investment_thesis_section(ipo)
+        if thesis_section:
+            ipo_elements.append(thesis_section)
+            ipo_elements.append(Spacer(1, 10))
+
         signal_breakdown_table = build_signal_breakdown_table(ipo)
         if signal_breakdown_table:
             ipo_elements.append(signal_breakdown_table)
@@ -877,19 +971,17 @@ def export_pdf_report(results, output_file):
                 ]))
                 return cell
 
-            # 3+2 two-row layout: row1 = 热度/质地/规模, row2 = 市场/基石/empty
+            # 2x2 layout: 热度/质地 + 规模/基石
             bd = Table([
                 [
                     component_cell("热度", breakdown.get('heat', {}), _C['red']),
                     component_cell("质地", breakdown.get('quality', {}), _C['teal']),
-                    component_cell("规模", breakdown.get('scale', {}), _C['blue']),
                 ],
                 [
-                    component_cell("市场", breakdown.get('market', {}), _C['purple']),
+                    component_cell("规模", breakdown.get('scale', {}), _C['blue']),
                     component_cell("基石", breakdown.get('cornerstone', {}), _C['gold']),
-                    Paragraph("", styles["Value"]),
                 ],
-            ], colWidths=[165, 165, 165], hAlign="LEFT")
+            ], colWidths=[247, 247], hAlign="LEFT")
             bd.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_C['slate_50'])),
                 ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor(_C['slate_200'])),

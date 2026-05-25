@@ -4,6 +4,7 @@ import logging
 import copy
 from collections import OrderedDict
 from datetime import datetime
+from typing import Optional
 
 from .utils import _is_num
 from .table_extraction import extract_financial_table_by_row
@@ -904,6 +905,16 @@ class ProspectusParser:
         info['cornerstone_pct'] = cornerstone_analysis.get('cornerstone_pct')
         extract_prospectus_basic_info(text, info)
 
+        # 如果文本提取的 cornerstone_pct 缺失或无效，使用表格计算值 fallback
+        text_pct = info.get('cornerstone_pct')
+        table_pct = info.get('cornerstone_offer_ratio_pct')
+        if (text_pct is None or text_pct <= 0) and table_pct is not None and table_pct > 0:
+            info['cornerstone_pct'] = table_pct
+            info['cornerstone_analysis']['cornerstone_pct'] = table_pct
+        # 反向 fallback：如果表格计算为 0 但文本提取到了有效占比，用文本值填充
+        if table_pct == 0 and text_pct is not None and text_pct > 0:
+            info['cornerstone_offer_ratio_pct'] = text_pct
+
         # 财务币种检测
         if 'financial_currency' not in info or info.get('financial_currency_unit') is None:
             detected_currency, detected_unit = self._detect_financial_currency(text)
@@ -942,10 +953,12 @@ class ProspectusParser:
         from .analyzers._management_governance import ManagementGovernanceAnalyzer
         from .analyzers._balance_sheet import BalanceSheetAnalyzer
         from .analyzers._profit_sustainability import ProfitSustainabilityAnalyzer
+        from .analyzers._sponsor_track_record import SponsorTrackRecordAnalyzer
 
         info['management_governance'] = ManagementGovernanceAnalyzer().analyze(info, text)
         info['balance_sheet'] = BalanceSheetAnalyzer().analyze(info, text)
         info['profit_sustainability'] = ProfitSustainabilityAnalyzer().analyze(info, text)
+        info['sponsor_track_record'] = SponsorTrackRecordAnalyzer().analyze(info, text)
 
         # 通过 dataclass 做一次结构校验与规范化（兼容层，失败时回退原始 dict）
         try:

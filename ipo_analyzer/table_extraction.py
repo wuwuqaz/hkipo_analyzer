@@ -1,6 +1,8 @@
 import re
 from .utils import _find_year_headers, _extract_table_nums
 
+_CRE_SEGMENT_NUM = re.compile(r'(\(?\s*[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?\s*\)?)')
+
 
 def extract_financial_table_by_row(text, row_label_patterns, year_headers=None):
     lines = text.split('\n')
@@ -41,7 +43,7 @@ def extract_segment_table(text, segment_names):
             if seg_name.lower() in ll:
                 nums = []
                 for j in range(i, min(i + 6, len(lines))):
-                    for m in re.finditer(r'(\(?\s*[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?\s*\)?)', lines[j]):
+                    for m in _CRE_SEGMENT_NUM.finditer(lines[j]):
                         raw = m.group(1).strip('( )')
                         raw = raw.replace(',', '')
                         try:

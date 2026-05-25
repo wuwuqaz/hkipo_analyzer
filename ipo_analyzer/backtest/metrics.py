@@ -23,18 +23,43 @@ def compute_objective(
     return round(obj, 6)
 
 
-def compute_objective_cv(dataset, weights, qualify_threshold=50):
-    """Leave-One-Out 交叉验证的目标函数值"""
+def compute_objective_cv(
+    dataset,
+    weights,
+    qualify_threshold=50,
+    k=5,
+    min_qualified_threshold=3,
+):
+    """K-Fold 交叉验证的目标函数值
+
+    Args:
+        dataset: 回测样本列表
+        weights: 权重字典
+        qualify_threshold: 合格评分阈值
+        k: 折数（默认 5）
+        min_qualified_threshold: 每折最少合格样本数，低于此值该折 objective=0
+    """
     n = len(dataset)
-    if n < 3:
+    if n < 5:
         result = run_backtest(dataset, weights, qualify_threshold)
         return compute_objective(result)
 
+    k = min(k, n)
+    fold_size = n // k
     objectives = []
-    for i in range(n):
-        train = [r for j, r in enumerate(dataset) if j != i]
-        result = run_backtest(train, weights, qualify_threshold)
-        obj = compute_objective(result)
-        objectives.append(obj)
 
-    return round(sum(objectives) / len(objectives), 6)
+    for fold in range(k):
+        start = fold * fold_size
+        end = start + fold_size if fold < k - 1 else n
+        test_fold = set(range(start, end))
+
+        train = [r for i, r in enumerate(dataset) if i not in test_fold]
+        result = run_backtest(train, weights, qualify_threshold)
+
+        if result.qualified_count < min_qualified_threshold:
+            objectives.append(0.0)
+        else:
+            obj = compute_objective(result)
+            objectives.append(obj)
+
+    return round(sum(objectives) / len(objectives), 6) if objectives else 0.0

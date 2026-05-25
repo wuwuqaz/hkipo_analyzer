@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -18,9 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 class BloggerMonitorService:
-    def __init__(self, db_path: str = "temp/blogger_monitor.db"):
+    def __init__(self, db_path: str | None = None, db: Optional[BloggerMonitorDB] = None):
+        if db_path is None:
+            storage_base = os.getenv("STORAGE_BASE_PATH", "temp")
+            db_path = os.path.join(storage_base, "blogger_monitor.db")
         self.config = load_config()
-        self.db = BloggerMonitorDB(db_path)
+        self.db = db if db is not None else BloggerMonitorDB(db_path)
         self.searcher = BloggerSearcher(self.config)
         self.relevance_filter = RelevanceFilter(self.config)
         self.analyzer = BloggerAnalyzer(self.config)
@@ -101,6 +105,7 @@ class BloggerMonitorService:
                 continue
 
             self.db.update_post_relevance(post["id"], relevance.relevance_score)
+            post["relevance_score"] = relevance.relevance_score
 
             if not relevance.is_relevant:
                 logger.debug(
@@ -194,7 +199,8 @@ class BloggerMonitorService:
         return ConsensusResultModel(**data)
 
     def _resolve_company_name(self, stock_code: str) -> Optional[str]:
-        history_path = Path("temp/ipo_history.json")
+        storage_base = os.getenv("STORAGE_BASE_PATH", "temp")
+        history_path = Path(os.path.join(storage_base, "ipo_history.json"))
         if not history_path.exists():
             logger.warning("ipo_history.json 不存在: %s", history_path)
             return None

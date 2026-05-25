@@ -12,6 +12,158 @@ meta:
   update_script: "python3 scripts/update_peer_comps.py --stale-only --write"
 
 hardtech:
+  saas_cloud_platform:
+    keywords:
+      - SaaS
+      - cloud platform
+      - subscription
+      - recurring revenue
+      - ARR
+      - NRR
+      - software platform
+      - 雲平台
+      - 云平台
+      - 訂閱
+      - 订阅
+      - 软件即服务
+    peers:
+      - name: Salesforce
+        ticker: "CRM"
+        type: listed
+        tags: [saas, cloud, subscription, enterprise software]
+        market_cap_hkd_million: 2200000
+        revenue_million: 290000
+        net_profit_million: 33000
+        ps: 7.6
+        pe: 66.0
+        gross_margin_pct: 76.0
+        revenue_growth_pct: 9.0
+        notes: "全球企业SaaS龙头，适合作为成熟SaaS估值上沿参考"
+      - name: ServiceNow
+        ticker: "NOW"
+        type: listed
+        tags: [saas, cloud, workflow, enterprise software]
+        market_cap_hkd_million: 1450000
+        revenue_million: 85000
+        net_profit_million: 11000
+        ps: 17.0
+        pe: 130.0
+        gross_margin_pct: 79.0
+        revenue_growth_pct: 22.0
+        notes: "高增长企业软件平台，适合作为PS/Growth参考"
+      - name: 金山云
+        ticker: "3896.HK"
+        type: listed
+        tags: [cloud, software, platform]
+        market_cap_hkd_million: 18000
+        revenue_million: 7600
+        net_profit_million: -1600
+        ps: 2.4
+        pe: null
+        gross_margin_pct: 15.0
+        revenue_growth_pct: 5.0
+        notes: "港股云服务参考，毛利结构与纯SaaS不同，仅作本地市场锚"
+
+  consumer_3d_printing:
+    keywords:
+      - 3D printing
+      - 3D printer
+      - 3D printers
+      - additive manufacturing
+      - 3D printing filaments
+      - 3D scanner
+      - 3D scanners
+      - consumer-grade 3D printing
+      - desktop 3D printer
+      - Creality
+      - 3D打印
+      - 3D打印機
+      - 3D打印机
+      - 增材製造
+      - 增材制造
+      - 打印耗材
+      - 3D掃描儀
+      - 3D扫描仪
+    business_line_groups:
+      printers:
+        label: 3D打印机
+        segment_keywords: [3D printer, 3D printers, 3D打印機, 3D打印机]
+        peer_tags: [3d printing, printer, additive manufacturing]
+      consumables:
+        label: 3D打印耗材
+        segment_keywords: [filament, filaments, consumables, 打印耗材, 耗材]
+        peer_tags: [materials, filament, consumables]
+      scanners:
+        label: 3D扫描仪
+        segment_keywords: [3D scanner, 3D scanners, 3D掃描儀, 3D扫描仪]
+        peer_tags: [scanner, 3d scanning]
+    peers:
+      - name: Stratasys
+        ticker: "SSYS"
+        type: listed
+        tags: [3d printing, additive manufacturing, printer, materials]
+        market_cap_hkd_million: 4600
+        revenue_million: 4300
+        net_profit_million: 100
+        ps: 1.1
+        pe: 46.0
+        gross_margin_pct: 44.0
+        revenue_growth_pct: -2.0
+        notes: "国际3D打印设备及材料公司，工业/专业场景占比高"
+      - name: 3D Systems
+        ticker: "DDD"
+        type: listed
+        tags: [3d printing, additive manufacturing, printer, healthcare]
+        market_cap_hkd_million: 3250
+        revenue_million: 3020
+        net_profit_million: 230
+        ps: 1.1
+        pe: null
+        gross_margin_pct: 41.0
+        revenue_growth_pct: -8.0
+        notes: "老牌3D打印公司，工业/医疗业务，经营波动较大"
+      - name: Materialise
+        ticker: "MTLS"
+        type: listed
+        tags: [3d printing, software, additive manufacturing, healthcare]
+        market_cap_hkd_million: 2600
+        revenue_million: 2450
+        net_profit_million: 70
+        ps: 1.1
+        pe: null
+        gross_margin_pct: 56.0
+        revenue_growth_pct: 4.0
+        notes: "3D打印软件、医疗及制造服务公司，软件属性更强"
+      - name: 铂力特
+        ticker: "688333.SH"
+        type: listed
+        tags: [industrial additive manufacturing, metal 3d printing, aerospace]
+        market_cap_hkd_million: 25000
+        revenue_million: 1750
+        net_profit_million: 250
+        ps: 14.0
+        pe: 100.0
+        gross_margin_pct: 48.0
+        revenue_growth_pct: 35.0
+        notes: "A股金属增材制造龙头，工业/航空航天主题溢价高，仅作高估值参考"
+      - name: 华曙高科
+        ticker: "688433.SH"
+        type: listed
+        tags: [industrial additive manufacturing, 3d printing equipment, metal printing]
+        market_cap_hkd_million: 35000
+        revenue_million: 800
+        net_profit_million: 80
+        ps: 40.0
+        pe: null
+        gross_margin_pct: 49.0
+        revenue_growth_pct: 20.0
+        notes: "A股工业级3D打印设备公司，主题估值高，仅作定性参考"
+      - name: Bambu Lab
+        ticker: "private"
+        type: private
+        tags: [consumer 3d printing, desktop 3d printer, printer]
+        notes: "消费级3D打印重要竞争者，未上市，适合作为竞争格局定性参考"
+
   robotics_visual_perception:
     keywords:
       - robot
@@ -265,6 +417,105 @@ hardtech:
         gross_margin_pct: 68.0
         revenue_growth_pct: 55.0
         notes: "自动驾驶芯片，亏损型平台公司"
+
+consumer:
+  consumer_hardware_brand:
+    keywords:
+      - consumer hardware
+      - smart device
+      - home appliance
+      - wearable
+      - 出海硬件
+      - 消费硬件
+      - 智能设备
+      - 消費電子
+      - 消费电子
+    peers:
+      - name: 小熊电器
+        ticker: "002959.SZ"
+        type: listed
+        tags: [consumer hardware, home appliance, brand]
+        market_cap_hkd_million: 8500
+        revenue_million: 4700
+        net_profit_million: 420
+        ps: 1.8
+        pe: 20.0
+        gross_margin_pct: 37.0
+        revenue_growth_pct: 8.0
+        notes: "消费电器品牌，适合作为硬件品牌利润率参考"
+      - name: 安克创新
+        ticker: "300866.SZ"
+        type: listed
+        tags: [consumer hardware, export brand, accessories]
+        market_cap_hkd_million: 65000
+        revenue_million: 21000
+        net_profit_million: 2100
+        ps: 3.1
+        pe: 31.0
+        gross_margin_pct: 44.0
+        revenue_growth_pct: 22.0
+        notes: "出海消费电子品牌，可参考PS、PE与现金流质量"
+      - name: SharkNinja
+        ticker: "SN"
+        type: listed
+        tags: [consumer hardware, appliance, global brand]
+        market_cap_hkd_million: 98000
+        revenue_million: 42000
+        net_profit_million: 2800
+        ps: 2.3
+        pe: 35.0
+        gross_margin_pct: 49.0
+        revenue_growth_pct: 18.0
+        notes: "全球化小家电品牌，适合作为出海消费硬件参考"
+
+financial:
+  brokerage_wealth_insurance:
+    keywords:
+      - brokerage
+      - wealth management
+      - asset management
+      - insurance
+      - securities
+      - bank
+      - 券商
+      - 财富管理
+      - 財富管理
+      - 保险
+      - 保險
+      - 银行
+      - 銀行
+    peers:
+      - name: 香港交易所
+        ticker: "0388.HK"
+        type: listed
+        tags: [exchange, financial infrastructure]
+        market_cap_hkd_million: 420000
+        revenue_million: 21000
+        net_profit_million: 12500
+        pb: 11.0
+        pe: 34.0
+        notes: "交易所平台属性强，估值明显高于普通金融机构"
+      - name: 中金公司
+        ticker: "3908.HK"
+        type: listed
+        tags: [brokerage, investment banking, wealth management]
+        market_cap_hkd_million: 47000
+        revenue_million: 23000
+        net_profit_million: 6200
+        pb: 0.7
+        pe: 7.6
+        notes: "投行/券商参考，PB与ROE比PS更有意义"
+      - name: 友邦保险
+        ticker: "1299.HK"
+        type: listed
+        tags: [insurance, life insurance, financial]
+        market_cap_hkd_million: 650000
+        revenue_million: 180000
+        net_profit_million: 33000
+        pb: 1.8
+        pe: 20.0
+        notes: "保险龙头，适合参考PB、EV和ROE，不适合普通PS框架"
+
 
 healthcare:
   ai_drug_delivery_nanomedicine:

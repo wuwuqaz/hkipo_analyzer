@@ -4,6 +4,7 @@ import logging
 import os
 import sqlite3
 import uuid
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -51,15 +52,18 @@ class BacktestStore:
         self._init_db()
 
     def _init_db(self):
-        conn = self._connect()
-        conn.executescript(SCHEMA)
-        conn.commit()
-        conn.close()
+        with self._connect() as conn:
+            conn.executescript(SCHEMA)
+            conn.commit()
 
+    @contextmanager
     def _connect(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def _dict_row(self, row):
         if row is None:
@@ -67,88 +71,83 @@ class BacktestStore:
         return dict(row)
 
     def save_backtest_run(self, result, notes=""):
-        run_id = str(uuid.uuid4())[:8]
+        run_id = str(uuid.uuid4())
         from datetime import datetime
-        conn = self._connect()
-        conn.execute(
-            """INSERT INTO backtest_runs
-               (id, run_at, weights, sample_count, qualified_count,
-                win_rate, expected_return, max_drawdown, sharpe_like,
-                ic_rank, break_rate, coverage, decile_returns,
-                is_optimized, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                run_id,
-                datetime.now().isoformat(),
-                json.dumps(result.weights),
-                result.sample_count,
-                result.qualified_count,
-                result.win_rate,
-                result.expected_return,
-                result.max_drawdown,
-                result.sharpe_like,
-                result.ic_rank,
-                result.break_rate,
-                result.coverage,
-                json.dumps(result.decile_returns),
-                0,
-                notes,
-            ),
-        )
-        conn.commit()
-        conn.close()
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO backtest_runs
+                   (id, run_at, weights, sample_count, qualified_count,
+                    win_rate, expected_return, max_drawdown, sharpe_like,
+                    ic_rank, break_rate, coverage, decile_returns,
+                    is_optimized, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    run_id,
+                    datetime.now().isoformat(),
+                    json.dumps(result.weights),
+                    result.sample_count,
+                    result.qualified_count,
+                    result.win_rate,
+                    result.expected_return,
+                    result.max_drawdown,
+                    result.sharpe_like,
+                    result.ic_rank,
+                    result.break_rate,
+                    result.coverage,
+                    json.dumps(result.decile_returns),
+                    0,
+                    notes,
+                ),
+            )
+            conn.commit()
         return run_id
 
     def save_optimization_run(self, opt_result, iterations, cv_enabled=True):
-        opt_id = str(uuid.uuid4())[:8]
+        opt_id = str(uuid.uuid4())
         from datetime import datetime
-        conn = self._connect()
-        conn.execute(
-            """INSERT INTO optimization_runs
-               (id, started_at, finished_at, iterations, best_weights,
-                best_objective, default_objective, improvement_pct,
-                cv_enabled, cv_objective, sample_count, convergence, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                opt_id,
-                datetime.now().isoformat(),
-                datetime.now().isoformat(),
-                iterations,
-                json.dumps(opt_result.weights),
-                opt_result.objective,
-                opt_result.default_objective,
-                opt_result.improvement_pct,
-                1 if cv_enabled else 0,
-                opt_result.cv_objective,
-                opt_result.sample_count,
-                json.dumps(opt_result.convergence),
-                "completed",
-            ),
-        )
-        conn.commit()
-        conn.close()
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO optimization_runs
+                   (id, started_at, finished_at, iterations, best_weights,
+                    best_objective, default_objective, improvement_pct,
+                    cv_enabled, cv_objective, sample_count, convergence, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    opt_id,
+                    datetime.now().isoformat(),
+                    datetime.now().isoformat(),
+                    iterations,
+                    json.dumps(opt_result.weights),
+                    opt_result.objective,
+                    opt_result.default_objective,
+                    opt_result.improvement_pct,
+                    1 if cv_enabled else 0,
+                    opt_result.cv_objective,
+                    opt_result.sample_count,
+                    json.dumps(opt_result.convergence),
+                    "completed",
+                ),
+            )
+            conn.commit()
         return opt_id
 
     def get_latest_backtest_run(self):
-        conn = self._connect()
-        row = conn.execute(
-            "SELECT * FROM backtest_runs ORDER BY run_at DESC LIMIT 1"
-        ).fetchone()
-        conn.close()
-        return self._dict_row(row)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM backtest_runs ORDER BY run_at DESC LIMIT 1"
+            ).fetchone()
+            return self._dict_row(row)
 
     def get_best_backtest_run(self):
-        conn = self._connect()
-        row = conn.execute(
-            "SELECT * FROM backtest_runs ORDER BY expected_return DESC LIMIT 1"
-        ).fetchone()
-        conn.close()
-        return self._dict_row(row)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM backtest_runs ORDER BY expected_return DESC LIMIT 1"
+            ).fetchone()
+            return self._dict_row(row)
 
     def get_latest_optimization(self):
-        conn = self._connect()
-        row = conn.execute(
-            "SELECT * FROM optimization_runs ORDER BY finished_at DESC LIMIT 1"
-        ).fetchone()
-        conn.close()
-        return self._dict_row(row)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM optimization_runs ORDER BY finished_at DESC LIMIT 1"
+            ).fetchone()
+            return self._dict_row(row)

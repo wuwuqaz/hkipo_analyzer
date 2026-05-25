@@ -1,10 +1,14 @@
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import get_config
-from api.routers import analyze, health
+from api.routers import analyze, blogger, health, history, live, peers, reports
+
+# 自动加载 .env 文件
+load_dotenv()
 
 
 @asynccontextmanager
@@ -40,3 +44,8 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(analyze.router)
+app.include_router(live.router)
+app.include_router(history.router)
+app.include_router(reports.router)
+app.include_router(peers.router)
+app.include_router(blogger.router)

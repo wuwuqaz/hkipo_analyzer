@@ -2,7 +2,7 @@
 
 import re
 import logging
-from ..utils import _is_num, extract_text_excerpts
+from ..utils import _is_num
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,32 @@ class ProfitSustainabilityAnalyzer:
 
     def _extract_non_gaap_net_profit(self, text):
         """提取扣非净利润（百万）。"""
+        table_match = re.search(
+            r'(?:經調整淨利潤|经调整净利润)[^\n]*?(?:非國際財務報告準則|非国际财务报告准则)?[^\n]*'
+            r'(?P<row>[\s\S]{0,220}?)(?=\n\s*(?:附註|附注|$))',
+            text,
+            re.IGNORECASE,
+        )
+        if table_match:
+            nums = []
+            for m in re.finditer(r'\(?[\d,]+(?:\.\d+)?\)?', table_match.group('row')):
+                raw = m.group(0).replace(',', '').strip('()')
+                try:
+                    val = float(raw)
+                except ValueError:
+                    continue
+                if 1900 <= val <= 2100:
+                    continue
+                if m.group(0).startswith('(') and m.group(0).endswith(')'):
+                    val = -val
+                nums.append(val)
+            if nums:
+                latest = nums[-1]
+                unit_context = text[max(0, table_match.start() - 400):table_match.start()]
+                if any(u in unit_context for u in ('人民幣千元', '人民币千元', '以千元計', '以千元计')):
+                    latest = latest / 1000
+                return round(latest, 3)
+
         for pattern in _NON_GAAP_NET_PROFIT_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
             if match:

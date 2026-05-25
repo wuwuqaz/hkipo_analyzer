@@ -16,7 +16,7 @@ _MANAGEMENT_EXPERIENCE_PATTERNS = [
     # 英文："X years of experience in"
     r'(\d+(?:\.\d+)?)\s+years?\s+(?:of\s+)?experience',
     # 董事简历中的经验年限
-    r'(?:joined|加入|since|自).{0,10}(\d{4})\b',
+    r'(?:joined|加入|since|自).{0,40}(\d{4})\b',
 ]
 
 # 创始人持股比例
@@ -110,7 +110,7 @@ class ManagementGovernanceAnalyzer:
         experiences = []
 
         # 方法1：直接匹配年限数字
-        for pattern in _MANAGEMENT_EXPERIENCE_PATTERNS[:2]:
+        for pattern in _MANAGEMENT_EXPERIENCE_PATTERNS[:-1]:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for m in matches:
                 try:
@@ -123,7 +123,7 @@ class ManagementGovernanceAnalyzer:
         # 方法2：通过年份计算（如"自2010年加入"）
         if not experiences:
             years_found = []
-            year_pattern = _MANAGEMENT_EXPERIENCE_PATTERNS[3]
+            year_pattern = _MANAGEMENT_EXPERIENCE_PATTERNS[-1]
             for m in re.finditer(year_pattern, text, re.IGNORECASE):
                 try:
                     year = int(m.group(1))

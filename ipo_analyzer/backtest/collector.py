@@ -27,6 +27,37 @@ def _load_reanalysis_scores(reanalysis_dir, stock_code):
         return {}
 
 
+def _coerce_data_quality(item, threshold):
+    data_quality = item.get("_data_quality")
+    if isinstance(data_quality, bool):
+        return 2 if data_quality else 0
+    if isinstance(data_quality, (int, float)):
+        return int(data_quality)
+
+    # Older archived analysis files did not persist _data_quality. If the
+    # record has a completed parser/score payload, treat it as usable rather
+    # than dropping every historical sample.
+    if item.get("parse_success") or item.get("score_breakdown") or item.get("score") is not None:
+        return max(2, int(threshold or 0))
+    return 0
+
+
+def _extract_outcome(post):
+    first_day = post.get("first_day") if isinstance(post, dict) else None
+    if isinstance(first_day, dict):
+        change_pct = first_day.get("change_pct")
+        if isinstance(change_pct, (int, float)):
+            return float(change_pct), "first_day"
+
+    grey_market = post.get("grey_market") if isinstance(post, dict) else None
+    if isinstance(grey_market, dict) and grey_market.get("status") == "ok":
+        change_pct = grey_market.get("change_pct")
+        if isinstance(change_pct, (int, float)):
+            return float(change_pct), "grey_market"
+
+    return None, ""
+
+
 def collect_backtest_dataset(
     history_dir="temp",
     data_quality_threshold=2,
@@ -52,19 +83,11 @@ def collect_backtest_dataset(
         if not isinstance(post, dict):
             continue
 
-        first_day = post.get("first_day")
-        if not isinstance(first_day, dict):
+        change_pct, outcome_source = _extract_outcome(post)
+        if change_pct is None:
             continue
 
-        change_pct = first_day.get("change_pct")
-        if not isinstance(change_pct, (int, float)):
-            continue
-
-        data_quality = item.get("_data_quality", 0)
-        if isinstance(data_quality, bool):
-            data_quality = 2 if data_quality else 0
-        if not isinstance(data_quality, (int, float)):
-            data_quality = 0
+        data_quality = _coerce_data_quality(item, data_quality_threshold)
         if data_quality < data_quality_threshold:
             continue
 
@@ -91,7 +114,12 @@ def collect_backtest_dataset(
             first_day_return=float(change_pct) / 100.0,
             is_break=float(change_pct) < 0,
             over_sub_ratio=float(post.get("public_subscription_level", 0) or 0),
-            score_timestamp=str(item.get("_post_listing_updated_at", "")),
+            score_timestamp=str(
+                item.get("_post_listing_updated_at")
+                or post.get("tracked_at")
+                or outcome_source
+                or ""
+            ),
             data_quality=int(data_quality),
         )
         dataset.append(record)

@@ -7,6 +7,7 @@ from .settings import SETTINGS
 from .cornerstone import get_sovereign_capital, get_top_tier_capital, get_weak_signal_capital
 from .industry_router import classify_company
 from .market_heat import LiveMarketHeatAnalyzer
+from .float_dryness import FloatDrynessAnalyzer
 
 
 def _score_from_board_heat(label: str) -> int:
@@ -17,6 +18,11 @@ def _score_from_board_heat(label: str) -> int:
         "冷清": 0,
         "缺失": 0,
     }.get(label, 0)
+
+
+_A_SHARE_RE = re.compile(r'\ba shares?\b|\ba-share\b', re.IGNORECASE)
+_H_SHARE_RE = re.compile(r'\bh shares?\b|\bh-share\b', re.IGNORECASE)
+_AH_DUAL_RE = re.compile(r'dual\s+list|a\s*\+\s*h|a股.*h股|h股.*a股|ah上市|a shares?\s+and\s+h shares?', re.IGNORECASE)
 
 
 class SignalComponentAnalyzer:
@@ -75,6 +81,7 @@ class SignalComponentAnalyzer:
         components = {
             'real_money': self._analyze_real_money(ipo),
             'float_structure': self._analyze_float_structure(ipo, prospectus_info),
+            'float_dryness': self._analyze_float_dryness(ipo, prospectus_info, text),
             'cornerstone_structure': self._analyze_cornerstone_structure(prospectus_info, text),
             'valuation_framework': self._analyze_valuation_framework(prospectus_info, text),
             'mainline_beta': self._analyze_mainline_beta(ipo, prospectus_info, text),
@@ -114,8 +121,6 @@ class SignalComponentAnalyzer:
         live_momentum_score = live_heat.get('sector_momentum_score', 0) or 0
         live_board_label = live_heat.get('sector_board_label', '缺失')
         live_board_heat_label = live_heat.get('sector_board_heat_label', '缺失')
-        live_board_flow_label = live_heat.get('sector_board_flow_label', '缺失')
-        live_board_change_pct = live_heat.get('sector_board_change_pct')
 
         vm = components['valuation_framework']
         valuation_label = vm.get('label', '')
@@ -133,52 +138,91 @@ class SignalComponentAnalyzer:
 
         signal_breakdown = {
             'real_money': {
+                'score': components['real_money'].get('score', 0),
+                'max_score': components['real_money'].get('max_score', 20),
+                'label': components['real_money'].get('label', ''),
                 'strength': self._strength(components['real_money'].get('score', 0), 20),
                 'detail': components['real_money'].get('detail', ''),
             },
             'float_structure': {
+                'score': components['float_structure'].get('score', 0),
+                'max_score': components['float_structure'].get('max_score', 15),
+                'label': components['float_structure'].get('label', ''),
                 'strength': self._strength(components['float_structure'].get('score', 0), 15),
                 'detail': components['float_structure'].get('detail', ''),
                 'float_signal': components['float_structure'].get('label', ''),
             },
+            'float_dryness': {
+                'score': components['float_dryness'].get('score', 0),
+                'max_score': components['float_dryness'].get('max_score', 20),
+                'label': components['float_dryness'].get('label', ''),
+                'strength': components['float_dryness'].get('strength', '—'),
+                'detail': components['float_dryness'].get('detail', ''),
+                'mechanism_b': components['float_dryness'].get('mechanism_b', False),
+                'squeeze_risk_label': components['float_dryness'].get('squeeze_risk_label', '低'),
+                'squeeze_risk_score': components['float_dryness'].get('squeeze_risk_score', 0),
+                'float_signals': components['float_dryness'].get('float_signals', []),
+            },
             'cornerstone_quality': {
+                'score': components['cornerstone_structure'].get('score', 0),
+                'max_score': components['cornerstone_structure'].get('max_score', 15),
+                'label': components['cornerstone_structure'].get('label', ''),
                 'strength': self._strength(components['cornerstone_structure'].get('score', 0), 15),
                 'detail': components['cornerstone_structure'].get('detail', ''),
             },
             'valuation_reading': {
+                'score': vm.get('score', 0),
+                'max_score': vm.get('max_score', 10),
+                'label': valuation_label,
                 'strength': vm_strength,
                 'detail': vm.get('detail', ''),
-                'label': valuation_label,
             },
             'market_heat': {
+                'score': live_heat_score,
+                'max_score': 15,
+                'label': live_heat_label,
                 'strength': self._strength(live_heat_score, 15, high_ratio=0.7, mid_ratio=0.4),
                 'detail': live_heat.get('sector_heat_detail', '') or components['mainline_beta'].get('detail', ''),
-                'label': live_heat_label,
             },
             'sector_flow': {
+                'score': live_flow_score,
+                'max_score': 8,
+                'label': live_flow_label,
                 'strength': self._strength(live_flow_score, 8, high_ratio=0.7, mid_ratio=0.4),
                 'detail': live_heat.get('sector_flow_detail', ''),
-                'label': live_flow_label,
             },
             'sector_momentum': {
+                'score': live_momentum_score,
+                'max_score': 8,
+                'label': live_momentum_label,
                 'strength': self._strength(live_momentum_score, 8, high_ratio=0.7, mid_ratio=0.4),
                 'detail': live_heat.get('sector_momentum_detail', ''),
-                'label': live_momentum_label,
             },
             'sector_board': {
+                'score': _score_from_board_heat(live_board_heat_label),
+                'max_score': 8,
+                'label': live_board_label,
                 'strength': self._strength(_score_from_board_heat(live_board_heat_label), 8, high_ratio=0.7, mid_ratio=0.4),
                 'detail': live_heat.get('sector_board_detail', ''),
-                'label': live_board_label,
             },
             'theme_bonus': {
+                'score': components['mainline_beta'].get('score', 0),
+                'max_score': components['mainline_beta'].get('max_score', 15),
+                'label': components['mainline_beta'].get('label', ''),
                 'strength': self._strength(components['mainline_beta'].get('score', 0), 15, high_ratio=0.67, mid_ratio=0.33),
                 'detail': components['mainline_beta'].get('detail', ''),
             },
             'liquidity_bonus': {
+                'score': components['stock_connect_path'].get('score', 0),
+                'max_score': components['stock_connect_path'].get('max_score', 10),
+                'label': components['stock_connect_path'].get('label', ''),
                 'strength': self._strength(components['stock_connect_path'].get('score', 0), 10, high_ratio=0.7, mid_ratio=0.4),
                 'detail': components['stock_connect_path'].get('detail', ''),
             },
             'data_confidence': {
+                'score': components['data_quality'].get('score', 0),
+                'max_score': components['data_quality'].get('max_score', 5),
+                'label': components['data_quality'].get('label', ''),
                 'strength': self._data_confidence_level(components['data_quality'].get('score', 0), 5),
                 'detail': components['data_quality'].get('detail', ''),
                 'red_flags': components['data_quality'].get('red_flags', []),
@@ -186,7 +230,11 @@ class SignalComponentAnalyzer:
             'valuation_driver': None,
         }
 
-        signal_breakdown['valuation_driver'] = self._analyze_valuation_driver(ipo, prospectus_info)
+        vd = self._analyze_valuation_driver(ipo, prospectus_info)
+        if vd:
+            vd['score'] = vd.get('score', 0)
+            vd['max_score'] = vd.get('max_score', 10)
+        signal_breakdown['valuation_driver'] = vd
 
         return {
             'signal_breakdown': signal_breakdown,
@@ -252,7 +300,12 @@ class SignalComponentAnalyzer:
     def _analyze_float_structure(self, ipo, prospectus_info):
         public_offer_ratio = prospectus_info.get('public_offer_ratio_pct')
         issuance_ratio = prospectus_info.get('issuance_ratio_pct')
-        cornerstone_ratio = prospectus_info.get('cornerstone_offer_ratio_pct') or prospectus_info.get('cornerstone_pct')
+        cornerstone_pct_text = prospectus_info.get('cornerstone_pct')
+        cornerstone_pct_table = prospectus_info.get('cornerstone_offer_ratio_pct')
+        if _is_num(cornerstone_pct_text) and _is_num(cornerstone_pct_table) and abs(cornerstone_pct_text - cornerstone_pct_table) > 10:
+            cornerstone_ratio = cornerstone_pct_text
+        else:
+            cornerstone_ratio = cornerstone_pct_table or cornerstone_pct_text
         public_offer = ipo.get('public_offer')
         score = 0
         reasons = []
@@ -277,17 +330,24 @@ class SignalComponentAnalyzer:
             else:
                 score += 1
 
+        ct = SETTINGS.cornerstone  # 使用统一的基石占比阈值
         if _is_num(cornerstone_ratio):
-            if ft.cornerstone_low_pct <= cornerstone_ratio <= 60:
+            if ct.pct_healthy_low <= cornerstone_ratio <= ct.pct_healthy_high:
                 score += 4
-                reasons.append("基石锁定比例处于健康区间")
-            elif 60 < cornerstone_ratio <= ft.cornerstone_high_pct:
+                reasons.append(f"基石锁定比例处于健康区间({ct.pct_healthy_low:.0f}%-{ct.pct_healthy_high:.0f}%)")
+            elif ct.pct_healthy_low - 10 <= cornerstone_ratio < ct.pct_healthy_low:
+                score += 3
+                reasons.append(f"基石锁定比例适中({ct.pct_healthy_low - 10:.0f}%-{ct.pct_healthy_low:.0f}%)")
+            elif ct.pct_healthy_low - 20 <= cornerstone_ratio < ct.pct_healthy_low - 10:
+                score += 2
+                reasons.append(f"基石锁定比例偏低({ct.pct_healthy_low - 20:.0f}%-{ct.pct_healthy_low - 10:.0f}%)")
+            elif ct.pct_healthy_high < cornerstone_ratio <= ct.pct_acceptable_high:
                 score += 2
                 reasons.append("基石锁定高，流通筹码更少但需看结构")
-            elif cornerstone_ratio > ft.cornerstone_high_pct:
+            elif cornerstone_ratio > ct.pct_acceptable_high:
                 red_flags.append("基石锁定超过80%，需警惕结构异常")
-            elif cornerstone_ratio < ft.cornerstone_low_pct:
-                red_flags.append("基石锁定低于30%，稳定筹码不足")
+            elif cornerstone_ratio < ct.pct_healthy_low - 20:
+                red_flags.append(f"基石锁定低于{ct.pct_healthy_low - 20:.0f}%，稳定筹码不足")
 
         if _is_num(public_offer):
             if public_offer <= ft.public_offer_fund_small:
@@ -304,6 +364,37 @@ class SignalComponentAnalyzer:
         vsl = SETTINGS.valuation_score
         label = '筹码紧' if score >= vsl.float_high else ('结构可看' if score >= vsl.float_mid else ('普通' if score > 0 else '缺失'))
         return self._component(score, 15, label, detail, reasons=reasons, red_flags=red_flags)
+
+    def _analyze_float_dryness(self, ipo, prospectus_info, text):
+        """流通盘干涸度分析 — 综合 Mechanism B / 流通盘 / 基石锁定 / 公开发售 等因素。"""
+        fd = FloatDrynessAnalyzer().analyze(prospectus_info, text or "", ipo)
+        dryness_label = fd.get('dryness_label', '缺失')
+        dryness_score = fd.get('dryness_score', 0) or 0
+        squeeze_label = fd.get('squeeze_risk_label', '低')
+        squeeze_score = fd.get('squeeze_risk_score', 0) or 0
+        detail_parts = []
+        if fd.get('mechanism_b'):
+            detail_parts.append(" 机制B")
+        if fd.get('float_millions') is not None:
+            detail_parts.append(f"流通盘{fd['float_millions']:.1f}亿")
+        if fd.get('cornerstone_lockup_pct') is not None:
+            detail_parts.append(f"基石锁定{fd['cornerstone_lockup_pct']:.0f}%")
+        if fd.get('public_offer_lots') is not None:
+            detail_parts.append(f"公开发售{int(fd['public_offer_lots'])}手")
+        if fd.get('float_signals'):
+            detail_parts.extend(fd['float_signals'][:2])
+        detail = '；'.join(detail_parts) if detail_parts else '数据不足'
+        return {
+            'score': dryness_score,
+            'max_score': 20,
+            'label': f"{dryness_label}/{squeeze_label}",
+            'strength': self._strength(dryness_score, 20),
+            'detail': detail,
+            'mechanism_b': fd.get('mechanism_b', False),
+            'squeeze_risk_label': squeeze_label,
+            'squeeze_risk_score': squeeze_score,
+            'float_signals': fd.get('float_signals', []),
+        }
 
     def _analyze_cornerstone_structure(self, prospectus_info, text):
         cornerstone = prospectus_info.get('cornerstone_analysis') or {}
@@ -323,13 +414,19 @@ class SignalComponentAnalyzer:
             red_flags = []
             red_flags.extend(cornerstone.get('concerns', [])[:2])
             red_flags.extend(cornerstone.get('red_flags', [])[:3])
+
+            # V2 模型已通过 red_flags 和 score_cap_severe_red_flags 扣分，此处不再二次惩罚
             return self._component(score, 15, label, detail, reasons=reasons, red_flags=red_flags)
 
+        # --- Fallback 路径：无 V2 评分时使用关键词匹配 ---
+        # 注意：只匹配 cornerstone_section 来源的投资者，排除 pre-IPO 章节
         rows = cornerstone.get('cornerstone_investors') or prospectus_info.get('cornerstone_investors') or []
+        matched_from_section = [r for r in rows if r.get('source') == 'cornerstone_section']
         context = " ".join(
             " ".join(str(row.get(key, '')) for key in ('name', 'short_name', 'match_names'))
-            for row in rows
+            for row in matched_from_section
         )
+        # 补充招股书全文，但只取基石章节附近文本（粗略估计前8万字）
         fallback_text = str(prospectus_info.get('_extracted_text', '') or text or '')
         context = f"{context} {fallback_text[:80000]}"
         sovereign_hits = self._match_capital_names(context, self.SOVEREIGN_CAPITAL)
@@ -417,6 +514,17 @@ class SignalComponentAnalyzer:
         is_biotech = profile.is_biotech
         is_low_rev_biotech = profile.is_low_revenue_biotech
 
+        # 行业感知 PS 阈值（与 _valuation.py 保持一致）
+        is_growth_sector = sector in ('hardtech', 'saas', 'software', 'technology')
+        if is_growth_sector:
+            ps_expensive = vt.ps_expensive_saas
+            ps_high = vt.ps_high_saas
+            ps_fair = vt.ps_fair_saas
+        else:
+            ps_expensive = vt.ps_expensive
+            ps_high = vt.ps_high
+            ps_fair = vt.ps_fair
+
         abs_score = 0
         if is_low_rev_biotech:
             reasons.append("未盈利 biotech，PE不适用")
@@ -451,12 +559,13 @@ class SignalComponentAnalyzer:
             clinical_stage = rnd.get('latest_clinical_stage', '')
             is_quality_pipeline = pipeline_label == '强' and moat_score >= 7
             is_advanced_clinical = clinical_stage in ('Phase II', 'Phase III', 'Phase 2', 'Phase 3', 'NDA', 'BLA')
+            # 上限与 vsl.abs_max 对齐，避免管线质量直接覆盖绝对估值逻辑
             if is_quality_pipeline and is_advanced_clinical:
-                abs_score = min(10, abs_score)
+                abs_score = min(vsl.abs_max, abs_score)
             elif is_quality_pipeline:
-                abs_score = min(8, abs_score)
+                abs_score = min(vsl.abs_max - 1, abs_score)
             else:
-                abs_score = min(6, abs_score)
+                abs_score = min(vsl.abs_max - 2, abs_score)
         elif _is_num(pe) and pe > 0:
             if growth_for_peg is not None and abs(growth_for_peg) > SETTINGS.valuation_score.peg_growth_min:
                 peg = pe / (growth_for_peg * 100)
@@ -475,11 +584,11 @@ class SignalComponentAnalyzer:
                 abs_score = 1
                 red_flags.append(f"PE偏高({pe:.1f}x)")
         elif _is_num(ps):
-            if ps <= vt.ps_fair:
+            if ps <= ps_fair:
                 abs_score = 6
-            elif ps <= vt.ps_high:
+            elif ps <= ps_high:
                 abs_score = 5
-            elif ps <= vt.ps_expensive:
+            elif ps <= ps_expensive:
                 abs_score = 3
             else:
                 abs_score = 1
@@ -525,11 +634,11 @@ class SignalComponentAnalyzer:
             relative_score = min(2, round(peer_score_val / 15 * pt.peer_map_max))
             reasons.append(f"同行样本不足({quant_count}家定量)，仅作定性参考")
         elif _is_num(ps) and not is_low_rev_biotech:
-            if ps <= vt.ps_fair:
+            if ps <= ps_fair:
                 relative_score = pt.peer_fallback_ps_low
-            elif ps <= vt.ps_high:
+            elif ps <= ps_high:
                 relative_score = pt.peer_fallback_ps_mid
-            elif ps <= vt.ps_expensive:
+            elif ps <= ps_expensive:
                 relative_score = pt.peer_fallback_ps_high
             else:
                 relative_score = 0
@@ -587,6 +696,39 @@ class SignalComponentAnalyzer:
             if not is_biotech:
                 red_flags.append("净利率接近0，疑似利润解析或盈利质量异常")
 
+        if not is_biotech and _is_num(pe) and pe > 0:
+            valuation_cap = None
+            cap_reason = None
+            if pe > SETTINGS.valuation_score.pe_extreme:
+                valuation_cap = 8
+                cap_reason = f"PE极高({pe:.1f}x)，相对PS低也不能视为便宜"
+            elif pe > 60:
+                valuation_cap = 10
+                cap_reason = f"PE偏高({pe:.1f}x)"
+            elif pe > vt.pe_expensive:
+                valuation_cap = 13
+                cap_reason = f"PE高于港股小盘IPO贵价阈值({pe:.1f}x)"
+
+            net_margin = None
+            if _is_num(net_profit) and _is_num(revenue) and revenue > 0:
+                net_margin = net_profit / revenue * 100
+            if net_margin is not None and net_margin < 5 and pe > vt.pe_expensive:
+                valuation_cap = min(valuation_cap or 20, 8)
+                cap_reason = f"净利率仅{net_margin:.1f}%且PE {pe:.1f}x，盈利质量不足以支撑高估值"
+
+            net_profit_y1 = prospectus_info.get('net_profit_y1')
+            if _is_num(net_profit) and _is_num(net_profit_y1) and abs(net_profit_y1) > 1e-9:
+                profit_growth = (net_profit - net_profit_y1) / abs(net_profit_y1)
+                if profit_growth < -0.30 and pe > vt.pe_high:
+                    valuation_cap = min(valuation_cap or 20, 9)
+                    cap_reason = f"净利润同比下滑{abs(profit_growth)*100:.1f}%且PE {pe:.1f}x"
+
+            if valuation_cap is not None and score > valuation_cap:
+                score = valuation_cap
+                if cap_reason:
+                    red_flags.append(cap_reason)
+                    reasons.append(f"估值分封顶{valuation_cap}/20: {cap_reason}")
+
         detail_parts = []
         if pe and not is_low_rev_biotech:
             detail_parts.append(f"PE {pe:.1f}x")
@@ -635,9 +777,7 @@ class SignalComponentAnalyzer:
         live_heat_label = live_heat.get('sector_heat_label', '缺失')
         live_heat_score = live_heat.get('sector_heat_score', 0) or 0
         live_flow_label = live_heat.get('sector_flow_label', '缺失')
-        live_flow_score = live_heat.get('sector_flow_score', 0) or 0
         live_momentum_label = live_heat.get('sector_momentum_label', '缺失')
-        live_momentum_score = live_heat.get('sector_momentum_score', 0) or 0
         live_board_label = live_heat.get('sector_board_label', '缺失')
         live_board_heat_label = live_heat.get('sector_board_heat_label', '缺失')
         live_board_flow_label = live_heat.get('sector_board_flow_label', '缺失')
@@ -826,22 +966,43 @@ class SignalComponentAnalyzer:
 
     def _analyze_stock_connect_path(self, prospectus_info, text):
         market_cap = prospectus_info.get('market_cap_hkd_million')
+        listing_date_str = prospectus_info.get('listing_date')
         code_text = (text or '')[:120000].lower()
         is_w = '-w' in code_text or 'weighted voting rights' in code_text
-        has_a_shares = bool(re.search(r'\ba shares?\b|\ba-share\b', code_text, re.IGNORECASE))
-        has_h_shares = bool(re.search(r'\bh shares?\b|\bh-share\b', code_text, re.IGNORECASE))
+        is_18c = prospectus_info.get('is_chapter_18c', False)
+        has_a_shares = bool(_A_SHARE_RE.search(code_text))
+        has_h_shares = bool(_H_SHARE_RE.search(code_text))
         is_ah = has_a_shares and has_h_shares
-        is_ah = is_ah or bool(re.search(r'dual\s+list|a\s*\+\s*h|a股.*h股|h股.*a股|ah上市|a shares?\s+and\s+h shares?', code_text, re.IGNORECASE))
+        is_ah = is_ah or bool(_AH_DUAL_RE.search(code_text))
         score = 0
         reasons = []
         sc = SETTINGS.stock_connect
 
+        # 上市时间检查
+        listing_months = None
+        listing_days = None
+        if listing_date_str:
+            try:
+                from datetime import datetime, date
+                ld_text = str(listing_date_str).strip()
+                if 'T' in ld_text:
+                    ld_text = ld_text.split('T', 1)[0]
+                listing_dt = datetime.strptime(ld_text, '%Y-%m-%d').date()
+                today = date.today()
+                diff_days = (today - listing_dt).days
+                listing_days = max(0, diff_days)
+                listing_months = max(0, diff_days / 30.0)
+            except Exception:
+                pass
+
         if is_ah:
             score, label = sc.score_ah, 'AH直通候选'
-            reasons.append("疑似AH结构，需核实稳价期和港股通生效规则")
+            reasons.append("AH结构H股享有绿色通道，豁免市值和恒指成分股要求")
+            if listing_months is not None and listing_months < 1:
+                reasons.append(f"上市仅{listing_days}天，需满10个交易日后生效")
         elif _is_num(market_cap) and market_cap >= sc.large_cap:
             score, label = sc.score_large, '大型快速候选'
-            reasons.append("市值接近大型股特别快速纳入观察范围")
+            reasons.append("市值达大型股水平，入通概率较高")
         elif _is_num(market_cap) and market_cap >= sc.fast_track:
             score, label = sc.score_fast, '快速观察'
             reasons.append("市值接近季度快速纳入观察范围")
@@ -853,14 +1014,34 @@ class SignalComponentAnalyzer:
             reasons.append("市值接近恒生小型股观察区间")
         else:
             label = '暂不足'
-            reasons.append("市值或规则信息不足")
+            reasons.append("市值未达到港股通观察区间")
 
+        # -W公司惩罚
         if is_w and score > 0:
             score = max(0, score - 2)
             reasons.append("-W公司需满足额外上市时间、市值和成交额条件")
 
+        # 18C特专科技公司入通限制
+        if is_18c and score > 0 and not is_ah:
+            score = max(0, score - 1)
+            reasons.append("18C特专科技公司入通需额外观察流动性和市值稳定性")
+
+        # 上市时间不足惩罚（非AH股）
+        if not is_ah and listing_days is not None and listing_days < 30:
+            if score > 0:
+                score = max(0, score - 2)
+                reasons.append(f"上市仅{listing_days}天，快速纳入需满1个日历月")
+
         # --- 构建详细港股通路径说明 ---
         detail_parts = []
+        detail_parts.append("入通需恒生综指成分股")
+
+        if listing_days is not None:
+            if listing_days < 30:
+                detail_parts.append(f"上市{listing_days}天")
+            else:
+                detail_parts.append(f"上市{int(listing_months)}月")
+
         if _is_num(market_cap):
             # 阈值列表：(百万港元, 中文描述, 简称)
             thresholds = [
@@ -891,6 +1072,9 @@ class SignalComponentAnalyzer:
                     detail_parts.append(f"距{next_level[1]}（{next_level[0]/100:.0f}亿）还需涨{gap/100:.1f}亿（+{gap_pct:.1f}%）")
                 else:
                     detail_parts.append("已达最高港股通门槛")
+                # 小型股特别提示
+                if reached[0] == sc.small_cap:
+                    detail_parts.append("小型股需12个月平均市值≥50亿港元")
             elif next_level:
                 gap = next_level[0] - market_cap
                 gap_pct = gap / market_cap * 100
@@ -900,6 +1084,8 @@ class SignalComponentAnalyzer:
 
         if is_w:
             detail_parts.append("-W额外门槛")
+        if is_18c:
+            detail_parts.append("18C特专科技")
         if is_ah:
             detail_parts.append("AH候选")
 
@@ -999,7 +1185,17 @@ class SignalComponentAnalyzer:
 
         if not red_flags:
             reasons.append("核心财务口径未发现明显异常")
-        label = '可信' if score >= vsl.data_quality_high else ('需复核' if score >= vsl.data_quality_mid else '高风险')
+
+        # 修复问题3: 当存在严重red_flags时，强制降低数据置信度等级
+        # 避免"中"级置信度但有严重异常警告的矛盾
+        has_severe_flag = any(
+            '异常' in f or '超过100%' in f or '极端' in f or '超过10倍' in f
+            for f in red_flags
+        )
+        if has_severe_flag and score >= 3:
+            score = min(score, 2)
+
+        label = '可信' if score >= vsl.data_quality_high else ('需复核' if score >= vsl.data_quality_mid else '低')
         detail = '；'.join(red_flags[:2]) if red_flags else '财务数据通过基础异常检查'
         return self._component(score, 5, label, detail, reasons=reasons, red_flags=red_flags)
 

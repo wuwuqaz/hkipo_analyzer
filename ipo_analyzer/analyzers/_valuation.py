@@ -5,6 +5,11 @@ from ..settings import SETTINGS
 from ..industry_router import classify_company
 logger = logging.getLogger(__name__)
 
+_PHASE_III_RE = re.compile(r'phase\s*iii|phase\s*3|pivotal\s*(?:trial|study)|关键\s*(?:临床|试验)', re.IGNORECASE)
+_NDA_RE = re.compile(r'\bnda\b|new drug application|上市申请|pre-nda', re.IGNORECASE)
+_APPROVED_RE = re.compile(r'\bapproved\b|获批上市|已上市|marketing authorization|commercialized', re.IGNORECASE)
+_PHASE_II_RE = re.compile(r'phase\s*(ii|2)', re.IGNORECASE)
+
 
 class ValuationAnalyzer:
     """估值分析器 — 支持绝对估值 + 相对估值 + 稀缺性 + 创新药 综合判断"""
@@ -20,6 +25,8 @@ class ValuationAnalyzer:
             'valuation_reasons': [], 'confidence': 'missing',
             'valuation_type': 'absolute_only',
             'valuation_framework_type': None,
+            'valuation_framework_label': None,
+            'primary_valuation_metric': None,
             'valuation_profitability_type': None,
             'revenue_hkd_million': None,
             'revenue_previous_hkd_million': None,
@@ -43,8 +50,8 @@ class ValuationAnalyzer:
             'biotech_stage_label': None,
             'biotech_valuation_framework': None,
             'latest_clinical_stage': None,
-            'phase_iii_count': 0,
-            'nda_or_approved_count': 0,
+            'phase_iii_keyword_hits': 0,
+            'nda_or_approved_keyword_hits': 0,
             'cash_runway_years': None,
             'pipeline_concentration_warning': None,
             'revenue_too_small_for_ps': False,
@@ -56,6 +63,9 @@ class ValuationAnalyzer:
             revenue_raw = prospectus_info.get('revenue')
             nta_per_share = prospectus_info.get('pro_forma_NTA_per_share_HKD')
             adjusted_profit = prospectus_info.get('adjusted_profit_latest_RMB')
+            if not _is_num(adjusted_profit):
+                profit_sustainability = prospectus_info.get('profit_sustainability') or {}
+                adjusted_profit = profit_sustainability.get('non_gaap_net_profit')
             sector = prospectus_info.get('sector', 'unknown')
             fin_currency = prospectus_info.get('financial_currency', 'RMB')
             rd_expense = prospectus_info.get('rd_expense')
@@ -66,6 +76,8 @@ class ValuationAnalyzer:
             # 行业路由（集中判定，替代分散的 _is_biotech）
             profile = classify_company(prospectus_info, text)
             is_biotech = profile.is_biotech
+            is_financial = sector in ('financial', 'banking', 'insurance', 'securities', 'brokerage')
+            is_asset_heavy = sector in ('real_estate', 'property', 'resources', 'energy', 'mining')
 
             # 币种转换（财务数据通常是RMB million）
             if fin_currency == "RMB":
@@ -136,9 +148,18 @@ class ValuationAnalyzer:
                 result['net_cash_hkd_million'] = round(cashflow['cash_and_cash_equivalents'] * fx, 2)
             if _is_num(market_cap_m) and _is_num(revenue) and revenue > 0:
                 ev = market_cap_m
+                cash_note = ''
                 if _is_num(result.get('net_cash_hkd_million')):
                     ev = market_cap_m - result['net_cash_hkd_million']
-                result['ev_sales_ratio'] = round(max(ev, 0) / revenue, 2)
+                    if ev <= 0:
+                        cash_note = '（EV≤0，公司净现金超过市值，EV/Sales失真）'
+                if ev <= 0:
+                    result['ev_sales_ratio'] = None
+                    if cash_note:
+                        result.setdefault('_ev_notes', '')
+                        result['_ev_notes'] = cash_note
+                else:
+                    result['ev_sales_ratio'] = round(ev / revenue, 2)
 
             indicative_market_cap = prospectus_info.get('indicative_market_cap_hkd_million')
             gross_proceeds = prospectus_info.get('final_total_fund')
@@ -166,12 +187,69 @@ class ValuationAnalyzer:
             if is_biotech:
                 result['valuation_framework_type'] = '18A_biotech'
                 result['valuation_type'] = 'biotech_special'
+                result['primary_valuation_metric'] = 'Pipeline/Cash Runway'
             elif sector == "healthcare":
                 result['valuation_framework_type'] = 'healthcare_standard'
+                result['primary_valuation_metric'] = 'PE/PS'
+            elif is_financial:
+                result['valuation_framework_type'] = 'financial_pb_roe'
+                result['valuation_framework_label'] = '金融/PB-ROE框架'
+                result['primary_valuation_metric'] = 'PB'
+                result['valuation_type'] = 'sector_special'
+                reasons.append("金融类公司优先参考P/B、ROE与资产质量，PS仅作辅助")
+            elif is_asset_heavy:
+                result['valuation_framework_type'] = 'asset_pb_nav'
+                result['valuation_framework_label'] = '资产/NAV框架'
+                result['primary_valuation_metric'] = 'PB/NAV'
+                result['valuation_type'] = 'sector_special'
+                reasons.append("资产/周期类公司优先参考P/B、NAV与周期价格，PS仅作辅助")
+            elif profile.is_tech_saas:
+                result['valuation_framework_type'] = 'tech_saas'
+                result['valuation_framework_label'] = 'SaaS/PS-Growth框架'
+                result['primary_valuation_metric'] = 'PS/Growth'
+                result['valuation_type'] = 'sector_special'
+                reasons.append("SaaS/订阅型公司优先参考PS、收入增速、毛利率与留存质量")
+            elif sector in ('hardtech', 'consumer', 'manufacturing'):
+                result['valuation_framework_type'] = 'hardware_manufacturing'
+                result['valuation_framework_label'] = '硬件/制造PS-PE框架'
+                result['primary_valuation_metric'] = 'PS/Adjusted PE'
+                reasons.append("硬件/制造类公司重点参考PS、经调整PE、毛利率与经营现金流")
 
             # --- 绝对估值 ---
             absolute_label = '缺失'
-            if pe is not None:
+
+            # 行业感知 PS 阈值（SaaS/hardtech 放宽）
+            is_growth_sector = sector in ('hardtech', 'saas', 'software', 'technology')
+            if is_growth_sector:
+                ps_expensive = vt.ps_expensive_saas
+                ps_high = vt.ps_high_saas
+                ps_fair = vt.ps_fair_saas
+            else:
+                ps_expensive = vt.ps_expensive
+                ps_high = vt.ps_high
+                ps_fair = vt.ps_fair
+
+            if is_financial and result.get('pb_ratio') is not None:
+                pb = result['pb_ratio']
+                if pb > 2.5:
+                    absolute_label = '很贵'
+                elif pb > 1.5:
+                    absolute_label = '偏贵'
+                elif pb >= 0.8:
+                    absolute_label = '合理'
+                else:
+                    absolute_label = '低估'
+            elif is_asset_heavy and result.get('pb_ratio') is not None:
+                pb = result['pb_ratio']
+                if pb > 2.0:
+                    absolute_label = '很贵'
+                elif pb > 1.2:
+                    absolute_label = '偏贵'
+                elif pb >= 0.6:
+                    absolute_label = '合理'
+                else:
+                    absolute_label = '低估'
+            elif pe is not None:
                 if pe > vt.pe_expensive:
                     absolute_label = '很贵'
                 elif pe > vt.pe_high:
@@ -181,11 +259,11 @@ class ValuationAnalyzer:
                 else:
                     absolute_label = '低估'
             elif ps_val is not None:
-                if ps_val > vt.ps_expensive:
+                if ps_val > ps_expensive:
                     absolute_label = '很贵'
-                elif ps_val > vt.ps_high:
+                elif ps_val > ps_high:
                     absolute_label = '偏贵'
-                elif ps_val > vt.ps_fair:
+                elif ps_val > ps_fair:
                     absolute_label = '合理'
                 else:
                     absolute_label = '低估'
@@ -198,11 +276,11 @@ class ValuationAnalyzer:
 
                 # 管线阶段检测
                 text_for_pipeline = prospectus_info.get('_extracted_text', '') or ''
-                phase_iii = len(re.findall(r'phase\s*iii|phase\s*3|pivotal\s*(?:trial|study)|关键\s*(?:临床|试验)', text_for_pipeline, re.IGNORECASE))
-                nda_count = len(re.findall(r'\bnda\b|new drug application|上市申请|pre-nda', text_for_pipeline, re.IGNORECASE))
-                approved = len(re.findall(r'\bapproved\b|获批上市|已上市|marketing authorization|commercialized', text_for_pipeline, re.IGNORECASE))
-                result['phase_iii_count'] = phase_iii
-                result['nda_or_approved_count'] = nda_count + approved
+                phase_iii = len(_PHASE_III_RE.findall(text_for_pipeline))
+                nda_count = len(_NDA_RE.findall(text_for_pipeline))
+                approved = len(_APPROVED_RE.findall(text_for_pipeline))
+                result['phase_iii_keyword_hits'] = phase_iii
+                result['nda_or_approved_keyword_hits'] = nda_count + approved
 
                 if approved > 0:
                     result['latest_clinical_stage'] = 'approved'
@@ -211,7 +289,7 @@ class ValuationAnalyzer:
                 elif phase_iii > 0:
                     result['latest_clinical_stage'] = 'phase_iii'
                 else:
-                    found_phase = re.search(r'phase\s*(ii|2)', text_for_pipeline, re.IGNORECASE)
+                    found_phase = _PHASE_II_RE.search(text_for_pipeline)
                     result['latest_clinical_stage'] = 'phase_ii' if found_phase else 'early_stage'
 
                 stage = result['latest_clinical_stage'] or 'unknown'
@@ -226,16 +304,33 @@ class ValuationAnalyzer:
 
                 # 现金runway估算
                 cash_text = prospectus_info.get('_extracted_text', '')
-                cash_matches = re.findall(r'(?:cash and cash equivalents?|现金及现金等价物).*?(?:HK\$|HKD|RMB)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:million|billion)?', cash_text, re.IGNORECASE)
-                operating_loss_matches = re.findall(r'net cash used in operating.*?(?:HK\$|HKD|RMB)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:million|billion)?', cash_text, re.IGNORECASE)
-                if cash_matches and operating_loss_matches:
+
+                def _parse_cash_number(text: str, pattern: str):
+                    """提取现金/亏损数字，处理 billion/million 单位转换"""
+                    match = re.search(pattern, text, re.IGNORECASE)
+                    if not match:
+                        return None
                     try:
-                        cash_val = float(cash_matches[0].replace(',', ''))
-                        loss_val = float(operating_loss_matches[0].replace(',', ''))
-                        if loss_val > 0:
-                            result['cash_runway_years'] = round(cash_val / loss_val, 1)
+                        num_str = match.group(1).replace(',', '')
+                        val = float(num_str)
+                        # 单位检测：捕获组2是单位词
+                        unit = (match.group(2) or '').lower()
+                        if 'billion' in unit or '十亿' in unit:
+                            val *= 1000  # billion → million
+                        elif '万' in unit:
+                            val /= 10  # 万 → million（假设原始单位是万港元）
+                        return val
                     except Exception:
-                        pass
+                        return None
+
+                cash_pattern = r'(?:cash and cash equivalents?|现金及(?:现金)?等价物|现金储备).*?(?:HK\$|HKD|RMB|港元)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(million|billion|百萬|十億|万)?'
+                operating_loss_pattern = r'(?:net cash used in operating|經營所用現金淨額|经营所用现金净额|net cash used in operating activities).*?(?:HK\$|HKD|RMB|港元)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(million|billion|百萬|十億|万)?'
+
+                cash_val = _parse_cash_number(cash_text, cash_pattern)
+                loss_val = _parse_cash_number(cash_text, operating_loss_pattern)
+
+                if cash_val is not None and loss_val is not None and loss_val > 0:
+                    result['cash_runway_years'] = round(cash_val / loss_val, 1)
                 if result.get('cash_runway_years') is not None and result['cash_runway_years'] < SETTINGS.valuation.cash_runway_warning:
                     biotech_reasons.append(f"现金runway仅{result['cash_runway_years']}年，需关注融资需求")
                 if result.get('cash_runway_years') is not None:
@@ -283,6 +378,16 @@ class ValuationAnalyzer:
                 if result['valuation_profitability_type'] == 'loss_making':
                     biotech_reasons.append("未盈利临床阶段创新药，PE不适用")
 
+                # 盈利状态与估值框架冲突检测（在估值分析器层面标记）
+                profitable = prospectus_info.get('profitable')
+                if profitable is True and '未盈利' in str(biotech_label):
+                    result['valuation_conflict'] = True
+                    result['valuation_conflict_reasons'] = [
+                        f"盈利状态为盈利，但生物科技估值标签为'{biotech_label}'"
+                    ]
+                    biotech_label = "盈利状态与估值框架冲突，需复核"
+                    reasons.append("⚠️ 盈利状态与估值框架冲突，需复核")
+
                 result['biotech_valuation_label'] = biotech_label
                 result['biotech_valuation_reasons'] = biotech_reasons
                 reasons.extend(biotech_reasons)
@@ -325,13 +430,19 @@ class ValuationAnalyzer:
             if result.get('revenue_too_small_for_ps') and final_label in ('很贵', '明显偏贵'):
                 final_label = "PS失真，仅作参考"
 
-            if relative_label and relative_label != '缺失' and not is_biotech:
+            if relative_label and relative_label != '缺失' and not is_biotech and not is_financial and not is_asset_heavy:
                 if absolute_label in ('很贵',) and any(x in (relative_label or '') for x in ('合理', '相对低估', '偏贵但可解释')):
                     final_label = '偏贵但可解释'
                     reasons.append(f"绝对{absolute_label}，但同行相对{relative_label}，有稀缺性支撑")
                 elif absolute_label in ('很贵', '偏贵') and '明显偏贵' in (relative_label or ''):
                     final_label = '很贵'
                     reasons.append(f"绝对{absolute_label}，且相对同行也偏高")
+                elif '明显偏贵' in (relative_label or ''):
+                    final_label = '偏贵'
+                    reasons.append("绝对PS不高，但相对可比3D打印/硬科技同行明显溢价")
+                elif '偏贵' in (relative_label or '') and absolute_label in ('低估', '合理'):
+                    final_label = '偏贵'
+                    reasons.append("绝对PS不高，但相对同行偏贵")
                 elif any(x in (relative_label or '') for x in ('合理', '相对低估')) and scarcity_score >= 5:
                     if _is_num(ps_val) and ps_val > SETTINGS.valuation.ps_expensive and sector in ('healthcare', 'hardtech'):
                         final_label = '赛道合理'

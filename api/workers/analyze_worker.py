@@ -20,6 +20,12 @@ def _get_semaphore() -> asyncio.Semaphore:
     return _semaphore
 
 
+async def _refresh_live_blogger_consensus_async(results, output_dir: str) -> None:
+    from ipo_analyzer.core import _refresh_live_blogger_consensus
+
+    await asyncio.to_thread(_refresh_live_blogger_consensus, results, output_dir)
+
+
 def run_upload_analysis(job_id: str, upload_path: str,
                         stock_code: Optional[str], company_name: Optional[str]):
     config = get_config()
@@ -34,7 +40,7 @@ def run_upload_analysis(job_id: str, upload_path: str,
             history_svc.update_job_status(job_id, "running")
             logger.info(f"Job {job_id}: starting upload analysis for {upload_path}")
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
                 None,
                 _call_analyze_uploaded_pdf,
@@ -74,7 +80,7 @@ def run_upload_analysis(job_id: str, upload_path: str,
         finally:
             semaphore.release()
 
-    asyncio.get_event_loop().create_task(_run())
+    asyncio.get_running_loop().create_task(_run())
 
 
 def run_reanalyze(job_id: str, stock_code: str, company_name: Optional[str],
@@ -93,7 +99,7 @@ def run_reanalyze(job_id: str, stock_code: str, company_name: Optional[str],
 
             tmp_dir = str(config.storage_base_path / "tmp")
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
                 None,
                 _call_reanalyze_ipo,
@@ -136,7 +142,7 @@ def run_reanalyze(job_id: str, stock_code: str, company_name: Optional[str],
         finally:
             semaphore.release()
 
-    asyncio.get_event_loop().create_task(_run())
+    asyncio.get_running_loop().create_task(_run())
 
 
 def _call_analyze_uploaded_pdf(pdf_path: str, stock_code: Optional[str],
@@ -155,3 +161,59 @@ def _call_reanalyze_ipo(stock_code: str, company_name: Optional[str],
         historical_market_data=historical_market_data,
         output_dir=output_dir,
     )
+
+
+def run_live_analysis(job_id: str, force_refresh: bool = False, output_dir: str = "temp"):
+    config = get_config()
+    history_svc = HistoryService(str(config.db_path))
+
+    semaphore = _get_semaphore()
+
+    async def _run():
+        await semaphore.acquire()
+        try:
+            history_svc.update_job_status(job_id, "running")
+            logger.info(f"Job {job_id}: starting live IPO analysis")
+
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                _call_analyze_live_ipos,
+                force_refresh,
+                output_dir,
+            )
+
+            status = result.get("status", "error")
+            if status == "error":
+                error_msg = result.get("message", "Unknown error")
+                history_svc.update_job_status(job_id, "failed", error=error_msg)
+                logger.error(f"Job {job_id}: live analysis failed: {error_msg}")
+                return
+
+            results = result.get("results", [])
+            if results:
+                from ipo_analyzer.cache import ResultCache
+                cache = ResultCache(output_dir)
+                cache.save(results)
+
+                from ipo_analyzer.history import HistoryStore
+                HistoryStore(output_dir).archive_many(results, source="live")
+                logger.info(f"Job {job_id}: cached {len(results)} IPOs")
+
+            history_svc.update_job_status(job_id, "success")
+            if results:
+                asyncio.get_running_loop().create_task(_refresh_live_blogger_consensus_async(results, output_dir))
+            logger.info(f"Job {job_id}: live analysis complete")
+        except Exception as e:
+            tb = traceback.format_exc()
+            history_svc.update_job_status(job_id, "failed", error=f"{e}\n{tb}")
+            logger.error(f"Job {job_id}: unexpected error: {e}\n{tb}")
+        finally:
+            semaphore.release()
+
+    asyncio.get_running_loop().create_task(_run())
+
+
+def _call_analyze_live_ipos(force_refresh: bool = False, output_dir: str = "temp") -> dict:
+    from ipo_analyzer.core import analyze_live_ipos
+    return analyze_live_ipos(output_dir=output_dir, force_refresh=force_refresh, return_status=True)

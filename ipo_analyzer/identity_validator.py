@@ -8,6 +8,15 @@ from .utils import _normalize_company_name
 
 logger = logging.getLogger(__name__)
 
+# 预编译正则表达式
+_RE_WHITESPACE = re.compile(r'\s+')
+_RE_CN_NAME_LINE = re.compile(r'([\u4e00-\u9fffA-Za-z0-9()（）]{2,50}有限公司)')
+_RE_CN_NAME_FALLBACK = re.compile(r'([\u4e00-\u9fff]{2,20}(?:股份)?有限公司)')
+_RE_EN_NAME = re.compile(r'([A-Z][A-Za-z\s&.,]+(?:CO\.?,?\s*LTD\.?|LIMITED|INC\.?|CORP\.?))')
+_RE_STOCK_CODE_EN = re.compile(r'Stock\s*code\s*:?\s*(\d{4,5})', re.IGNORECASE)
+_RE_STOCK_CODE_CN = re.compile(r'股票\s*代[碼码]\s*:?\s*(\d{4,5})', re.IGNORECASE)
+_RE_EN_WORDS = re.compile(r'[A-Za-z]{3,}')
+
 
 _SIMPLIFIED_TO_TRADITIONAL = {
     '乐': '樂', '动': '動', '机': '機', '器': '器', '人': '人',
@@ -24,6 +33,9 @@ _SIMPLIFIED_TO_TRADITIONAL = {
     '业': '業', '建': '建', '筑': '築', '材': '材',
     '深': '深', '圳': '圳', '北': '北', '京': '京', '上': '上',
     '海': '海', '广': '廣', '州': '州', '杭': '杭',
+    '诺': '諾', '泰': '泰',
+    '英': '英', '派': '派', '桑': '桑', '拓': '拓',
+    '璞': '璞', '驭': '馭', '势': '勢',
 }
 
 
@@ -59,10 +71,10 @@ def extract_company_name_from_first_page(text: str) -> tuple[Optional[str], Opti
     extracted_en = None
 
     for line in first_page.splitlines():
-        compact_line = re.sub(r'\s+', '', line or '')
+        compact_line = _RE_WHITESPACE.sub('', line or '')
         if '有限公司' not in compact_line:
             continue
-        cn_name_match = re.search(r'([\u4e00-\u9fffA-Za-z0-9()（）]{2,50}有限公司)', compact_line)
+        cn_name_match = _RE_CN_NAME_LINE.search(compact_line)
         if not cn_name_match:
             continue
         candidate = cn_name_match.group(1)
@@ -72,14 +84,11 @@ def extract_company_name_from_first_page(text: str) -> tuple[Optional[str], Opti
         break
 
     if not extracted_cn:
-        cn_name_match = re.search(r'([\u4e00-\u9fff]{2,20}(?:股份)?有限公司)', first_page)
+        cn_name_match = _RE_CN_NAME_FALLBACK.search(first_page)
         if cn_name_match and cn_name_match.group(1) not in ('股份有限公司', '有限公司'):
             extracted_cn = cn_name_match.group(1)
 
-    en_name_match = re.search(
-        r'([A-Z][A-Za-z\s&.,]+(?:CO\.?,?\s*LTD\.?|LIMITED|INC\.?|CORP\.?))',
-        first_page,
-    )
+    en_name_match = _RE_EN_NAME.search(first_page)
     if en_name_match:
         extracted_en = en_name_match.group(1).strip()
 
@@ -89,9 +98,9 @@ def extract_company_name_from_first_page(text: str) -> tuple[Optional[str], Opti
 def extract_stock_code_from_first_page(text: str) -> Optional[str]:
     """从 PDF 首页提取股票代码。"""
     first_page = text[:5000]
-    stock_code_match = re.search(r'Stock\s*code\s*:?\s*(\d{4,5})', first_page, re.IGNORECASE)
+    stock_code_match = _RE_STOCK_CODE_EN.search(first_page)
     if not stock_code_match:
-        stock_code_match = re.search(r'股票\s*代[碼码]\s*:?\s*(\d{4,5})', first_page, re.IGNORECASE)
+        stock_code_match = _RE_STOCK_CODE_CN.search(first_page)
     if stock_code_match:
         return stock_code_match.group(1).zfill(5)
     return None
@@ -113,7 +122,7 @@ def validate_pdf_identity(
     - extracted_stock_code (str|None)
     - company_name_aliases (list[str])
     """
-    text_no_space = re.sub(r'\s+', '', text)
+    text_no_space = _RE_WHITESPACE.sub('', text)
 
     name_match = False
     stock_code_match = False
@@ -125,7 +134,6 @@ def validate_pdf_identity(
         company_aliases = build_company_aliases(company_name)
         name_match = any(kw in text or kw in text_no_space for kw in company_aliases if kw)
 
-    # 更精确的名称匹配
     if extracted_company_name and company_name:
         trad_name = _to_traditional(_normalize_company_name(company_name))
         extracted_norm = _normalize_company_name(extracted_company_name)
@@ -133,7 +141,7 @@ def validate_pdf_identity(
             name_match = True
 
     if extracted_english_name and not name_match and company_name:
-        en_aliases = re.findall(r'[A-Za-z]{3,}', company_name or '')
+        en_aliases = _RE_EN_WORDS.findall(company_name or '')
         if en_aliases:
             en_clean = ' '.join(en_aliases).upper()
             if en_clean and en_clean in extracted_english_name.upper():

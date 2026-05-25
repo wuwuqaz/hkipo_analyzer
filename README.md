@@ -1,41 +1,70 @@
 # 港股 IPO 打新分析 (hkipo_analyzer)
 
-**当前版本：0.5.0-alpha；状态：开发中，仅供研究参考**
+**当前版本：0.5.3-alpha；状态：开发中，仅供研究参考**
 
 > 🤖 本项目由 AI（Claude Code + deepseek）全流程驱动完成，从需求分析、架构设计、代码实现到测试和部署，均为 AI 自主生成。
 
-自动获取港股招股IPO列表，下载招股书PDF，解析财务数据，运行多维度评分，通过Streamlit Web UI 展示或导出 PDF/JSON 报告。
+自动获取港股招股 IPO 列表，下载招股书 PDF，解析财务数据，运行多维度评分，并通过 FastAPI 后端 + Next.js 前端展示分析结果、历史记录与 PDF/JSON 报告。
 
 ## 快速开始
 
+### 方式一：本地开发（前后端分离启动）
+
+适合日常开发和调试，前后端热重载。
+
 ```bash
+# 1. 安装依赖
 cd hkipo_analyzer
 python3 -m pip install -e ".[dev]"
 
-# 启动 Web UI
-streamlit run app.py
+# 2. 配置环境变量
+cp .env.example .env
+# 如需接入外部服务，可按需填写 .env；本地分析无需 API Token
 
-# 或使用 CLI 模式
-python3 -c "from ipo_analyzer.core import main; main()"
+# 3. 启动 FastAPI 后端（终端 1）
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+# 访问 http://127.0.0.1:8000/docs 查看 API 文档
+
+# 4. 启动 Next.js 前端（终端 2）
+cd frontend
+npm install
+npm run dev
+# 访问 http://localhost:3000
 ```
+
+### 方式二：Docker Compose 部署（推荐生产环境）
+
+适合一次性启动完整服务栈，无需本地安装 Python/Node。
+
+```bash
+# 1. 配置环境变量
+cp .env.example .env
+# 如需接入外部服务，可按需填写 .env；本地分析无需 API Token
+
+# 2. 仅启动 API + nginx（最小部署，无前端界面，仅提供 API）
+docker compose up -d fastapi nginx
+# 访问 http://localhost/api/health
+
+# 3. 启动完整栈（API + nginx + Next.js 前端）
+NGINX_TEMPLATE=full docker compose --profile frontend up -d
+# 访问 http://localhost（前端）→ nginx 自动代理 /api/ 到 FastAPI
+```
+
+> **部署拓扑说明**：
+> - `nginx.conf`（默认）：`/` 返回提示文本，仅 `/api/` 代理到 FastAPI
+> - `nginx.full.conf`（完整栈）：`/` 代理到 Next.js，`/api/` 代理到 FastAPI
+> - 切换模板：`NGINX_TEMPLATE=full docker compose up -d nginx`
 
 ## 项目结构
 
 ```
 hkipo_analyzer/
-├── app.py                          # Streamlit Web UI 入口
-├── style.css                       # 前端样式
 ├── pyproject.toml                  # 依赖与构建配置
 ├── data/
 │   ├── peer_comps.yaml             # 同行对比数据库（半动态：可手动更新或通过行情刷新）
 │   └── backups/                    # 更新前自动备份（自动生成）
-├── ui/
-│   ├── __init__.py
-│   ├── constants.py                # UI 常量（免责声明等）
-│   ├── renderers/                  # HTML / 数据格式化渲染器
-│   ├── components/                 # Streamlit 展示组件
-│   ├── pages/                      # Streamlit 页面
-│   └── utils/                      # UI 工具函数
+├── api/                            # FastAPI 后端：REST API、任务队列、历史与报告接口
+├── frontend/                       # Next.js 前端：上传、历史、详情、同行库、重新分析
 ├── ipo_analyzer/
 │   ├── __init__.py                 # 包初始化（含 __version__，不 eager import 重依赖）
 │   ├── models.py                   # 核心数据模型（dataclass + dict 兼容层）
@@ -69,8 +98,8 @@ hkipo_analyzer/
 ├── scripts/
 │   ├── test_peer_comps.py          # 同行对比单元测试
 │   └── update_peer_comps.py        # 同行库更新 CLI 工具
-├── tests/                          # pytest 回归与 UI 测试
-└── temp/                           # 临时文件 / 缓存 / 输出
+├── tests/                          # pytest 回归测试
+└── storage/                        # 本地运行数据：历史库、招股书样本、上传目录
 ```
 
 ## 评分体系（0.4.0-alpha 已重构）
@@ -81,23 +110,23 @@ hkipo_analyzer/
 
 权重根据数据阶段自动切换：
 
-**1. 有孖展/超购/预测热度数据（live_heat）**：
+**1. 有孖展/超购/预测热度数据（live_heat，2026 严格口径）**：
 | 维度 | 权重 |
 |------|------|
-| **trade_score** | 35% |
-| **fundamental_score** | 30% |
-| **valuation_score** | 20% |
+| **trade_score** | 25% |
+| **fundamental_score** | 35% |
+| **valuation_score** | 25% |
 | **theme_score** | 10% |
 | **data_quality_score** | 5% |
 
-**2. 无热度数据/仅招股书阶段（prospectus_only）**：
+**2. 无热度数据/仅招股书阶段（prospectus_only，2026 严格口径）**：
 | 维度 | 权重 |
 |------|------|
-| **trade_score** | 20% |
-| **fundamental_score** | 35% |
-| **valuation_score** | 20% |
+| **trade_score** | 15% |
+| **fundamental_score** | 40% |
+| **valuation_score** | 25% |
 | **theme_score** | 15% |
-| **data_quality_score** | 10% |
+| **data_quality_score** | 5% |
 
 ### 维度说明
 
@@ -108,6 +137,8 @@ hkipo_analyzer/
 | **valuation_score** | PE/PS/PB、同行估值、未盈利专项估值（市值/R&D、现金runway） |
 | **theme_score** | 主线候选、赛道稀缺性、港股通路径（标准化为 0-100 分） |
 | **data_quality_score** | 解析置信度；同时作为 confidence_gate，数据差时限制总分上限 |
+
+> **2026 严格打新口径**：`ipo_trade_score` 现在代表严格打新分，不再等同于纯交易热度；它由原始交易信号、长期投资分、估值分综合生成，并对高估值、弱赛道、弱基本面公司设置封顶。原始热度保留在 `raw_trade_signal_score`。
 | **risk_penalty** | 仅用于重大红旗风险（现金runway < 12个月、重大诉讼、持续经营不确定性、审计保留意见、核心产品监管/临床失败、客户极端集中、财务数据异常、基石红旗） |
 
 > **注意**：旧版「进阶框架 100分」独立卡片已废弃（`advanced_framework_score` 仍保留兼容输出，但不再作为独立主指标）。7 个维度拆分为「交易信号拆解」展示，每项显示 强/中/弱/缺失。
@@ -147,6 +178,33 @@ hkipo_analyzer/
   - `is_biotech()` 统一提取至 `_utils.py`，替代散落在 valuation/scoring/quality/signal 四处的重复判断
   - 新增 7 个测试文件、46 个测试用例全部通过（含 8 个原有回归测试）
 
+### 0.5.3-alpha — 2026-05-19
+- **change: 2026 严格打新评分**：降低热度权重，提高基本面与估值权重；`ipo_trade_score` 改为严格打新分，新增 `raw_trade_signal_score`、`strict_ipo_score`、`strict_scoring_profile`
+- **risk: 高估值封顶**：高估值叠加弱赛道/弱基本面时，推荐降为谨慎区间，避免单靠超购倍数给出积极结论
+- **ui: 前端筛选同步收紧**：首页“打新高分”从 ≥60 调整为 ≥65，详情页展示严格打新分、原始热度信号、估值压力
+
+### 0.5.2-alpha — 2026-05-19
+- **change: 移除项目内 API Token 认证**：上传、重新分析、实时刷新、历史导出、报告下载、同行库刷新、博主观点搜索均可直接使用，不再需要 `Authorization` 请求头或前端 Token 输入框
+- **docs: 开箱即用说明更新**：`.env.example`、本地启动、Docker 启动和架构迁移记录均移除 Token 配置要求
+- **tests: API 测试同步调整**：删除旧 Token 认证断言，改为验证无 Token 情况下核心接口可正常创建任务或返回业务状态
+
+### 0.5.1-alpha — 2026-05-15
+- **security: API 端点认证加固**：曾为敏感 GET 端点添加 Token 认证；已在 0.5.2-alpha 按开箱即用目标移除
+- **security: FileResponse 路径遍历防护**：`StorageService` 新增 `validate_path` 方法，校验文件路径在 `storage_base_path` 目录内，路径遍历攻击返回 403
+- **security: 上传文件大小限制**：`APIConfig` 新增 `max_upload_size_mb`（默认 50MB），超限返回 HTTP 413
+- **security: Nginx 安全响应头**：`nginx.conf` 和 `nginx.full.conf` 添加 `X-Content-Type-Options`、`X-Frame-Options`、`X-XSS-Protection`、`Content-Security-Policy`
+- **fix: SQLite 连接泄漏**：`BloggerMonitorDB` 改为 FastAPI 依赖注入（`get_blogger_db`），请求结束后自动关闭连接
+- **fix: blogger_monitor 硬编码路径**：`service.py` 中 `temp/ipo_history.json` 改为读取 `STORAGE_BASE_PATH` 环境变量
+- **fix: HistoryService SQL 安全**：`update_job_status` 中 f-string 动态 SQL 改为 `COALESCE` 静态 SQL
+- **fix: .gitignore 遗漏**：添加 `storage/blogger_monitor.db*`、`storage/ipo_history.json`、`storage/results_cache.json`、`.env.local`、`.env.production`、`.venv/`、`venv/`
+- **fix: 前端下载链接认证**：`downloadJobJson`/`downloadJobPdf` 曾添加 `token` 参数；已在 0.5.2-alpha 移除
+- **fix: 代码规范清理**：`live.py`/`blogger.py`/`history.py`/`peers.py`/`reports.py` 重复导入修复；`analyze_worker.py` 中 `asyncio.get_event_loop()` → `asyncio.get_running_loop()`
+- **fix: 前端 ESLint 修复**：4 个 `react-hooks/set-state-in-effect` error 和 8 个 warning 全部修复
+  - `history/page.tsx`、`page.tsx`、`peers/page.tsx`、`BloggerConsensusCard.tsx`：useEffect 中 `load()` 调用改为内联 `async function fetchData()` + `cancelled` flag 模式
+  - `DetailViewExtras.tsx`：移除未使用的 `useMemo`、`scoreHex`；`[_, data]` → `[, data]`
+  - `page.tsx`：移除未使用的 `job` 变量
+- **tests: API 测试扩充**：新增 4 个测试文件（test_live.py、test_history.py、test_peers.py、test_blogger.py），共 17 个新测试用例，总计 45 个测试全部通过
+
 ### 0.5.0-alpha — 2026-05-13
 - **feat: 新增 `blogger_monitor` 子包**：自动搜索和分析港股新股打新博主观点，提供市场情绪参考
   - `models.py`：SearchResultModel、RelevanceResultModel、BloggerOpinionModel、ConsensusResultModel（统一 Pydantic v2）
@@ -178,7 +236,7 @@ hkipo_analyzer/
 
 ### 0.4.0-alpha — 2026-05-07
 - **refactor: 进阶框架拆分为交易信号拆解**：`AdvancedIPOFrameworkAnalyzer` 重命名为 `SignalComponentAnalyzer`，不再输出独立 100 分主指标；新增 `signal_breakdown` 字段供 UI 展示（资金热度/筹码弹性/基石质量/估值解释/主题催化/港股通路径/数据置信度）
-- **refactor: ScoringSystem.calculate 新五维权重**：`trade_score×0.35 + fundamental_score×0.30 + valuation_score×0.20 + theme_score×0.10 + data_quality_score×0.05 − risk_penalty`；`advanced_score_adjustment` 已废弃（固定为 0）
+- **refactor: ScoringSystem.calculate 新五维权重**：曾采用 `trade_score×0.35 + fundamental_score×0.30 + valuation_score×0.20 + theme_score×0.10 + data_quality_score×0.05 − risk_penalty`；已在 2026 严格口径中调整为更重基本面和估值
 - **feat: 未盈利 biotech 特殊处理**：PE 显示"PE不适用"；估值框架显示"PS辅助/管线估值/市值-R&D/现金runway"；收入极小时禁止 PS 单独拉高/拉低分；同行样本不足时仅显示"定性参考"
 - **fix: dataclass 字段同步**：ValuationResult 新增 `net_profit_hkd_million`、`adjusted_profit_hkd_million`、`financial_currency`；PeerComparisonResult 新增 `quantitative_peers`、`qualitative_peers`、`quantitative_peer_count`、`qualitative_peer_count`、`peer_sample_warning`
 - **fix: peer_comps.py quantitative/qualitative 分层**：`_split_peer_samples` 提取为独立函数，median 和 premium 仅使用 quantitative peers；少于 2 家时不输出强相对估值结论
@@ -216,6 +274,119 @@ hkipo_analyzer/
 - 8 个分析器 + 3 层评分系统
 - PDF/JSON 报告导出
 - 结果缓存 + 历史归档
+
+## 架构迁移记录（FastAPI + Next.js）
+
+> **状态：迁移已完成 ✅ + 安全审计通过 ✅（2026-05-15 审计）**
+
+### 迁移背景
+
+原架构为 **Streamlit 单体应用**（`app.py` + `ui/`），所有前后端逻辑耦合在 Python 进程中。新架构拆分为：
+
+- **Backend**：`api/` — FastAPI 异步服务，提供 REST API + 异步任务队列
+- **Frontend**：`frontend/` — Next.js 16 + React 19 + Tailwind CSS 4，独立部署
+- **Gateway**：`nginx.conf` / `nginx.full.conf` — 反向代理统一入口
+
+### 新架构目录
+
+```
+# Backend (FastAPI)
+api/
+├── main.py                 # FastAPI 入口，lifespan、CORS、路由挂载
+├── config.py               # 环境配置（CORS、并发数、存储路径）
+├── routers/
+│   ├── health.py           # /api/health, /api/version
+│   ├── analyze.py          # /api/analyze/upload, reanalyze, jobs, result
+│   ├── live.py             # /api/live/results, analyze, status
+│   ├── history.py          # /api/history/records, export
+│   ├── reports.py          # /api/reports/jobs/{id}/json, pdf
+│   ├── peers.py            # /api/peers, peers/refresh
+│   └── blogger.py          # /api/blogger/{code}, blogger/{code}/search
+├── schemas/                # Pydantic v2 模型
+├── services/
+│   ├── storage_service.py  # 上传/结果文件存储
+│   └── history_service.py  # SQLite + WAL 任务与历史管理
+├── workers/
+│   └── analyze_worker.py   # 信号量控制的异步分析执行器
+└── tests/                  # 45 个 API 测试（全量通过）
+
+# Frontend (Next.js)
+frontend/
+├── src/app/
+│   ├── page.tsx            # 首页：系统状态控制台（SSR）
+│   ├── upload/page.tsx     # PDF 上传
+│   ├── history/page.tsx    # 任务历史列表
+│   ├── jobs/[jobId]/page.tsx  # 任务详情与结果展示
+│   └── reanalyze/page.tsx  # 按股票代码重新分析
+├── src/components/results/ # 结果卡片：评分、估值、同行、基石、风险等
+├── src/lib/api.ts          # 同构 API 客户端（服务端 fetch + 客户端 upload）
+└── src/lib/types.ts        # TypeScript 类型定义
+```
+
+### 部署方式
+
+```bash
+# 仅启动 API + nginx（默认）
+docker compose up -d fastapi nginx
+
+# 启动完整栈（含 Next.js 前端）
+NGINX_TEMPLATE=full docker compose --profile frontend up -d
+```
+
+- 默认 `nginx.conf` 仅暴露 API，根路径返回提示文本
+- `nginx.full.conf` 将 `/` 代理到 Next.js，同时保留 `/api/` 到 FastAPI
+
+### 迁移审计结果
+
+| 检查项 | 状态 | 说明 |
+|--------|------|------|
+| FastAPI 服务启动 | ✅ | `api/main.py` lifespan 初始化数据库与目录 |
+| 健康/版本端点 | ✅ | `/api/health`、`/api/version` 正常 |
+| 上传分析流程 | ✅ | 上传 PDF → 创建任务 → 异步分析 → 存储结果 |
+| 重新分析流程 | ✅ | 按股票代码触发重新分析 |
+| 任务状态查询 | ✅ | 支持轮询 `jobs/{id}` 和列表 `jobs` |
+| 结果获取与展示 | ✅ | 前端 Job 详情页完整展示 9 个结果卡片 |
+| API Token 门槛 | 已移除 | 上传、重新分析、刷新、下载均可直接使用 |
+| Next.js 构建 | ✅ | `output: "standalone"` 构建成功 |
+| Docker 镜像 | ✅ | FastAPI、Next.js 均含 Dockerfile |
+| docker-compose | ✅ | 支持 fastapi / nginx / nextjs；旧 Streamlit profile 已移除 |
+| API 测试 | ✅ | 45 个测试全部通过 |
+| 原有回归测试 | ✅ | 255 个测试全部通过 |
+| 前端 ESLint | ✅ | 零 error、零 warning |
+| 前端构建 | ✅ | Next.js 16 standalone 构建成功 |
+
+### 待完善项
+
+1. ~~**`pyproject.toml` 依赖缺失**~~ ✅ **已修复**
+2. ~~**`.env.example` 过时**~~ ✅ **已修复**
+3. ~~**CI 未覆盖 API 测试**~~ ✅ **已修复**
+4. ~~**前端无 API Proxy**~~ ✅ **已修复**：生产环境通过 nginx 统一代理，`/` → Next.js，`/api/` → FastAPI。
+5. ~~**Streamlit 过渡期**~~ ✅ **已下线**：新前端已完整实现原核心功能，旧 `app.py`/`ui/`/`style.css` 已删除。
+
+### 瘦身记录（2026-05-18）
+
+本次清理后，项目从约 **1.3G** 降至约 **158M**。保留形态为 **FastAPI 后端 + Next.js 前端**。
+
+- 删除旧 Streamlit 单体入口：`app.py`、`ui/`、`style.css`、`.streamlit/`、`Dockerfile.streamlit`
+- 移除 Python 依赖中的 `streamlit`，并删除 `docker-compose.yml` 的 `transition/streamlit` 服务
+- 后端 `api/routers/history.py` 不再依赖旧 `ui.renderers.data_formatter`
+- 删除可再生成的大目录：`frontend/node_modules`、`frontend/.next`、测试截图、dogfood 输出、临时 PDF/重分析缓存
+- 保留业务运行数据：`storage/` 中的历史库、招股书样本和上传目录
+
+### 功能迁移完成记录（2026-05-15）
+
+| 原 Streamlit 功能 | 新前端页面 | 后端 API | 状态 |
+|---|---|---|---|
+| 首页 Dashboard（实时IPO列表、筛选、刷新） | `/` | `GET /api/live/results`, `POST /api/live/analyze` | ✅ 已完成 |
+| 手动上传分析 | `/upload` | `POST /api/analyze/upload` | ✅ 已完成 |
+| 历史归档（搜索、筛选、排序） | `/history` | `GET /api/history/records` | ✅ 已完成 |
+| 任务详情与结果展示 | `/jobs/[jobId]` | `GET /api/analyze/jobs/{id}/result` | ✅ 已完成 |
+| 重新分析 | `/reanalyze` | `POST /api/analyze/reanalyze` | ✅ 已完成 |
+| 同行库管理 | `/peers` | `GET /api/peers`, `POST /api/peers/refresh` | ✅ 已完成 |
+| 博主观点搜索与展示 | Job 详情页卡片 | `GET /api/blogger/{code}`, `POST /api/blogger/{code}/search` | ✅ 已完成 |
+| 报告导出（PDF/JSON） | Job 详情页下载按钮 | `GET /api/reports/jobs/{id}/pdf`, `/json` | ✅ 已完成 |
+
+---
 
 ## 维护说明
 

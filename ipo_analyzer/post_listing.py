@@ -180,7 +180,7 @@ def _parse_allocation_pool(text: str, pool_name: str) -> dict[str, Any]:
 
         if m_b:
             base_shares = _to_int(m_b.group(1))
-            partial_success = _to_int(m_b.group(2))
+            _ = _to_int(m_b.group(2))
             denominator = _to_int(m_b.group(3))
             add_shares = _to_int(m_b.group(4))
             successful_apps = denominator
@@ -683,6 +683,12 @@ _GREY_PRICE_PATTERNS = [
     re.compile(r'(?:暗盘|Grey\s*Market)[^0-9]{0,40}([0-9]+(?:\.[0-9]+)?)\s*(?:港元|HKD|HK\$)', re.IGNORECASE),
 ]
 
+_GREY_NEWS_PRICE_PATTERNS = [
+    re.compile(r'暗盘[^0-9]{0,30}收\s*([0-9]+(?:\.[0-9]+)?)\s*元', re.IGNORECASE),
+    re.compile(r'暗盘[^0-9]{0,30}报\s*([0-9]+(?:\.[0-9]+)?)\s*元', re.IGNORECASE),
+    re.compile(r'暗盘[^0-9]{0,30}([0-9]+(?:\.[0-9]+)?)\s*元', re.IGNORECASE),
+]
+
 
 def _is_price_reasonable(price: float, final_offer_price: Any = None) -> bool:
     if final_offer_price is None:
@@ -746,6 +752,210 @@ def fetch_grey_market_performance(stock_code: str, final_offer_price: Any = None
     except Exception as exc:
         payload["error"] = str(exc)
     return payload
+
+
+def _fetch_grey_market_from_news(stock_code: str, final_offer_price: Any = None) -> dict[str, Any]:
+    """Fallback: extract grey market price from AAStocks news page.
+
+    When the grey market page no longer shows the price (e.g. the stock has
+    already listed), the news page often contains articles like:
+    'XXX(01236.HK)暗盘昨日收49.8元 高上市价88.9%'
+    """
+    display_code = _display_stock_code(stock_code)
+    short_code = display_code.lstrip("0") or display_code
+    url = f"https://www.aastocks.com/sc/stocks/analysis/stock-aafn/{short_code}/0/all/1"
+    payload: dict[str, Any] = {
+        "status": "missing",
+        "source": "aastocks_news",
+        "source_url": url,
+        "fetched_at": datetime.now().isoformat(),
+    }
+    try:
+        response = httpx.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+            timeout=httpx.Timeout(30.0, connect=5.0, read=30.0),
+            follow_redirects=True,
+        )
+        if response.status_code != 200:
+            payload["error"] = f"HTTP {response.status_code}"
+            return payload
+
+        text = _clean_text(_strip_script_style(response.text))
+        if "暗盘" not in text:
+            payload["error"] = "no grey market news found"
+            return payload
+
+        price = None
+        for pattern in _GREY_NEWS_PRICE_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                candidate = _to_float(match.group(1))
+                if candidate is not None and _is_price_reasonable(candidate, final_offer_price):
+                    price = candidate
+                    break
+
+        if price is None:
+            payload["error"] = "grey market price not found in news"
+            return payload
+
+        payload.update(
+            {
+                "status": "ok",
+                "price": price,
+                "change_pct": _pct_change(price, final_offer_price),
+            }
+        )
+    except Exception as exc:
+        payload["error"] = str(exc)
+    return payload
+
+
+def _fetch_price_from_tencent_kline(stock_code: str, final_offer_price: Any = None, listing_date: Optional[str] = None) -> dict[str, Any]:
+    """Fallback: fetch first-day and latest prices from Tencent K-line API.
+
+    API: https://web.ifzq.gtimg.cn/appstock/app/hkfqkline/get
+    Returns JSON with kline data: [date, open, close, high, low, volume, {}, change, turnover]
+    """
+    display_code = _display_stock_code(stock_code)
+    symbol = f"hk{display_code}"
+    url = f"https://web.ifzq.gtimg.cn/appstock/app/hkfqkline/get?param={symbol},day,,,60,qfq"
+    result: dict[str, Any] = {
+        "status": "missing",
+        "source": "tencent_kline",
+        "symbol": symbol,
+        "fetched_at": datetime.now().isoformat(),
+    }
+    try:
+        response = httpx.get(url, timeout=httpx.Timeout(10.0, connect=5.0, read=10.0))
+        if response.status_code != 200:
+            result["error"] = f"HTTP {response.status_code}"
+            return result
+
+        import json as _json
+        data = _json.loads(response.text)
+        if data.get("code") != 0:
+            result["error"] = f"tencent api code={data.get('code')}"
+            return result
+
+        hk_data = (data.get("data") or {}).get(symbol, {})
+        klines = hk_data.get("qfqday") or hk_data.get("day") or []
+        if not klines:
+            result["error"] = "no kline data"
+            return result
+
+        first_kline = klines[0]
+        latest_kline = klines[-1]
+
+        first_date = str(first_kline[0])
+        first_close = _to_float(first_kline[2])
+        latest_date = str(latest_kline[0])
+        latest_close = _to_float(latest_kline[2])
+
+        if first_close is None or latest_close is None:
+            result["error"] = "invalid kline price data"
+            return result
+
+        result.update(
+            {
+                "status": "ok",
+                "first_day": {
+                    "price": round(first_close, 3),
+                    "change_pct": _pct_change(first_close, final_offer_price),
+                    "date": first_date,
+                    "source": "tencent_kline",
+                    "source_url": f"https://gu.qq.com/{symbol}",
+                },
+                "latest": {
+                    "price": round(latest_close, 3),
+                    "change_pct": _pct_change(latest_close, final_offer_price),
+                    "date": latest_date,
+                    "source": "tencent_kline",
+                    "source_url": f"https://gu.qq.com/{symbol}",
+                },
+            }
+        )
+    except Exception as exc:
+        result["error"] = str(exc)
+    return result
+
+
+def _fetch_price_from_eastmoney_kline(stock_code: str, final_offer_price: Any = None, listing_date: Optional[str] = None) -> dict[str, Any]:
+    """Fallback: fetch first-day and latest prices from EastMoney K-line API.
+
+    API: https://push2his.eastmoney.com/api/qt/stock/kline/get
+    HK stocks use secid=116.xxxxx
+    """
+    display_code = _display_stock_code(stock_code)
+    secid = f"116.{display_code}"
+    url = (
+        f"https://push2his.eastmoney.com/api/qt/stock/kline/get"
+        f"?secid={secid}&fields1=f1,f2,f3,f4,f5,f6"
+        f"&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=0"
+        f"&beg=0&end=20500101"
+    )
+    result: dict[str, Any] = {
+        "status": "missing",
+        "source": "eastmoney_kline",
+        "symbol": secid,
+        "fetched_at": datetime.now().isoformat(),
+    }
+    try:
+        response = httpx.get(url, timeout=httpx.Timeout(10.0, connect=5.0, read=10.0))
+        if response.status_code != 200:
+            result["error"] = f"HTTP {response.status_code}"
+            return result
+
+        import json as _json
+        data = _json.loads(response.text)
+        klines_raw = (data.get("data") or {}).get("klines") or []
+        if not klines_raw:
+            result["error"] = "no kline data"
+            return result
+
+        def _parse_em_kline(line: str):
+            parts = line.split(",")
+            if len(parts) < 7:
+                return None
+            return {
+                "date": parts[0],
+                "open": _to_float(parts[1]),
+                "close": _to_float(parts[2]),
+                "high": _to_float(parts[3]),
+                "low": _to_float(parts[4]),
+            }
+
+        parsed_klines = [_parse_em_kline(k) for k in klines_raw]
+        parsed_klines = [k for k in parsed_klines if k and k["close"] is not None]
+        if not parsed_klines:
+            result["error"] = "invalid kline data"
+            return result
+
+        first_kline = parsed_klines[0]
+        latest_kline = parsed_klines[-1]
+
+        result.update(
+            {
+                "status": "ok",
+                "first_day": {
+                    "price": round(first_kline["close"], 3),
+                    "change_pct": _pct_change(first_kline["close"], final_offer_price),
+                    "date": first_kline["date"],
+                    "source": "eastmoney_kline",
+                    "source_url": f"https://quote.eastmoney.com/hk/{display_code}.html",
+                },
+                "latest": {
+                    "price": round(latest_kline["close"], 3),
+                    "change_pct": _pct_change(latest_kline["close"], final_offer_price),
+                    "date": latest_kline["date"],
+                    "source": "eastmoney_kline",
+                    "source_url": f"https://quote.eastmoney.com/hk/{display_code}.html",
+                },
+            }
+        )
+    except Exception as exc:
+        result["error"] = str(exc)
+    return result
 
 
 def _series_from_history(history: Any):
@@ -889,14 +1099,31 @@ def track_post_listing(
     )
 
     final_offer_price = post_listing.get("final_offer_price")
-    post_listing["grey_market"] = fetch_grey_market_performance(display_code, final_offer_price)
+
+    # 暗盘价格：优先阿思达克暗盘页面，备用阿思达克新闻页面
+    grey_market = fetch_grey_market_performance(display_code, final_offer_price)
+    if grey_market.get("status") != "ok":
+        logger.info("Grey market page failed (%s), trying news fallback for %s", grey_market.get("error"), display_code)
+        grey_news = _fetch_grey_market_from_news(display_code, final_offer_price)
+        if grey_news.get("status") == "ok":
+            grey_market = grey_news
+    post_listing["grey_market"] = grey_market
+
+    # 首日/至今价格：优先yfinance，备用腾讯K线，再备用东方财富K线
     price_perf = fetch_price_performance(display_code, final_offer_price, post_listing.get("listing_date"))
+    if price_perf.get("status") != "ok":
+        logger.info("yfinance failed (%s), trying tencent kline for %s", price_perf.get("error"), display_code)
+        price_perf = _fetch_price_from_tencent_kline(display_code, final_offer_price, post_listing.get("listing_date"))
+    if price_perf.get("status") != "ok":
+        logger.info("Tencent kline failed (%s), trying eastmoney kline for %s", price_perf.get("error"), display_code)
+        price_perf = _fetch_price_from_eastmoney_kline(display_code, final_offer_price, post_listing.get("listing_date"))
+
     if price_perf.get("status") == "ok":
         post_listing["first_day"] = price_perf.get("first_day")
         post_listing["latest"] = price_perf.get("latest")
     else:
-        post_listing["first_day"] = {"status": "missing", "source": "yfinance", "error": price_perf.get("error")}
-        post_listing["latest"] = {"status": "missing", "source": "yfinance", "error": price_perf.get("error")}
+        post_listing["first_day"] = {"status": "missing", "source": price_perf.get("source", "unknown"), "error": price_perf.get("error")}
+        post_listing["latest"] = {"status": "missing", "source": price_perf.get("source", "unknown"), "error": price_perf.get("error")}
     post_listing["price_performance"] = price_perf
     return post_listing
 

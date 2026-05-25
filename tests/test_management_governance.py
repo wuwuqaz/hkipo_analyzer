@@ -14,6 +14,14 @@ def test_extract_management_experience_direct_match():
     assert result['management_experience_years'] >= 10
 
 
+def test_extract_management_experience_variant_patterns():
+    """测试中文变体、英文和年份型管理层经验。"""
+    analyzer = ManagementGovernanceAnalyzer()
+    assert analyzer._extract_management_experience("核心团队具备12年行业经验。") == 12
+    assert analyzer._extract_management_experience("He has 15 years of experience in robotics.") == 15
+    assert analyzer._extract_management_experience("The founder joined the industry in 2010.") >= 10
+
+
 def test_extract_founder_ownership():
     """测试提取创始人持股比例。"""
     text = """

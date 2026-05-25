@@ -3,11 +3,36 @@ import logging
 from ..utils import _is_num, _extract_table_nums, extract_text_excerpts
 from ..table_extraction import extract_financial_table_by_row
 from ..settings import SETTINGS
+from ..industry_router import classify_company
 from . import _adjust_for_unit
 logger = logging.getLogger(__name__)
 
 
 class WorkingCapitalCashFlowAnalyzer:
+    @staticmethod
+    def _extract_chinese_operating_cash_flow_pair(text):
+        match = re.search(
+            r'經營活動所得╱（所用）現金淨額(?P<row>[\s\S]{0,260}?)(?=\n\s*(?:投資活動|融资活動|融資活動|現金及現金等價物|$))',
+            text,
+            re.IGNORECASE,
+        )
+        if not match:
+            match = re.search(
+                r'经营活动所得[／/╱]（所用）现金净额(?P<row>[\s\S]{0,260}?)(?=\n\s*(?:投资活动|融资活动|现金及现金等价物|$))',
+                text,
+                re.IGNORECASE,
+            )
+        if not match:
+            return None, None
+        row = match.group('row')
+        nums = _extract_table_nums(row, 3, min_val=0)
+        if len(nums) < 2:
+            return None, None
+        latest = nums[-1]
+        prev = nums[-2]
+        unit_context = text[max(0, match.start() - 500):match.start()]
+        return _adjust_for_unit(latest, unit_context), _adjust_for_unit(prev, unit_context)
+
     @staticmethod
     def _extract_operating_cash_flow(text):
         row_match = re.search(
@@ -138,6 +163,10 @@ class WorkingCapitalCashFlowAnalyzer:
                 ],
                 min_val=500,
             )
+            zh_ocf_latest, zh_ocf_prev = self._extract_chinese_operating_cash_flow_pair(text)
+            if zh_ocf_latest is not None:
+                ocf_pair_latest = zh_ocf_latest
+                ocf_pair_prev = zh_ocf_prev
             result['operating_cash_flow_prev'] = ocf_pair_prev
             result['operating_cash_flow'] = self._extract_operating_cash_flow(text)
             if result['operating_cash_flow'] is None:
@@ -312,9 +341,16 @@ class WorkingCapitalCashFlowAnalyzer:
 
             risks = []
             ocf_np = result.get('ocf_to_net_profit')
+            # Biotech 豁免：现金runway充足时，经营现金流为负不直接判弱
+            profile = classify_company(prospectus_info, text)
+            is_biotech_with_runway = profile.is_biotech and _is_num(result.get('cash_runway_years')) and result['cash_runway_years'] >= 5
             if _is_num(operating_cash_flow) and operating_cash_flow < 0:
-                result['cash_quality_label'] = '弱'
-                risks.append('经营现金流为负')
+                if is_biotech_with_runway:
+                    result['cash_quality_label'] = '一般'
+                    risks.append('经营现金流为负，但现金runway充足(≥5年)')
+                else:
+                    result['cash_quality_label'] = '弱'
+                    risks.append('经营现金流为负')
                 if _is_num(result.get('ocf_to_revenue')):
                     risks.append(f"经营现金流/收入{result['ocf_to_revenue']*100:.1f}%")
             elif ocf_np is not None:

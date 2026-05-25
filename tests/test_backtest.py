@@ -197,6 +197,61 @@ class TestCollector:
         assert r.trade_score == 60
         assert r.fundamental_score == 75
 
+    def test_collector_accepts_completed_analysis_without_data_quality_marker(self):
+        records = [
+            {
+                "hk_code": "07630",
+                "company_name": "已分析样本",
+                "parse_success": True,
+                "trade_score": 70,
+                "fundamental_score": 60,
+                "valuation_score": 55,
+                "theme_score": 45,
+                "data_quality_score": 80,
+                "post_listing": {
+                    "first_day": {"change_pct": 12.5},
+                    "public_subscription_level": 100.0,
+                },
+            },
+        ]
+        self._write_history(records)
+
+        dataset = collect_backtest_dataset(history_dir=self.tempdir)
+
+        assert len(dataset) == 1
+        assert dataset[0].data_quality == 2
+        assert dataset[0].first_day_return == 0.125
+
+    def test_collector_uses_grey_market_when_first_day_price_missing(self):
+        records = [
+            {
+                "hk_code": "07630",
+                "company_name": "暗盘样本",
+                "score": 60,
+                "trade_score": 70,
+                "fundamental_score": 60,
+                "valuation_score": 55,
+                "theme_score": 45,
+                "data_quality_score": 80,
+                "post_listing": {
+                    "first_day": {
+                        "status": "missing",
+                        "source": "yfinance",
+                        "error": "rate limited",
+                    },
+                    "grey_market": {"status": "ok", "change_pct": 60.0},
+                    "public_subscription_level": 2282.4,
+                },
+            },
+        ]
+        self._write_history(records)
+
+        dataset = collect_backtest_dataset(history_dir=self.tempdir)
+
+        assert len(dataset) == 1
+        assert dataset[0].first_day_return == 0.60
+        assert not dataset[0].is_break
+
 
 class TestEngine:
     def _make_records(self):
@@ -386,7 +441,7 @@ class TestStore:
     def test_init_creates_tables(self):
         from ipo_analyzer.backtest.store import BacktestStore
         import sqlite3 as _sqlite3
-        store = BacktestStore(self.db_path)
+        BacktestStore(self.db_path)
         conn = _sqlite3.connect(self.db_path)
         tables = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"

@@ -91,6 +91,24 @@ def extract_market_cap_table_value(text: str, label_pattern: str, window_size: i
         return None
 
 
+def extract_chinese_market_cap_table_value(text: str) -> Optional[float]:
+    """提取中文/繁体全球发售统计表中的公司股份市值（百万元港元）。"""
+    patterns = [
+        r'股份市值(?:\(\d+\))?[\s\S]{0,220}?([0-9,]+(?:\.[0-9]+)?)\s*百萬港元',
+        r'股份市值(?:\(\d+\))?[\s\S]{0,220}?([0-9,]+(?:\.[0-9]+)?)\s*百万港元',
+        r'本公司市值(?:\(\d+\))?[\s\S]{0,220}?([0-9,]+(?:\.[0-9]+)?)\s*百萬港元',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        try:
+            return float(match.group(1).replace(',', ''))
+        except Exception:
+            continue
+    return None
+
+
 def parse_text_date(date_text: str) -> Optional[str]:
     if not date_text:
         return None
@@ -158,13 +176,19 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
         # 中文招股书全球发售股份（冒号可能在下一行）
         r'全球發售.*?發售股份數目\s*[：:]\s*([0-9,]+)',
         r'全球發售.*?發售股份總數\s*[：:]\s*([0-9,]+)',
+        r'全球發售發行\s*([0-9,]+)\s*股',
+        r'全球发售发行\s*([0-9,]+)\s*股',
     ])
     hk_offer_shares = extract_int_after_label(text, [
         r'Number of Hong Kong Offer Shares\s*[:：]?\s*\n?\s*([0-9,]+)',
         r'Number of Hong Kong Offer Shares\s*([0-9,]+)\s*H Shares',
-        # 中文香港发售股份（冒号可能在下一行）
+        # 中文香港发售股份（冒号可能在下一行，允许中间有其他字符）
         r'香港發售股份數目\s*[：:]\s*([0-9,]+)',
         r'香港公開發售.*?股份數目\s*[：:]\s*([0-9,]+)',
+        r'香港公開發售\s*[:：]\s*\n?\s*([0-9,]+)',
+        r'香港發售\s*[:：]\s*\n?\s*([0-9,]+)',
+        # 表格格式：香港发售股份可能在表格中
+        r'香港\s*(?:公開)?\s*發售\s*股份\s*[:：]?\s*\n?\s*([0-9,]+)',
     ])
     intl_offer_shares = extract_int_after_label(text, [
         r'Number of International Offer Shares\s*[:：]?\s*\n?\s*([0-9,]+)',
@@ -184,15 +208,20 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
     board_lot = info.get('lot_size')
     if board_lot is None:
         board_lot = extract_int_after_label(text, [
-            r'board lot size[^0-9]*?([0-9,]+)',
-            r'each board lot[^0-9]*?([0-9,]+)',
+            r'board\s+lot\s+size[^\d]*?(\d[\d,]*)',
+            r'each\s+board\s+lot[^\d]*?(\d[\d,]*)',
             # 中文每手股数
-            r'每手[^0-9]*?([0-9,]+)\s*股',
-            r'每手買賣單位[^0-9]*?([0-9,]+)\s*股',
-            r'買賣單位每手\s*([0-9,]+)\s*股',
+            r'每\s*手[^\d]*?(\d[\d,]*)\s*股',
+            r'每\s*手\s*買\s*賣\s*單\s*位[^\d]*?(\d[\d,]*)\s*股',
+            r'買\s*賣\s*單\s*位\s*每\s*手[^\d]*?(\d[\d,]*)\s*股',
+            r'每\s*手[^\d]*?(\d[\d,]*)',
+            r'買\s*賣\s*單\s*位\s*[:：][^\d]*?(\d[\d,]*)\s*股',
         ])
         if board_lot is not None:
             info['lot_size'] = board_lot
+    # 同时存储 board_lot 字段，供 core.py 使用
+    if board_lot is not None:
+        info['board_lot'] = board_lot
 
     post_listing_shares = extract_int_after_label(text, [
         r'([0-9,]+)\s*(?:H\s*)?Shares expected to be in issue immediately\s+(?:after|upon)\s+(?:the\s+)?completion of the Global Offering',
@@ -235,6 +264,13 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
             market_cap_high = cap_table_value
             market_cap_million = cap_table_value
             market_cap_source = 'company_shares_table'
+        else:
+            cap_table_value_zh = extract_chinese_market_cap_table_value(text)
+            if cap_table_value_zh is not None:
+                market_cap_low = cap_table_value_zh
+                market_cap_high = cap_table_value_zh
+                market_cap_million = cap_table_value_zh
+                market_cap_source = 'company_shares_table_zh'
 
     # 2. 发行H股市值（仅当未找到公司总市值时 fallback）
     if market_cap_million is None:
@@ -280,7 +316,11 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
             market_cap_source = 'shares_x_offer_price'
 
     # 5. 交叉校验：如果提取到的市值与 股数×股价 差异超过2倍，优先相信股数×股价
-    if market_cap_million is not None and post_listing_shares is not None:
+    if (
+        market_cap_million is not None
+        and post_listing_shares is not None
+        and market_cap_source not in ('company_shares_table', 'company_shares_table_zh')
+    ):
         prices = []
         for pm in re.finditer(r'HK\$([0-9]+(?:\.[0-9]+)?)\s*per\s*(?:Offer\s*)?(?:H\s*)?Share', text, re.IGNORECASE):
             try:
@@ -293,6 +333,18 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
             if market_cap_million > 0 and (implied_mc / market_cap_million > 2 or market_cap_million / implied_mc > 2):
                 market_cap_million = implied_mc
                 market_cap_source = 'shares_x_offer_price(cross_check)'
+
+    if market_cap_million is not None and offer_price and offer_price > 0:
+        inferred_total_shares = round(market_cap_million * 1_000_000 / offer_price)
+        if (
+            post_listing_shares is None
+            or (
+                offer_shares is not None
+                and post_listing_shares <= offer_shares * 1.5
+                and inferred_total_shares > offer_shares * 2
+            )
+        ):
+            post_listing_shares = inferred_total_shares
 
     if market_cap_low is not None:
         info['market_cap_hkd_million_low'] = market_cap_low
@@ -344,6 +396,8 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
 
     if hk_offer_shares and offer_shares:
         info['public_offer_ratio_pct'] = hk_offer_shares / offer_shares * 100
+    if intl_offer_shares and offer_shares:
+        info['international_offer_ratio_pct'] = intl_offer_shares / offer_shares * 100
 
     # 从招股书估算公开集资额与总集资额（亿港元，供 pre-IPO 评分使用）
     if _is_num(offer_price) and hk_offer_shares:
@@ -357,8 +411,8 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
         cornerstone_investment_hkd = 0
         cornerstone_investment_usd = 0
         for row in cornerstone_rows:
-            hkd_amount = row.get('investment_amount_hkd_m') or row.get('total_investment_amount_hkd_m')
-            usd_amount = row.get('total_investment_amount_usd_m')
+            hkd_amount = row.get('investment_amount_hkd_m')
+            usd_amount = row.get('investment_amount_usd_m')
             if _is_num(hkd_amount):
                 cornerstone_investment_hkd += hkd_amount
             elif _is_num(usd_amount):
@@ -376,3 +430,6 @@ def extract_prospectus_basic_info(text: str, info: dict) -> None:
     sector = infer_sector_label(text)
     if sector:
         info['sector'] = sector
+
+    if info.get('lot_size') and not info.get('board_lot'):
+        info['board_lot'] = info['lot_size']

@@ -50,7 +50,9 @@ def test_final_price_revalues_market_cap_and_ps():
     assert pi["market_cap_hkd_million"] == expected_mc
     assert pi["valuation"]["ps_ratio"] == expected_ps
     assert pi["valuation"]["final_ps_ratio"] == expected_ps
-    assert result["ipo_trade_score"] >= 70
+    assert result["raw_trade_signal_score"] >= 70
+    assert result["ipo_trade_score"] < result["raw_trade_signal_score"]
+    assert result["strict_scoring_profile"] == "balanced_strict_2026"
     assert result["subscription_recommendation"]
 
 

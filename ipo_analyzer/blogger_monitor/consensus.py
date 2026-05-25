@@ -184,7 +184,11 @@ class ConsensusCalculator:
                         "title": best.get("title", ""),
                         "url": best_post.get("url", ""),
                         "author": best.get("author", ""),
+                        "source": best.get("source", "") or best_post.get("source", "") or best_post.get("domain", ""),
                         "stance_score": best.get("stance_score", 50),
+                        "summary": best.get("summary", ""),
+                        "apply_suggestion": best.get("apply_suggestion", ""),
+                        "main_reasons": self._parse_json_field(best.get("main_reasons")),
                     }
                 )
 

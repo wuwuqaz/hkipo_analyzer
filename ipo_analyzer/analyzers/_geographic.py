@@ -5,6 +5,10 @@ from ..table_extraction import extract_segment_table
 from ..settings import SETTINGS
 logger = logging.getLogger(__name__)
 
+_GEO_PCT_RE = re.compile(r'(\d+\.?\d*)\s*%')
+_GEO_YEAR_RE = re.compile(r'\b(20\d{2})\b')
+_GEO_NUMERIC_LINE_RE = re.compile(r'^(\d[\d,]*\.?\d*)$')
+
 
 class GeographicExpansionAnalyzer:
     _CHINA_ALIASES = ['Chinese mainland', 'Mainland China', 'PRC', 'China market', "People's Republic of China"]
@@ -109,10 +113,16 @@ class GeographicExpansionAnalyzer:
                     result['geographic_table'] = {'china': cn_data, 'overseas': os_data}
                     result['geographic_confidence'] = 'regex_context'
 
+            # 地域收入异常校验
+            result['geo_validation'] = self._validate_geo_data(result, prospectus_info)
+            if not result['geo_validation'].get('valid', True):
+                result['overseas_growth_label'] = '解析失败/需人工复核'
+                result['overseas_risks'].append(result['geo_validation'].get('reason', '地域收入数据异常'))
+
             overseas_pct = result.get('overseas_revenue_pct')
             overseas_growth = result.get('overseas_growth_pct')
             gt = SETTINGS.geographic
-            if overseas_pct is not None:
+            if overseas_pct is not None and result['geo_validation'].get('valid', True):
                 if overseas_pct >= gt.high_pct and (overseas_growth or 0) > gt.growth_extreme:
                     result['overseas_growth_label'] = '高速扩张'
                 elif overseas_pct >= gt.high_pct:
@@ -174,13 +184,57 @@ class GeographicExpansionAnalyzer:
             result['_error'] = str(e)
         return result
 
+    def _validate_geo_data(self, result, prospectus_info):
+        """校验地域收入数据的合理性。"""
+        from datetime import date
+        current_year = date.today().year
+        validation = {'valid': True, 'reason': ''}
+
+        # 1. 检查年份是否超出合理范围（未来超过2年）
+        geo_table = result.get('geographic_table', {})
+        all_years = []
+        for k, v in geo_table.items():
+            if isinstance(v, dict):
+                all_years.extend([int(y) for y in v.keys() if str(y).isdigit()])
+        for y in all_years:
+            if y > current_year + 2:
+                validation['valid'] = False
+                validation['reason'] = f"地域收入包含未来年份({y})，超出合理范围"
+                return validation
+
+        # 2. 检查分地区收入合计是否明显超过总收入
+        revenue = prospectus_info.get('revenue')
+        if _is_num(revenue) and revenue > 0:
+            # 如果是从 segment table 提取的原始金额（非百分比）
+            china_latest = result.get('china_revenue_latest')
+            overseas_latest = result.get('overseas_revenue_latest')
+            if _is_num(china_latest) and _is_num(overseas_latest):
+                total_geo = china_latest + overseas_latest
+                # 允许 10% 的误差（因为币种/单位可能不同）
+                if total_geo > revenue * 1.5:
+                    validation['valid'] = False
+                    validation['reason'] = f"分地区收入合计({total_geo:.1f})显著超过总收入({revenue:.1f})，单位或币种可能不一致"
+                    return validation
+
+        # 3. 检查百分比合计是否超过 100%
+        if isinstance(geo_table, dict):
+            for year_str, vals in geo_table.items():
+                if isinstance(vals, dict):
+                    total_pct = sum(v for v in vals.values() if _is_num(v))
+                    if total_pct > 110:
+                        validation['valid'] = False
+                        validation['reason'] = f"地域收入占比合计({total_pct:.1f}%)超过100%，数据可能重复计算"
+                        return validation
+
+        return validation
+
     def _extract_overseas_pct_direct(self, text):
         lines = text.split('\n')
         for i, line in enumerate(lines):
             ll = line.lower().strip()
             if any(alias.lower() in ll for alias in self._OVERSEAS_ALIASES):
                 window = ' '.join(lines[i:min(i + 6, len(lines))])
-                pcts = [float(m) for m in re.findall(r'(\d+\.?\d*)\s*%', window) if 0 < float(m) <= 100]
+                pcts = [float(m) for m in _GEO_PCT_RE.findall(window) if 0 < float(m) <= 100]
                 if pcts:
                     return pcts[-1]
         return None
@@ -189,7 +243,7 @@ class GeographicExpansionAnalyzer:
         lines = text.split('\n')
         result = {'china': {}, 'overseas': {}}
 
-        year_matches = re.findall(r'\b(20\d{2})\b', text)
+        year_matches = _GEO_YEAR_RE.findall(text)
         geo_years = sorted({int(y) for y in year_matches if 2015 <= int(y) <= 2030})
         if len(geo_years) < 2:
             from datetime import date
@@ -214,7 +268,7 @@ class GeographicExpansionAnalyzer:
                     break
                 if 'total' in next_lower:
                     break
-                for m in re.finditer(r'^(\d[\d,]*\.?\d*)$', next_line):
+                for m in _GEO_NUMERIC_LINE_RE.finditer(next_line):
                     raw = m.group(1).replace(',', '')
                     try:
                         val = float(raw)
@@ -238,7 +292,7 @@ class GeographicExpansionAnalyzer:
         lines = text.split('\n')
         result = {'mainland': {}, 'hong_kong': {}, 'other': {}}
 
-        year_matches = re.findall(r'\b(20\d{2})\b', text)
+        year_matches = _GEO_YEAR_RE.findall(text)
         geo_years = sorted({int(y) for y in year_matches if 2015 <= int(y) <= 2030})
         if len(geo_years) < 2:
             from datetime import date
@@ -261,7 +315,7 @@ class GeographicExpansionAnalyzer:
                     break
                 if 'total' in next_lower:
                     break
-                for m in re.finditer(r'^(\d[\d,]*\.?\d*)$', next_line):
+                for m in _GEO_NUMERIC_LINE_RE.finditer(next_line):
                     raw = m.group(1).replace(',', '')
                     try:
                         val = float(raw)

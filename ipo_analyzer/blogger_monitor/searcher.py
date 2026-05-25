@@ -8,6 +8,8 @@ from .models import SearchResultModel
 
 logger = logging.getLogger(__name__)
 
+_DDG_BACKENDS = ("html", "lite", "auto")
+
 _TRACKING_PARAMS = frozenset(
     {
         "utm_source",
@@ -115,35 +117,104 @@ class BloggerSearcher:
         return items
 
     def _search_duckduckgo(self, keyword: str) -> list[SearchResultModel]:
+        ddgs_class = self._get_ddgs_class()
+        if ddgs_class is None:
+            logger.warning("DuckDuckGo 搜索未安装，请运行: pip install ddgs")
+            return []
+
+        # 先走 html 后端；当前网络环境下 auto 经常返回 0 条，而 html 更稳定。
+        query_candidates: list[tuple[str, Optional[set[str]]]] = []
+        if self.config.site_filters:
+            query_candidates.extend(
+                (f"site:{domain} {keyword}", {domain.lower()}) for domain in self.config.site_filters[:3]
+            )
+        query_candidates.append((keyword, None))
+
+        for query, allowed_domains in query_candidates:
+            items = self._run_duckduckgo_query(ddgs_class, query, allowed_domains=allowed_domains)
+            if items:
+                return items
+
+        logger.warning("DuckDuckGo 搜索无结果，关键词: %s", keyword)
+        return []
+
+    @staticmethod
+    def _get_ddgs_class():
+        try:
+            from ddgs import DDGS
+            return DDGS
+        except ImportError:
+            pass
         try:
             from duckduckgo_search import DDGS
+            return DDGS
         except ImportError:
-            logger.warning("DuckDuckGo 搜索未安装，请运行: pip install duckduckgo-search")
-            return []
+            return None
 
-        items: list[SearchResultModel] = []
-        try:
-            with DDGS() as ddgs:
-                for r in ddgs.text(
-                    keyword,
-                    max_results=self.config.max_results_per_keyword,
-                ):
-                    url = r.get("href", "") or r.get("url", "")
-                    items.append(
-                        SearchResultModel(
-                            title=r.get("title", ""),
-                            url=url,
-                            snippet=r.get("body", ""),
-                            content=r.get("body", ""),
-                            published_at=None,
-                            source_domain=self.extract_domain(url),
+    def _run_duckduckgo_query(self, ddgs_class, keyword: str, allowed_domains: Optional[set[str]] = None) -> list[SearchResultModel]:
+        for backend in _DDG_BACKENDS:
+            items: list[SearchResultModel] = []
+            try:
+                with ddgs_class(timeout=20) as ddgs:
+                    for r in ddgs.text(
+                        keyword,
+                        region="cn-zh",
+                        safesearch="off",
+                        backend=backend,
+                        max_results=self.config.max_results_per_keyword,
+                    ):
+                        url = r.get("href", "") or r.get("url", "")
+                        items.append(
+                            SearchResultModel(
+                                title=r.get("title", ""),
+                                url=url,
+                                snippet=r.get("body", ""),
+                                content=r.get("body", ""),
+                                published_at=None,
+                                source_domain=self.extract_domain(url),
+                            )
                         )
-                    )
-        except Exception:
-            logger.exception("DuckDuckGo 搜索失败，关键词: %s", keyword)
-            return []
+            except TypeError:
+                # 兼容不同 DDGS 实现签名，必要时退回最小参数集。
+                try:
+                    with ddgs_class() as ddgs:
+                        for r in ddgs.text(
+                            keyword,
+                            backend=backend,
+                            max_results=self.config.max_results_per_keyword,
+                        ):
+                            url = r.get("href", "") or r.get("url", "")
+                            items.append(
+                                SearchResultModel(
+                                    title=r.get("title", ""),
+                                    url=url,
+                                    snippet=r.get("body", ""),
+                                    content=r.get("body", ""),
+                                    published_at=None,
+                                    source_domain=self.extract_domain(url),
+                                )
+                            )
+                except Exception:
+                    logger.debug("DuckDuckGo 搜索失败，关键词: %s, backend: %s", keyword, backend, exc_info=True)
+                    items = []
+            except Exception:
+                logger.debug("DuckDuckGo 搜索失败，关键词: %s, backend: %s", keyword, backend, exc_info=True)
+                items = []
 
-        return items
+            if allowed_domains:
+                items = [
+                    item for item in items
+                    if any(
+                        item.source_domain == domain or item.source_domain.endswith(f".{domain}")
+                        for domain in allowed_domains
+                    )
+                ]
+
+            if items:
+                logger.info("DuckDuckGo 搜索命中，关键词: %s, backend: %s, 结果: %d", keyword, backend, len(items))
+                return items
+
+        return []
 
     @staticmethod
     def canonicalize_url(url: str) -> str:

@@ -535,6 +535,56 @@ class CornerstoneThresholds:
 # 全局单例
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# 市场情绪 + 宏观环境阈值
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SentimentMacroThresholds:
+    """市场IPO情绪与宏观环境评分阈值"""
+    sentiment_hot_threshold: float = 10.0
+    sentiment_hot_bonus: int = 5
+    sentiment_warm_threshold: float = 5.0
+    sentiment_warm_bonus: int = 3
+    sentiment_neutral_threshold: float = 0.0
+    sentiment_neutral_bonus: int = 1
+    sentiment_cool_bonus: int = -2
+    sentiment_cold_bonus: int = -5
+    min_samples_1m: int = 3
+    macro_tailwind_threshold: float = 0.03
+    macro_tailwind_bonus: int = 3
+    macro_slight_tailwind_bonus: int = 1
+    macro_headwind_threshold: float = -0.03
+    macro_headwind_bonus: int = -3
+    max_total_bonus: int = 10
+
+
+# ---------------------------------------------------------------------------
+# 保荐人战绩阈值
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SponsorThresholds:
+    """保荐人战绩评分阈值"""
+    tier_s_score: int = 10
+    tier_s_win_rate_min: float = 0.80
+    tier_a_score: int = 7
+    tier_a_win_rate_min: float = 0.60
+    tier_b_score: int = 3
+    tier_b_win_rate_min: float = 0.40
+    max_score: int = 10
+    min_project_count: int = 5
+    pricing_gap_discount_threshold: float = -0.20
+    pricing_gap_discount_score: int = 5
+    pricing_gap_neutral_threshold: float = 0.10
+    pricing_gap_aggressive_threshold: float = 0.20
+    pricing_gap_aggressive_score: int = -3
+    pricing_gap_very_aggressive_score: int = -8
+    sponsor_missing_score: int = 0
+
+
+# ---------------------------------------------------------------------------
+
 @dataclass
 class Settings:
     fx: FXConfig = field(default_factory=FXConfig)
@@ -568,6 +618,8 @@ class Settings:
     backtest: BacktestSettings = field(default_factory=BacktestSettings)
     dimension: DimensionThresholds = field(default_factory=DimensionThresholds)
     adjustment: AdjustmentThresholds = field(default_factory=AdjustmentThresholds)
+    sponsor: SponsorThresholds = field(default_factory=SponsorThresholds)
+    sentiment_macro: SentimentMacroThresholds = field(default_factory=SentimentMacroThresholds)
 
     def to_dict(self) -> dict[str, Any]:
         from dataclasses import asdict

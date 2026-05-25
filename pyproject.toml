@@ -7,7 +7,7 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4"]
 ignore = ["E501"]
 
 [lint.isort]
-known-first-party = ["ipo_analyzer", "ui"]
+known-first-party = ["ipo_analyzer", "api"]
 
 [format]
 quote-style = "double"
@@ -18,15 +18,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hkipo-analyzer"
-version = "0.4.1-alpha"
+version = "0.5.3-alpha"
 description = "港股IPO打新分析工具"
 requires-python = ">=3.11"
 readme = "README.md"
 license = {text = "MIT"}
 dependencies = [
-    "streamlit>=1.32,<2.0",
     "httpx>=0.24,<1.0",
-    "PyPDF2>=3.0,<4.0",
+    "pypdf>=5.0,<7.0",
     "pymupdf>=1.24,<2.0",
     "reportlab>=4.0,<5.0",
     "pandas>=2.0,<3.0",
@@ -36,15 +35,34 @@ dependencies = [
     "tavily-python>=0.5,<1.0",
     "python-dotenv>=1.0,<2.0",
     "pydantic>=2.0,<3.0",
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.30,<1.0",
+    "aiosqlite>=0.20,<1.0",
+    "python-multipart>=0.0.9,<1.0",
 ]
 
 [project.scripts]
 hkipo-analyze = "ipo_analyzer.__main__:main"
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "mypy"]
+
+cli = [
+    "tabulate>=0.9,<1.0",
+    "numpy>=1.24,<3.0",
+]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "api/tests"]
 python_files = ["test_*.py"]
 addopts = ["-v", "--tb=short"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+ignore_missing_imports = true
+show_error_codes = true
+exclude = ["^tests/", "^api/tests/", "^scripts/"]

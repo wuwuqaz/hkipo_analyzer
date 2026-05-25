@@ -2,7 +2,7 @@
 
 import re
 import logging
-from ..utils import _is_num, extract_text_excerpts
+from ..utils import _is_num
 
 logger = logging.getLogger(__name__)
 

@@ -5,6 +5,7 @@ from ipo_analyzer.market_heat import LiveMarketHeatAnalyzer
 from ipo_analyzer.board_heat import BoardHeatAnalyzer, _CACHE as BOARD_HEAT_CACHE
 from unittest.mock import patch
 import pandas as pd
+import pytest
 
 
 def test_robotics_business_breakdown_detects_solution_mix():
@@ -30,6 +31,115 @@ def test_robotics_business_breakdown_detects_solution_mix():
     assert result["evidence_excerpt"], "应输出业务分部原文证据"
 
 
+def test_chinese_3d_printing_revenue_table_extracts_segments():
+    text = """
+    我們的收入模式
+    下表載列於所示年度我們按業務線劃分的收入明細（按絕對金額及佔總收入百分比列示）。
+    截至12月31日止年度
+    2023年
+    2024年
+    2025年
+    人民幣
+    %
+    人民幣
+    %
+    人民幣
+    %
+    （以千元計，百分比除外）
+    3D打印機 . . . . . . . . . .
+    1,403,796
+    74.6
+    1,416,124
+    61.9
+    1,784,952
+    57.1
+    3D打印耗材 . . . . . . . .
+    136,203
+    7.2
+    261,534
+    11.4
+    418,408
+    13.4
+    3D掃描儀 . . . . . . . . . .
+    41,530
+    2.2
+    207,585
+    9.1
+    365,701
+    11.7
+    總計 . . . . . . . . . . . . . .
+    1,882,862
+    100.0
+    2,288,328
+    100.0
+    3,127,040
+    100.0
+    """
+
+    result = BusinessBreakdownAnalyzer().analyze({"sector": "hardtech"}, text)
+
+    assert result["main_segment"] == "3D打印機"
+    assert len(result["segments"]) >= 3
+    assert result["segments"][0]["revenue_latest"] == 1784.952
+    assert result["segments"][0]["share_pct"] == 57.1
+    assert result["fastest_growing_segment"] == "3D掃描儀"
+
+
+def test_generic_chinese_business_line_table_extracts_non_3d_segments():
+    text = """
+    下表載列於所示年度我們按服務線劃分的收入明細（按絕對金額及佔總收入百分比列示）。
+    截至12月31日止年度
+    2023年
+    2024年
+    2025年
+    人民幣
+    %
+    人民幣
+    %
+    人民幣
+    %
+    （以千元計，百分比除外）
+    雲平台訂閱服務 . . . . . . . . . .
+    120,000
+    40.0
+    180,000
+    45.0
+    300,000
+    50.0
+    專業實施服務 . . . . . . . . . .
+    90,000
+    30.0
+    130,000
+    32.5
+    180,000
+    30.0
+    硬件設備銷售 . . . . . . . . . .
+    90,000
+    30.0
+    90,000
+    22.5
+    120,000
+    20.0
+    總計 . . . . . . . . . . . . . .
+    300,000
+    100.0
+    400,000
+    100.0
+    600,000
+    100.0
+    競爭格局
+    第一名市場份額 45.0%
+    """
+
+    result = BusinessBreakdownAnalyzer().analyze({"sector": "hardtech"}, text)
+
+    assert result["main_segment"] == "雲平台訂閱服務"
+    assert result["segments"][0]["revenue_latest"] == 300.0
+    assert result["segments"][0]["share_pct"] == 50.0
+    assert result["fastest_growing_segment"] == "雲平台訂閱服務"
+    assert all("市場份額" not in s["name"] for s in result["segments"])
+
+
 def test_cashflow_extracts_inventory_receivables_and_monthly_burn():
     text = """
     Inventories 100 120 150
@@ -52,6 +162,31 @@ def test_cashflow_extracts_inventory_receivables_and_monthly_burn():
     assert result["working_capital_pressure_label"] in ("低", "中", "高", "可控")
     assert result["working_capital_pressure_reasons"], "应输出营运资本压力理由"
     assert result["evidence_excerpt"], "应输出营运资本原文证据"
+
+
+def test_chinese_cashflow_extracts_operating_cash_flow_turn_negative():
+    text = """
+    合併現金流量表概要
+    截至12月31日止年度
+    2023年
+    2024年
+    2025年
+    （人民幣千元）
+    經營活動所得╱（所用）現金淨額 . . .
+    161,123
+    172,911
+    (63,977)
+    """
+
+    result = WorkingCapitalCashFlowAnalyzer().analyze(
+        {"revenue": 3127.04, "net_profit": -182.42, "financial_currency": "RMB"},
+        text,
+    )
+
+    assert result["operating_cash_flow"] == -63.977
+    assert result["operating_cash_flow_prev"] == 172.911
+    assert result["cash_quality_label"] == "弱"
+    assert any("经营现金流为负" in item for item in result["working_capital_risks"])
 
 
 def test_hardtech_rnd_parser_captures_moat_signals():
@@ -128,6 +263,99 @@ def test_robot_factory_automation_peer_matching_and_weighting():
     assert result["valuation_position"] != "缺失"
 
 
+def test_consumer_3d_printing_peer_matching_uses_additive_manufacturing_peers():
+    prospectus_info = {
+        "sector": "hardtech",
+        "revenue": 3127.04,
+        "revenue_y1": 2288.33,
+        "market_cap_hkd_million": 8776.6,
+        "gross_margin": 31.2,
+        "business_breakdown": {
+            "segments": [
+                {"name": "3D printers", "share_pct": 57.1},
+                {"name": "3D printing filaments", "share_pct": 13.4},
+                {"name": "3D scanners", "share_pct": 11.7},
+            ],
+        },
+        "_extracted_text": (
+            "global consumer-grade 3D printing products and services, additive manufacturing, "
+            "3D printers, 3D printing filaments, 3D scanners, Creality Cloud"
+        ),
+    }
+
+    result = PeerComparableAnalyzer().analyze(
+        prospectus_info,
+        prospectus_info["_extracted_text"],
+        {"company_name": "创想三维", "hk_code": "03388"},
+    )
+
+    assert result["subsector"] == "consumer_3d_printing"
+    assert result["peer_median_ps"] <= 1.5
+    assert result["relative_ps_premium_pct"] > 50
+    assert result["valuation_position"] in ("明显偏贵", "偏贵")
+
+
+def test_hardtech_relative_overvaluation_overrides_low_absolute_ps_label():
+    prospectus_info = {
+        "sector": "hardtech",
+        "financial_currency": "RMB",
+        "revenue": 3127.04,
+        "revenue_y1": 2288.33,
+        "net_profit": -182.42,
+        "market_cap_hkd_million": 8776.6,
+        "gross_margin": 31.2,
+        "peer_comparison": {
+            "peer_median_ps": 1.1,
+            "relative_ps_premium_pct": 136.4,
+            "valuation_position": "明显偏贵",
+            "scarcity_score": 1,
+        },
+    }
+
+    result = ValuationAnalyzer().analyze(prospectus_info, "")
+
+    assert result["ps_ratio"] > 2
+    assert result["relative_valuation_label"] == "明显偏贵"
+    assert result["valuation_label"] in ("偏贵", "很贵")
+
+
+def test_financial_company_uses_pb_framework_not_ps_primary_label():
+    prospectus_info = {
+        "sector": "financial",
+        "financial_currency": "RMB",
+        "revenue": 1500.0,
+        "net_profit": 320.0,
+        "offer_price": 5.0,
+        "pro_forma_NTA_per_share_HKD": 3.0,
+        "market_cap_hkd_million": 5000.0,
+    }
+
+    result = ValuationAnalyzer().analyze(prospectus_info, "banking wealth management insurance brokerage")
+
+    assert result["valuation_framework_type"] == "financial_pb_roe"
+    assert result["primary_valuation_metric"] == "PB"
+    assert result["valuation_label"] in ("合理", "偏贵")
+    assert any("金融" in r or "P/B" in r for r in result["valuation_reasons"])
+
+
+def test_saas_company_uses_growth_ps_framework():
+    prospectus_info = {
+        "sector": "hardtech",
+        "financial_currency": "RMB",
+        "revenue": 600.0,
+        "revenue_y1": 360.0,
+        "net_profit": -80.0,
+        "market_cap_hkd_million": 7200.0,
+        "_extracted_text": "cloud SaaS platform subscription recurring revenue ARR NRR",
+    }
+
+    result = ValuationAnalyzer().analyze(prospectus_info, prospectus_info["_extracted_text"])
+
+    assert result["valuation_framework_type"] == "tech_saas"
+    assert result["primary_valuation_metric"] == "PS/Growth"
+    assert any("SaaS" in r or "订阅" in r for r in result["valuation_reasons"])
+
+
 def test_mainline_beta_combines_market_heat_with_sector_context():
     ipo = {"market_heat": "热门", "over_sub_ratio": 128.0}
     prospectus_info = {
@@ -183,6 +411,36 @@ def test_live_market_heat_uses_peer_quotes_and_index_backdrop():
     assert snapshot["sector_flow_detail"], "应输出板块资金流说明"
     assert snapshot["sector_momentum_label"] in ("强势", "上行", "盘整", "偏弱", "缺失")
     assert snapshot["sector_momentum_detail"], "应输出板块动能说明"
+
+
+def test_live_market_heat_degrades_to_local_peer_library_when_quotes_fail():
+    peers = [
+        {"name": "Stratasys", "ticker": "SSYS"},
+        {"name": "3D Systems", "ticker": "DDD"},
+    ]
+    board = {
+        "sector_board_label": "科技硬件",
+        "sector_board_type": "theme",
+        "sector_board_change_pct": 1.2,
+        "sector_board_turnover": 20_000_000,
+        "sector_board_company_count": 12,
+        "sector_board_heat_label": "热门",
+        "sector_board_flow_label": "活跃",
+        "sector_board_detail": "本地板块热度可用",
+        "sector_board_source": "local",
+        "sector_board_confidence": "fallback",
+    }
+
+    with patch.object(LiveMarketHeatAnalyzer, "_collect_peer_quotes", return_value=[]), \
+         patch.object(BoardHeatAnalyzer, "analyze", return_value=board):
+        snapshot = LiveMarketHeatAnalyzer().analyze(
+            {"peer_comparison": {"quantitative_peers": peers}},
+            "",
+        )
+
+    assert snapshot["sector_heat_source"] == "local_peer_library_fallback"
+    assert snapshot["sector_flow_label"] == "活跃"
+    assert snapshot["sector_samples"][0]["source"] == "local_peer_library"
 
 
 def test_signal_breakdown_exposes_live_market_heat():
@@ -252,6 +510,7 @@ def test_manual_live_market_heat_flows_into_mainline_beta():
 
 
 def test_board_heat_analyzer_uses_real_board_index():
+    pytest.importorskip("akshare", reason="akshare not installed")
     BOARD_HEAT_CACHE.clear()
     concept_df = pd.DataFrame([
         {"板块": "机器人概念", "涨跌幅": 3.2, "总成交额": 28651266870, "公司家数": 45},

@@ -92,7 +92,7 @@ def main():
 
 
 def _print_batch_summary(r, dry_run):
-    print(f"\n=== 更新摘要 ===")
+    print("\n=== 更新摘要 ===")
     print(f"  总计: {r.get('total', 0)}")
     print(f"  处理: {r.get('processed', 0)}")
     if dry_run:

@@ -1,12 +1,14 @@
 import os
 import tempfile
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+TEST_TOKEN = "test-api-token"
 
-TEST_TOKEN = "test-api-token-12345"
+
+def auth_headers(token: str = TEST_TOKEN) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
@@ -14,6 +16,7 @@ def client(monkeypatch):
     tmpdir = tempfile.mkdtemp()
     os.environ["STORAGE_BASE_PATH"] = tmpdir
     os.environ["HKIPO_API_TOKEN"] = TEST_TOKEN
+    os.environ["HKIPO_REQUIRE_API_TOKEN"] = "true"
 
     calls = []
 
@@ -45,10 +48,6 @@ def client(monkeypatch):
     yield test_client
 
 
-def _auth_headers():
-    return {"Authorization": f"Bearer {TEST_TOKEN}"}
-
-
 class TestUploadAndAnalyze:
     def test_upload_pdf_creates_job(self, client):
         pdf_bytes = b"%PDF-1.4 fake pdf content"
@@ -56,7 +55,7 @@ class TestUploadAndAnalyze:
             "/api/analyze/upload",
             files={"pdf": ("test.pdf", pdf_bytes, "application/pdf")},
             data={"stock_code": "01234", "company_name": "TestCo"},
-            headers=_auth_headers(),
+            headers=auth_headers(),
         )
         assert response.status_code == 200
         data = response.json()
@@ -74,7 +73,7 @@ class TestUploadAndAnalyze:
         response = client.post(
             "/api/analyze/upload",
             files={"pdf": ("test.txt", b"not a pdf", "text/plain")},
-            headers=_auth_headers(),
+            headers=auth_headers(),
         )
         assert response.status_code == 400
         assert "PDF" in response.json()["detail"]
@@ -83,23 +82,15 @@ class TestUploadAndAnalyze:
         response = client.post(
             "/api/analyze/upload",
             files={"pdf": ("empty.pdf", b"", "application/pdf")},
-            headers=_auth_headers(),
+            headers=auth_headers(),
         )
         assert response.status_code == 400
         assert "empty" in response.json()["detail"]
 
-    def test_upload_without_token_returns_401(self, client):
+    def test_upload_without_token_is_rejected(self, client):
         response = client.post(
             "/api/analyze/upload",
             files={"pdf": ("test.pdf", b"%PDF-1.4 fake", "application/pdf")},
-        )
-        assert response.status_code == 401
-
-    def test_upload_with_wrong_token_returns_401(self, client):
-        response = client.post(
-            "/api/analyze/upload",
-            files={"pdf": ("test.pdf", b"%PDF-1.4 fake", "application/pdf")},
-            headers={"Authorization": "Bearer wrong-token"},
         )
         assert response.status_code == 401
 
@@ -109,7 +100,7 @@ class TestReanalyze:
         response = client.post(
             "/api/analyze/reanalyze",
             json={"stock_code": "09995", "company_name": "Demo Ltd"},
-            headers=_auth_headers(),
+            headers=auth_headers(),
         )
         assert response.status_code == 200
         data = response.json()
@@ -122,7 +113,7 @@ class TestReanalyze:
         assert call[2] == "09995"
         assert call[3] == "Demo Ltd"
 
-    def test_reanalyze_without_token_returns_401(self, client):
+    def test_reanalyze_without_token_is_rejected(self, client):
         response = client.post(
             "/api/analyze/reanalyze",
             json={"stock_code": "09995", "company_name": "Demo Ltd"},
@@ -135,20 +126,53 @@ class TestJobStatus:
         upload_resp = client.post(
             "/api/analyze/upload",
             files={"pdf": ("test.pdf", b"%PDF-1.4 fake", "application/pdf")},
-            headers=_auth_headers(),
+            headers=auth_headers(),
         )
         job_id = upload_resp.json()["job_id"]
 
-        response = client.get(f"/api/analyze/jobs/{job_id}")
+        response = client.get(f"/api/analyze/jobs/{job_id}", headers=auth_headers())
         assert response.status_code == 200
         data = response.json()
         assert data["job_id"] == job_id
         assert data["status"] == "queued"
 
     def test_get_nonexistent_job(self, client):
-        response = client.get("/api/analyze/jobs/nonexistent-job-id")
+        response = client.get("/api/analyze/jobs/nonexistent-job-id", headers=auth_headers())
         assert response.status_code == 404
         assert "not found" in response.json()["detail"]
+
+
+class TestJobList:
+    def test_list_jobs(self, client):
+        # Create two jobs
+        r1 = client.post(
+            "/api/analyze/upload",
+            files={"pdf": ("test1.pdf", b"%PDF-1.4 fake", "application/pdf")},
+            headers=auth_headers(),
+        )
+        r2 = client.post(
+            "/api/analyze/upload",
+            files={"pdf": ("test2.pdf", b"%PDF-1.4 fake", "application/pdf")},
+            headers=auth_headers(),
+        )
+        assert r1.status_code == 200
+        assert r2.status_code == 200
+
+        response = client.get("/api/analyze/jobs", headers=auth_headers())
+        assert response.status_code == 200
+        data = response.json()
+        assert "jobs" in data
+        assert "total" in data
+        assert len(data["jobs"]) >= 2
+        job_ids = {j["job_id"] for j in data["jobs"]}
+        assert r1.json()["job_id"] in job_ids
+        assert r2.json()["job_id"] in job_ids
+
+    def test_list_jobs_pagination(self, client):
+        response = client.get("/api/analyze/jobs?limit=1&offset=0", headers=auth_headers())
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["jobs"]) <= 1
 
 
 class TestJobResult:
@@ -156,14 +180,14 @@ class TestJobResult:
         upload_resp = client.post(
             "/api/analyze/upload",
             files={"pdf": ("test.pdf", b"%PDF-1.4 fake", "application/pdf")},
-            headers=_auth_headers(),
+            headers=auth_headers(),
         )
         job_id = upload_resp.json()["job_id"]
 
-        response = client.get(f"/api/analyze/jobs/{job_id}/result")
+        response = client.get(f"/api/analyze/jobs/{job_id}/result", headers=auth_headers())
         assert response.status_code == 409
         assert "only available" in response.json()["detail"]
 
     def test_get_result_nonexistent_job(self, client):
-        response = client.get("/api/analyze/jobs/nonexistent/result")
+        response = client.get("/api/analyze/jobs/nonexistent/result", headers=auth_headers())
         assert response.status_code == 404

@@ -222,7 +222,7 @@ def _extract_competitor_chunks(text):
     for pat, source in patterns:
         for m in re.finditer(pat, text, re.IGNORECASE):
             start = max(0, m.start() - 100)
-            end = min(len(text), m.end() + 2000)
+            end = min(len(text), m.end() + 5000)  # 扩大到5000字符，避免截断长竞争章节
             chunk = text[start:end]
 
             # 排除非目标章节：检查前后 200 字符是否包含排除词
@@ -289,6 +289,9 @@ def _is_pure_junk(name):
         'visual perception technology', 'robot visual perception',
         'intelligent robot visual perception', 'service robot visual',
         'robotics visual perception', 'commercial service robot',
+        'biotechnology companies', 'pharmaceutical companies',
+        'biopharmaceutical companies', 'drug companies',
+        'medical device companies', 'healthcare companies',
     ]
     if any(phrase in lower for phrase in _GENERIC_PHRASES):
         return True
@@ -414,6 +417,42 @@ def _extract_potential_company_names(text, issuer_aliases=None):
 # 候选过滤
 # ---------------------------------------------------------------------------
 
+def _normalize_chinese_for_matching(text):
+    """将常见繁体字转换为简体字，用于中文名称匹配
+
+    覆盖港股招股书常见繁体字（公司名/行业术语），去重后约50个映射。
+    港股名称常见繁→简对照。
+    """
+    trad_to_simp = {
+        # 医药/生物科技
+        '藥': '药', '醫': '医', '療': '疗', '健': '健', '康': '康',
+        '發': '发', '展': '展', '研': '研', '製': '制', '劑': '剂',
+        # 企业/金融
+        '務': '务', '資': '资', '產': '产', '業': '业', '財': '财',
+        '銀': '银', '險': '险', '投': '投', '控': '控', '團': '团',
+        # 地理/国际
+        '國': '国', '際': '际', '東': '东', '無': '无', '錫': '锡',
+        '華': '华', '廈': '厦', '灣': '湾', '區': '区', '歐': '欧',
+        '亞': '亚', '美': '美', '洲': '洲',
+        # 通用商业
+        '電': '电', '風': '风', '開': '开', '質': '质', '問': '问',
+        '題': '题', '場': '场', '學': '学', '體': '体', '係': '系',
+        '術': '术', '網': '网', '絡': '络', '軟': '软', '設': '设',
+        '備': '备', '車': '车', '機': '机', '構': '构', '導': '导',
+        '圖': '图', '數': '数', '據': '据', '庫': '库', '雲': '云',
+        '智': '智', '能': '能', '源': '源', '動': '动', '力': '力',
+        '環': '环', '保': '保', '農': '农', '林': '林', '漁': '渔',
+        '牧': '牧', '礦': '矿', '鐵': '铁', '鋼': '钢',
+        # 公司后缀
+        '份': '份', '限': '限', '責': '责', '任': '任', '公': '公',
+        '司': '司', '有': '有',
+    }
+    result = []
+    for ch in text:
+        result.append(trad_to_simp.get(ch, ch))
+    return ''.join(result)
+
+
 def _filter_peer_candidates(candidates, all_peer_names, issuer_aliases):
     """严格过滤候选同行"""
     all_peer_lower = {n.strip().lower() for n in all_peer_names if n.strip()}
@@ -430,6 +469,10 @@ def _filter_peer_candidates(candidates, all_peer_names, issuer_aliases):
         if len(name) < 4:
             continue
 
+        # 排除纯无用词/通用短语
+        if _is_pure_junk(name):
+            continue
+
         # 排除纯后缀片段：如 "Bio Limited"、"Tech Inc"（仅后缀+1个短词）
         words = lower.split()
         if len(words) <= 2 and words[-1] in pure_suffixes:
@@ -439,26 +482,48 @@ def _filter_peer_candidates(candidates, all_peer_names, issuer_aliases):
             if len(words) == 2 and (len(words[0]) <= 4 or words[0] in junk_lower):
                 continue
 
-        # 排除发行人别名
+        # 排除发行人别名（精确匹配）
         if lower in issuer_aliases:
             continue
-        # 排除部分匹配：候选名包含发行人别名的一个完整词
+        # 排除部分匹配：候选名与发行人别名有过多词重叠
+        # 但排除常见行业词干扰（Tech、Bio、Medical、International 等）
         if issuer_aliases:
             candidate_words = set(words)
+            industry_noise = {'tech', 'bio', 'medical', 'health', 'intl', 'international',
+                              'global', 'group', 'holdings', 'corp', 'limited', 'ltd', 'inc'}
             should_skip = False
             for alias in issuer_aliases:
-                alias_words = set(alias.split())
-                if candidate_words & alias_words:
-                    # 如果超过一半的词相同，排除
-                    overlap = len(candidate_words & alias_words)
-                    if overlap >= len(candidate_words) / 2 and overlap > 0:
-                        should_skip = True
-                        break
+                alias_words = set(alias.split()) - industry_noise
+                candidate_meaningful = candidate_words - industry_noise
+                if not alias_words or not candidate_meaningful:
+                    continue
+                overlap = len(candidate_meaningful & alias_words)
+                # 如果候选名的有意义词超过一半与发行人别名重叠，排除
+                if overlap >= len(candidate_meaningful) / 2 and overlap > 0:
+                    should_skip = True
+                    break
             if should_skip:
                 continue
 
-        # 排除已在同行库里
+        # 排除已在同行库里（完整匹配或子串匹配）
         if lower in all_peer_lower:
+            continue
+        # 排除包含已收录同行名称的候选（如"無錫藥明康德新藥開發股份有限"包含"药明康德"）
+        skip_for_peer = False
+        lower_normalized = _normalize_chinese_for_matching(lower)
+        for peer_name in all_peer_lower:
+            if peer_name in lower or lower in peer_name:
+                # 要求匹配长度至少为4个字符，避免短词误过滤
+                if len(peer_name) >= 4:
+                    skip_for_peer = True
+                    break
+            # 简体化后再次匹配（处理繁体名称）
+            peer_normalized = _normalize_chinese_for_matching(peer_name)
+            if peer_normalized in lower_normalized or lower_normalized in peer_normalized:
+                if len(peer_normalized) >= 4:
+                    skip_for_peer = True
+                    break
+        if skip_for_peer:
             continue
 
         # 只保留 high / medium
@@ -572,6 +637,7 @@ def _extract_keywords_subsector(prospectus_info, text, peer_data=None):
         for sk, sd, hits in matches:
             all_matches.append((sec_key, sk, sd, hits))
     if not all_matches:
+        # Fallback：需要至少2个关键词命中，或1个核心关键词（sector名称本身）
         for sec_key, sec_data in peer_data.items():
             if sec_key == "meta":
                 continue
@@ -579,10 +645,11 @@ def _extract_keywords_subsector(prospectus_info, text, peer_data=None):
                 if sk == "meta":
                     continue
                 kws = sd.get("keywords", [])
-                for kw in kws:
-                    if kw.lower() in combined:
-                        all_matches.append((sec_key, sk, sd, 1))
-                        break
+                hit_count = sum(1 for kw in kws if kw.lower() in combined)
+                # 核心关键词：赛道名称本身（如 "robotics"、"healthcare"）
+                is_core = sec_key.replace("_", " ") in combined.lower()
+                if hit_count >= 2 or is_core:
+                    all_matches.append((sec_key, sk, sd, hit_count))
             if all_matches:
                 break
     all_matches.sort(key=lambda x: x[3], reverse=True)
@@ -643,8 +710,20 @@ def _split_peer_samples(matched_peers):
         quantitative_peers = []
         quantitative_basis = "none"
 
-    quantitative_set = {id(p) for p in quantitative_peers}
-    qualitative_peers = [p for p in matched_peers if id(p) not in quantitative_set]
+    # 使用 stock_code 作为唯一标识符（避免 id(p) 的内存地址语义错误）
+    quantitative_codes = set()
+    for p in quantitative_peers:
+        code = p.get("stock_code")
+        if code:
+            quantitative_codes.add(str(code))
+
+    qualitative_peers = []
+    for p in matched_peers:
+        code = p.get("stock_code")
+        if code and str(code) in quantitative_codes:
+            continue
+        qualitative_peers.append(p)
+
     return quantitative_peers, qualitative_peers, quantitative_basis, len(quantitative_peers), len(qualitative_peers)
 
 
@@ -663,9 +742,13 @@ def _calc_peer_medians(peers, exclude_private=True):
             mc_v.append(p["market_cap_hkd_million"])
     return {
         "peer_median_ps": round(median(ps_v), 2) if len(ps_v) >= 2 else (ps_v[0] if ps_v else None),
+        "peer_median_ps_is_median": len(ps_v) >= 2,
         "peer_median_pe": round(median(pe_v), 2) if len(pe_v) >= 2 else (pe_v[0] if pe_v else None),
+        "peer_median_pe_is_median": len(pe_v) >= 2,
         "peer_median_pb": round(median(pb_v), 2) if len(pb_v) >= 2 else (pb_v[0] if pb_v else None),
+        "peer_median_pb_is_median": len(pb_v) >= 2,
         "peer_median_market_cap": round(median(mc_v), 2) if len(mc_v) >= 2 else (mc_v[0] if mc_v else None),
+        "peer_median_market_cap_is_median": len(mc_v) >= 2,
         "peer_ps_count": len(ps_v),
         "peer_pe_count": len(pe_v),
         "peer_pb_count": len(pb_v),
@@ -714,6 +797,11 @@ def _calc_company_valuation_metrics(prospectus_info):
 
 
 def _calc_scarcity_score(prospectus_info, matched_peers, sector):
+    """稀缺性评分：衡量市场上同类公司的稀缺程度（与 _calc_peer_score 的行业加分互补）
+
+    _calc_peer_score 的行业加分反映行业投资吸引力，
+    此处的行业加分仅反映该行业在港股上市公司数量稀少的程度。
+    """
     score = 0
     rnd = prospectus_info.get("rnd_pipeline", {}) or {}
     ca = prospectus_info.get("cornerstone_analysis", {}) or {}
@@ -727,13 +815,14 @@ def _calc_scarcity_score(prospectus_info, matched_peers, sector):
         score += 3
     elif moat >= 5:
         score += 1
+    # 医疗赛道港股上市公司较少，适度加分（低于 _calc_peer_score 的 +2，避免重复计算）
     if sector == "healthcare":
-        score += 2
+        score += 1
     cornerstone_rows = ca.get("cornerstone_investors") or []
-    tiers = {row.get("tier", "") for row in cornerstone_rows}
+    tiers = {row.get("tier", "") for row in cornerstone_rows if row.get("tier")}
     if not tiers:
         matched_inv = ca.get("matched_investors", [])
-        tiers = {m.get("tier", "") for m in matched_inv}
+        tiers = {m.get("tier", "") for m in matched_inv if m.get("tier")}
     if "S" in tiers:
         score += 2
     elif "A" in tiers:
@@ -1053,8 +1142,12 @@ class PeerComparableAnalyzer:
                 end = min(len(text), m.end() + 50)
                 context = text[start:end]
                 unit_mult = 1.0
-                if re.search(r'billion|bn|亿|十亿', context, re.IGNORECASE):
-                    unit_mult = 1000.0
+                if re.search(r'billion|bn|十亿', context, re.IGNORECASE):
+                    unit_mult = 1000.0  # billion/十亿 = 1000 million
+                elif re.search(r'亿(?![十百千万])', context, re.IGNORECASE):
+                    unit_mult = 100.0   # 1亿 = 100 million
+                elif re.search(r'million', context, re.IGNORECASE):
+                    unit_mult = 1.0
                 size_million = num_val * unit_mult
                 segment = "unknown"
                 seg_pat = re.search(

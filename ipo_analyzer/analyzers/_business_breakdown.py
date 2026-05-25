@@ -113,6 +113,8 @@ class BusinessBreakdownAnalyzer:
         try:
             segments = self._extract_generic_segments(text)
             if not segments:
+                segments = self._extract_chinese_revenue_segments(text)
+            if not segments:
                 seg_table = extract_segment_table(text, ['Medical implants', 'Surgical equipment and associated'])
                 for seg_name, seg_data in seg_table.items():
                     years = sorted(seg_data.keys())
@@ -291,6 +293,117 @@ class BusinessBreakdownAnalyzer:
             return segments
 
         return self._parse_segment_by_name_search(text, years)
+
+    def _extract_chinese_revenue_segments(self, text):
+        """提取中文招股书常见的业务线收入表。"""
+        if not text:
+            return []
+        if not any(marker in text for marker in (
+            '按業務線劃分的收入', '按业务线划分的收入', '按產品劃分的收入', '按产品划分的收入',
+            '按服務線劃分的收入', '按服务线划分的收入', '收入明細', '收入明细',
+        )):
+            return []
+
+        start_candidates = [
+            text.find(marker) for marker in (
+                '按業務線劃分的收入', '按业务线划分的收入', '按產品劃分的收入', '按产品划分的收入',
+                '按服務線劃分的收入', '按服务线划分的收入', '收入明細', '收入明细',
+            )
+            if text.find(marker) >= 0
+        ]
+        if not start_candidates:
+            return []
+        start = min(start_candidates)
+        source_text = text[start:start + 5000]
+        total_match = re.search(
+            r'(?:總計|总计)[\s\S]{0,260}?(?:\n\s*附註|\n\s*附注|\n\s*我們的銷售|\n\s*我们的销售|\n\s*競爭格局|\n\s*竞争格局|\n\s*市場份額|\n\s*市场份额)',
+            source_text,
+        )
+        if total_match:
+            source_text = source_text[:total_match.end()]
+
+        lines = source_text.split('\n')
+        unit_divisor = 1000 if any(u in source_text for u in ('以千元計', '以千元计', '人民幣千元', '人民币千元')) else 1
+        year_matches = re.findall(r'(20\d{2})\s*年?', source_text)
+        years = []
+        for y in year_matches:
+            yi = int(y)
+            if 2015 <= yi <= 2030 and yi not in years:
+                years.append(yi)
+        if len(years) >= 2:
+            years = sorted(years)
+        latest_year = years[-1] if years else 2025
+        segments = []
+
+        def _clean_chinese_segment_name(raw: str) -> str:
+            name = raw.strip()
+            name = re.sub(r'\s+', '', name)
+            name = re.sub(r'[.．·•\s]+$', '', name)
+            name = re.sub(r'[（(]\d+[）)]$', '', name)
+            return name
+
+        def _is_chinese_segment_name(raw: str) -> bool:
+            name = _clean_chinese_segment_name(raw)
+            if len(name) < 2 or len(name) > 40:
+                return False
+            if name in ('總計', '总计', '合計', '合计'):
+                return False
+            if re.fullmatch(r'[\d,().%％]+', name):
+                return False
+            if re.search(r'20\d{2}|截至|年度|人民幣|人民币|港元|美元|百分比|除外|附註|附注', name):
+                return False
+            if any(bad in name for bad in ('市場份額', '市场份额', '競爭格局', '竞争格局', '客戶', '客户', '供應商', '供应商')):
+                return False
+            if not re.search(r'[\u4e00-\u9fffA-Za-z]', name):
+                return False
+            return True
+
+        def _line_starts_new_row(raw: str) -> bool:
+            clean = _clean_chinese_segment_name(raw)
+            return clean in ('總計', '总计', '合計', '合计') or _is_chinese_segment_name(raw)
+
+        for idx, line in enumerate(lines):
+            matched_name = _clean_chinese_segment_name(line)
+            if not _is_chinese_segment_name(line):
+                continue
+
+            nums = []
+            for follow in lines[idx + 1: idx + 18]:
+                follow_clean = follow.strip()
+                if _line_starts_new_row(follow_clean):
+                    break
+                for m in re.finditer(r'\(?[\d,]+(?:\.\d+)?\)?', follow_clean):
+                    raw = m.group(0).replace(',', '').strip('()')
+                    try:
+                        val = float(raw)
+                    except ValueError:
+                        continue
+                    nums.append(val)
+                if len(nums) >= 6:
+                    break
+
+            if len(nums) < 6:
+                continue
+
+            amounts = [nums[0], nums[2], nums[4]]
+            pcts = [nums[1], nums[3], nums[5]]
+            latest = round(amounts[-1] / unit_divisor, 3)
+            previous = round(amounts[-2] / unit_divisor, 3)
+            growth = None
+            if previous:
+                growth = round((latest - previous) / abs(previous) * 100, 1)
+
+            segments.append({
+                'name': matched_name,
+                'revenue_latest': latest,
+                'revenue_previous': previous,
+                'growth_pct': growth,
+                'share_pct': pcts[-1],
+                'share_pct_previous': pcts[-2],
+                'year_latest': latest_year,
+            })
+
+        return segments
 
     def _is_segment_name_line(self, clean_stripped):
         if not clean_stripped or len(clean_stripped) < 3 or len(clean_stripped) > 60:

@@ -115,4 +115,21 @@ class TestAnalyzeNoApiKey:
         a = BloggerAnalyzer(cfg)
         article = _make_article()
         result = a.analyze(article, "09999", "测试公司")
-        assert result is None
+        assert result is not None
+        assert result.stance == "positive"
+
+    def test_analyze_returns_neutral_fallback_without_sentiment_keywords(self):
+        cfg = BloggerMonitorConfig(llm_api_key="")
+        a = BloggerAnalyzer(cfg)
+        article = SearchResultModel(
+            title="测试公司 IPO 打新分析",
+            url="https://example.com/article",
+            snippet="测试公司(09999) 新股申购要点",
+            content="测试公司(09999) IPO 打新分析，介绍招股、估值、赛道与公开发售情况。",
+            published_at="2026-01-01",
+            source_domain="example.com",
+        )
+        result = a.analyze(article, "09999", "测试公司")
+        assert result is not None
+        assert result.stance == "neutral"
+        assert "IPO相关" in result.summary

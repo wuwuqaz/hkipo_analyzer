@@ -26,14 +26,19 @@ def _build_base_ipo():
 
 
 def _run_full_scoring(ipo, prospectus_info):
-    """运行完整的评分 pipeline，返回 scoring result。"""
+    """运行完整的评分 pipeline，返回 scoring result。
+
+    注意：mock LiveMarketHeatAnalyzer 避免测试中进行 yfinance 网络请求。
+    """
+    from unittest.mock import patch
     text = prospectus_info.get('_extracted_text', '')
 
     pi = prospectus_info
     pi['peer_comparison'] = PeerComparableAnalyzer().analyze(pi, text, ipo)
     pi['valuation'] = ValuationAnalyzer().analyze(pi, text, ipo)
 
-    signal = SignalComponentAnalyzer().analyze(ipo, pi, text)
+    with patch('ipo_analyzer.signal_analyzer.LiveMarketHeatAnalyzer.analyze', return_value={}):
+        signal = SignalComponentAnalyzer().analyze(ipo, pi, text)
     quality = ProspectusQualityAnalyzer().analyze(pi)
     pi['stock_quality'] = quality
 

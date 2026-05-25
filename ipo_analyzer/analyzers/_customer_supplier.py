@@ -77,7 +77,7 @@ class CustomerSupplierAnalyzer:
             return sorted(year_pct, key=lambda item: item[0])[-1][1]
         return None
 
-    def _extract_customer_quality(self, text):
+    def _extract_customer_quality(self, text, sector='unknown'):
         lower = text.lower()
         result = {
             'customer_retention_rate_pct': None,
@@ -93,6 +93,7 @@ class CustomerSupplierAnalyzer:
             'customer_validation_summary': '',
         }
 
+        # --- 机器人行业客户质量提取（原有逻辑） ---
         top_service = re.search(
             r'\b(7|seven)\s+(?:of|out\s+of)\s+(?:the\s+)?(?:top\s+)?(10|ten)\s+global\s+service\s+robot(?:ics)?\s+compan',
             lower,
@@ -131,9 +132,13 @@ class CustomerSupplierAnalyzer:
             r'net\s+dollar\s+retention\s+rate|net\s+revenue\s+retention|\bNDR\b|净美元留存率|净收入留存率',
         )
 
+        # --- 多行业客户质量提取（新增） ---
+        industry_customer_data = self._extract_industry_customer(text, sector)
+
         has_head_customer = any([
             result['top_global_service_robotics_customers_count'],
             result['top_global_commercial_service_robotics_customers_count'],
+            industry_customer_data.get('has_head_customer'),
             'supply chain' in lower and 'customer' in lower,
         ])
         result['head_customer_supply_chain'] = bool(has_head_customer) if has_head_customer else None
@@ -151,6 +156,12 @@ class CustomerSupplierAnalyzer:
         if commercial_count and commercial_total:
             score += sw.customer_commercial_high if commercial_count >= commercial_total else sw.customer_commercial_mid
             reasons.append(f"覆盖全球头部商用服务机器人客户({commercial_count}/{commercial_total})")
+        
+        # 多行业客户质量得分
+        if industry_customer_data.get('head_customer_score', 0) > 0:
+            score += industry_customer_data['head_customer_score']
+            reasons.extend(industry_customer_data.get('head_customer_reasons', []))
+        
         retention = result['customer_retention_rate_pct']
         if _is_num(retention):
             if retention >= 95:
@@ -176,6 +187,125 @@ class CustomerSupplierAnalyzer:
         result['customer_quality_reasons'] = reasons
         result['customer_validation_summary'] = '；'.join(reasons[:4])
         return result
+
+    def _extract_industry_customer(self, text, sector):
+        """按行业提取客户质量数据（Biotech/SaaS/硬件/消费）"""
+        lower = text.lower()
+        data = {
+            'has_head_customer': False,
+            'head_customer_score': 0,
+            'head_customer_reasons': [],
+        }
+
+        if sector == 'healthcare':
+            # Biotech: 头部医院、CRO、药企合作伙伴
+            head_hospital = re.search(
+                r'(?:top|leading|major|prestigious)\s+(?:\d+\s+)?(?:hospitals|medical centers|medical institutions)'
+                r'(?:\s+in\s+(?:china|asia|the\s+world))?'
+                r'[^.]{0,200}?(?:partner|collaborat|customer|client)',
+                lower,
+            )
+            if head_hospital:
+                data['has_head_customer'] = True
+                data['head_customer_score'] += 30
+                data['head_customer_reasons'].append("覆盖头部医院/医疗机构合作伙伴")
+
+            pharma_partner = re.search(
+                r'(?:top|leading|major|global|multinational)\s+(?:\d+\s+)?(?:pharma|pharmaceutical|biotech)\s+(?:compan|partner|collaborat)',
+                lower,
+            )
+            if pharma_partner:
+                data['has_head_customer'] = True
+                data['head_customer_score'] += 25
+                data['head_customer_reasons'].append("与头部药企/跨国药企合作")
+
+            cro_partner = re.search(
+                r'(?:top|leading|major)\s+(?:\d+\s+)?(?:CRO|contract\s+research|contract\s+manufacturing)',
+                lower,
+            )
+            if cro_partner:
+                data['has_head_customer'] = True
+                data['head_customer_score'] += 20
+                data['head_customer_reasons'].append("与头部CRO/CMO合作")
+
+            # 临床合作机构数量
+            site_count = re.search(r'(\d+)\s+(?:clinical\s+)?(?:sites?|hospitals|centers?|institutions?)\s+(?:in|across|worldwide)', lower)
+            if site_count:
+                count = int(site_count.group(1))
+                if count >= 50:
+                    data['head_customer_score'] += 15
+                    data['head_customer_reasons'].append(f"临床覆盖{count}+机构，网络广泛")
+                elif count >= 20:
+                    data['head_customer_score'] += 10
+                    data['head_customer_reasons'].append(f"临床覆盖{count}+机构")
+
+        elif sector in ('saas', 'software', 'technology'):
+            # SaaS: 头部企业客户、Fortune 500
+            fortune_500 = re.search(
+                r'(?:fortune\s+500|fortune\s+global\s+500|fortune\s+1000|forbes\s+global\s+2000)',
+                lower,
+            )
+            if fortune_500:
+                data['has_head_customer'] = True
+                data['head_customer_score'] += 30
+                data['head_customer_reasons'].append("覆盖Fortune 500/全球头部企业客户")
+
+            enterprise_count = re.search(
+                r'(?:over|more\s+than|approximately)?\s*(\d+,?\d*)\s+(?:enterprise|business|corporate)\s+(?:customers?|clients?)',
+                lower,
+            )
+            if enterprise_count:
+                count_str = enterprise_count.group(1).replace(',', '')
+                count = int(count_str) if count_str.isdigit() else 0
+                if count >= 1000:
+                    data['head_customer_score'] += 20
+                    data['head_customer_reasons'].append(f"服务{count}+企业客户")
+                elif count >= 100:
+                    data['head_customer_score'] += 15
+                    data['head_customer_reasons'].append(f"服务{count}+企业客户")
+                elif count >= 10:
+                    data['head_customer_score'] += 10
+                    data['head_customer_reasons'].append(f"服务{count}+企业客户")
+
+        elif sector == 'hardtech':
+            # 硬件/制造: 头部渠道商、订单可见度、供应链伙伴
+            head_customer = re.search(
+                r'(?:top|leading|major|global)\s+(?:\d+\s+)?(?:customer|client|partner|distributor|channel)',
+                lower,
+            )
+            if head_customer:
+                data['has_head_customer'] = True
+                data['head_customer_score'] += 25
+                data['head_customer_reasons'].append("与头部客户/渠道商合作")
+
+            backlog = re.search(
+                r'(?:backlog|order\s+book|orders?[\s-]in[-\s]hand)[^.]{0,200}?(\$|€|¥|HKD?|RMB?)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(million|billion|m|bn|亿|万)?',
+                lower,
+            )
+            if backlog:
+                data['has_head_customer'] = True
+                data['head_customer_score'] += 15
+                data['head_customer_reasons'].append("订单可见度高（有明确backlog）")
+
+        elif sector == 'consumer':
+            # 消费品牌: 头部渠道、零售网点数量
+            retail_count = re.search(
+                r'(?:over|more\s+than|approximately)?\s*(\d+,?\d*)\s+(?:retail\s+)?(?:stores?|outlets?|shops?|points?\s+of\s+sale)',
+                lower,
+            )
+            if retail_count:
+                count_str = retail_count.group(1).replace(',', '')
+                count = int(count_str) if count_str.isdigit() else 0
+                if count >= 1000:
+                    data['has_head_customer'] = True
+                    data['head_customer_score'] += 20
+                    data['head_customer_reasons'].append(f"零售网络覆盖{count}+网点")
+                elif count >= 100:
+                    data['has_head_customer'] = True
+                    data['head_customer_score'] += 15
+                    data['head_customer_reasons'].append(f"零售网络覆盖{count}+网点")
+
+        return data
 
     def analyze(self, prospectus_info: dict, text: str = '', ipo_data: dict = None) -> dict:
         # 防御：某些调用者把 ipo_data 传到了 text 位置
@@ -271,7 +401,8 @@ class CustomerSupplierAnalyzer:
 
             if top5_cust is not None:
                 result['confidence'] = 'regex_context'
-            quality = self._extract_customer_quality(text)
+            sector = prospectus_info.get('sector', 'unknown')
+            quality = self._extract_customer_quality(text, sector)
             result.update(quality)
             if quality.get('customer_quality_score', 0) > 0:
                 result['confidence'] = 'regex_context'

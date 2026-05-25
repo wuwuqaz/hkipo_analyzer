@@ -5,13 +5,13 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-import logging
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-
 from ipo_analyzer.peer_comps import PeerComparableAnalyzer
-from ipo_analyzer.analyzers import ValuationAnalyzer, BusinessBreakdownAnalyzer
+from ipo_analyzer.analyzers import ValuationAnalyzer
 from ipo_analyzer.scoring import SignalComponentAnalyzer, ScoringSystem, ProspectusQualityAnalyzer
 from ipo_analyzer.utils import _is_num
+
+import logging
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 def _build_mock_ipo(revenue=100, revenue_y1=50, net_profit=-10, gross_margin=45,
@@ -312,7 +312,7 @@ def test_false_positive_filtering():
 
     from ipo_analyzer.peer_comps import (
         _extract_competitor_chunks, _extract_potential_company_names,
-        _filter_peer_candidates, _unmatched_candidates, _build_issuer_aliases,
+        _filter_peer_candidates, _build_issuer_aliases,
     )
 
     # 模拟包含大量封面/承销商噪音的招股书文本
@@ -497,7 +497,7 @@ def test_biotech_valuation():
     Drug candidate in pivotal trial
     """
 
-    text = """
+    _ = """
     An 18A biotech company focused on innovative drug discovery.
     Clinical-stage biopharmaceutical company with PARP inhibitor pipeline.
     Our competitors include BeiGene and other innovative drug companies.
@@ -599,7 +599,7 @@ def test_single_quantitative_peer_weak_conclusion():
         assert result.get("peer_sample_warning"), "quantitative peers 不足时应给出样本不足提示"
         print(f"valuation_position: {vp}  (符合预期)")
     else:
-        print(f"quantitative peers >= 2, 跳过此断言")
+        print("quantitative peers >= 2, 跳过此断言")
 
     print("\n✅ Test 11 PASSED")
 

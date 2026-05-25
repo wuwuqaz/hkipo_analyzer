@@ -101,8 +101,8 @@ class BloggerAnalyzer:
     ]
 
     def _keyword_sentiment(self, article: SearchResultModel, stock_code: str, company_name: str) -> Optional[BloggerOpinionModel]:
-        content = f"{article.title} {article.content or article.snippet or ''}"
-        if len(content) < 50:
+        content = f"{article.title} {article.snippet or ''} {article.content or ''}"
+        if len(content) < 30:
             return None
 
         pos_hits = [kw for kw in self._POSITIVE_KEYWORDS if kw in content]
@@ -112,7 +112,7 @@ class BloggerAnalyzer:
         neg_score = len(neg_hits)
 
         if pos_score == 0 and neg_score == 0:
-            return None
+            return self._neutral_fallback(article, stock_code, company_name)
 
         if pos_score > neg_score:
             stance = "positive"
@@ -148,6 +148,39 @@ class BloggerAnalyzer:
             is_actionable=bool(pos_score or neg_score),
         )
 
+    def _neutral_fallback(self, article: SearchResultModel, stock_code: str, company_name: str) -> Optional[BloggerOpinionModel]:
+        content = f"{article.title} {article.snippet or ''} {article.content or ''}"
+        headline = f"{article.title} {article.snippet or ''}"
+        if len(content) < 30:
+            return None
+
+        has_company = company_name in headline or company_name in content
+        has_stock_code = stock_code in headline or stock_code in content
+        ipo_hits = [kw for kw in ("IPO", "打新", "招股", "港股", "申购", "新股", "暗盘", "中签") if kw in headline or kw in content]
+        if not (has_company or has_stock_code) or not ipo_hits:
+            return None
+
+        return BloggerOpinionModel(
+            stock_code=stock_code,
+            company_name=company_name,
+            source=article.source_domain,
+            author="",
+            author_type="blogger",
+            title=article.title,
+            published_at=article.published_at,
+            stance="neutral",
+            stance_score=50,
+            apply_suggestion="观望",
+            suggested_capital_ratio="",
+            main_reasons=ipo_hits[:3],
+            risk_points=[],
+            valuation_comment="",
+            summary="文章与IPO相关，但缺少明确看多看空措辞，按中性观点处理",
+            confidence_score=20,
+            evidence_quotes=[],
+            is_actionable=False,
+        )
+
     # --- LLM 分析 ---
 
     def _call_llm(self, prompt: str) -> Optional[str]:
@@ -156,6 +189,8 @@ class BloggerAnalyzer:
             return None
 
         url = f"{self.config.llm_base_url.rstrip('/')}/chat/completions"
+        if not url.startswith("https://"):
+            logger.warning("LLM_BASE_URL 不是 HTTPS (%s)，API Key 可能以明文传输", self.config.llm_base_url)
         headers = {
             "Authorization": f"Bearer {self.config.llm_api_key}",
             "Content-Type": "application/json",

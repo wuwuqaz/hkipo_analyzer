@@ -110,7 +110,7 @@ def main():
     # backtest 子命令
     subparsers.add_parser("backtest", help="回测 & 权重优化")
 
-    args = parser.parse_args()
+    args, remaining = parser.parse_known_args()
 
     if args.command == "reanalyze":
         if not args.code and not args.pdf:
@@ -118,6 +118,7 @@ def main():
         cmd_reanalyze(args)
     elif args.command == "backtest":
         from ipo_analyzer.backtest.cli import main as backtest_main
+        sys.argv = [sys.argv[0], *remaining]
         backtest_main()
     else:
         parser.print_help()

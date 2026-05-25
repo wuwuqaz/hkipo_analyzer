@@ -7,3 +7,15 @@ from .engine import run_backtest
 from .metrics import compute_objective, compute_objective_cv
 from .optimizer import optimize_weights
 from .store import BacktestStore
+
+__all__ = [
+    "BacktestRecord",
+    "BacktestResult",
+    "OptimizationResult",
+    "collect_backtest_dataset",
+    "run_backtest",
+    "compute_objective",
+    "compute_objective_cv",
+    "optimize_weights",
+    "BacktestStore",
+]

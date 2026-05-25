@@ -8,6 +8,7 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     SUCCESS = "success"
     FAILED = "failed"
+    NOT_FOUND = "not_found"
 
 
 class ErrorResponse(BaseModel):

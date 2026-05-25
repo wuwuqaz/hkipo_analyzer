@@ -7,8 +7,9 @@ import uuid
 import platform
 import logging
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .utils import _is_num, _normalize_gm, format_iso_date, _format_cornerstone_amount, classify_market_heat
+from .utils import _is_num, _normalize_gm, format_iso_date, _format_cornerstone_amount, classify_market_heat, _sanitize_stock_code
 from .settings import SETTINGS
 from .downloader import AiPOMarginClient, ProspectusDownloader
 from .parser import ProspectusParser
@@ -23,13 +24,39 @@ from .analyzers import (
     RiskFactorAnalyzer,
     ShareholderAnalyzer,
     OrderBacklogAnalyzer,
+    PiotroskiFAnalyzer,
+    DCFValuationAnalyzer,
+    SectorAnalyzer,
+    CompanyProfileAnalyzer,
+    InvestmentThesisAnalyzer,
 )
 from .scoring import ProspectusQualityAnalyzer, SignalComponentAnalyzer, ScoringSystem
 from .peer_comps import PeerComparableAnalyzer
 from .report import export_pdf_report
 from .history import HistoryStore
+from .blogger_monitor.service import BloggerMonitorService
 
 logger = logging.getLogger(__name__)
+
+
+class _PerfTimer:
+    """简单性能计时上下文管理器，用于关键路径耗时记录。"""
+
+    def __init__(self, name: str, threshold_ms: float = 50.0):
+        self.name = name
+        self.threshold_ms = threshold_ms
+
+    def __enter__(self):
+        self.start = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        elapsed_ms = (time.perf_counter() - self.start) * 1000
+        if elapsed_ms >= self.threshold_ms:
+            logger.info("[perf] %s took %.1fms", self.name, elapsed_ms)
+        else:
+            logger.debug("[perf] %s took %.1fms", self.name, elapsed_ms)
+
 
 # CLI 入口配置日志
 if __name__ == "__main__":
@@ -40,7 +67,7 @@ if __name__ == "__main__":
 
 
 def _attach_debug_info(ipo_data, pdf_path, prospectus_info, prospectus_text):
-    ipo_data['pdf_downloaded'] = pdf_path is not None and os.path.exists(pdf_path) if pdf_path else False
+    ipo_data['pdf_downloaded'] = bool(pdf_path and os.path.exists(pdf_path))
     ipo_data['pdf_path'] = pdf_path
     if pdf_path and os.path.exists(pdf_path):
         try:
@@ -71,7 +98,7 @@ _PROSPECTUS_COPY_FIELDS = [
     'market_cap_hkd_million', 'indicative_market_cap_hkd_million',
     'final_market_cap_hkd_million', 'final_ps_ratio', 'final_total_fund',
     'final_public_offer', 'net_proceeds_hkd_million', 'issuance_ratio_pct',
-    'public_offer_ratio_pct', 'cornerstone_total_offer_shares',
+    'public_offer_ratio_pct', 'international_offer_ratio_pct', 'cornerstone_total_offer_shares',
     'cornerstone_investment_hkd_million', 'cornerstone_investment_usd_million',
     'cornerstone_offer_ratio_pct', 'revenue', 'revenue_y1', 'revenue_year',
     'revenue_y1_year', 'net_profit', 'net_profit_y1', 'net_profit_year',
@@ -81,12 +108,15 @@ _PROSPECTUS_COPY_FIELDS = [
     'growth_validation_status', 'growth_validation_summary',
     # 发行数据（供 scoring 使用）
     'public_offer', 'total_fund', 'cornerstone_pct',
+    'board_lot',
 ]
 
 
 def _safe_float(value):
     """将字符串/数值安全转换为 float，失败返回 None。"""
-    if value in (None, "", "--"):
+    if value is None or value == "" or value == "--":
+        return None
+    if isinstance(value, bool):
         return None
     try:
         return float(value)
@@ -101,11 +131,19 @@ def _fetch_margin_data(client, ipo, margin_detail=None):
     if margin_detail is None:
         margin_detail = client.fetch_margin_detail(stock_code)
 
+    # 优先从IPO列表取日期，若为空则从margin_detail回退
+    start_date = format_iso_date(ipo.get('startdate', ''))
+    end_date = format_iso_date(ipo.get('enddate', ''))
+    if not start_date and margin_detail:
+        start_date = format_iso_date(margin_detail.get('StartDate', ''))
+    if not end_date and margin_detail:
+        end_date = format_iso_date(margin_detail.get('EndDate', ''))
+
     ipo_data = {
         'company_name': company_name,
         'hk_code': stock_code,
-        'apply_start_date': format_iso_date(ipo.get('startdate', '')),
-        'apply_end_date': format_iso_date(ipo.get('enddate', '')),
+        'apply_start_date': start_date,
+        'apply_end_date': end_date,
         'margin_total': None,
         'public_offer': None,
         'actual_over_sub_ratio': None,
@@ -182,6 +220,76 @@ def _fetch_margin_data(client, ipo, margin_detail=None):
     return ipo_data
 
 
+def _detect_valuation_profitability_conflict(ipo_data, prospectus_info):
+    """检测盈利状态与估值框架是否存在冲突。"""
+    valuation = prospectus_info.get('valuation') or {}
+    profitable = prospectus_info.get('profitable')
+    biotech_label = valuation.get('biotech_valuation_label') or ''
+    val_label = valuation.get('valuation_label') or ''
+    is_conflict = False
+    conflict_reasons = []
+
+    if profitable is True:
+        if '未盈利' in str(biotech_label):
+            is_conflict = True
+            conflict_reasons.append(f"盈利状态为盈利，但生物科技估值标签为'{biotech_label}'")
+        if '未盈利' in str(val_label):
+            is_conflict = True
+            conflict_reasons.append(f"盈利状态为盈利，但估值标签包含'未盈利': '{val_label}'")
+
+    if is_conflict:
+        valuation['valuation_conflict'] = True
+        valuation['valuation_conflict_reasons'] = conflict_reasons
+        ipo_data['valuation_conflict'] = True
+        ipo_data['valuation_conflict_reasons'] = conflict_reasons
+    else:
+        valuation['valuation_conflict'] = False
+        valuation['valuation_conflict_reasons'] = []
+        ipo_data['valuation_conflict'] = False
+        ipo_data['valuation_conflict_reasons'] = []
+
+
+def _validate_financial_year_consistency(ipo_data, prospectus_info):
+    """校验财务年份一致性。若收入、净利润、毛利率年份不一致，标记为需要复核。"""
+    revenue_year = prospectus_info.get('revenue_year')
+    net_profit_year = prospectus_info.get('net_profit_year')
+    gross_margin_year = prospectus_info.get('gross_margin_year')
+
+    flags = list(prospectus_info.get('financial_data_quality_flags', []) or [])
+    confidence = prospectus_info.get('financial_extract_confidence', 'unknown')
+    has_issue = False
+    has_severe_issue = False
+    issue_reasons = []
+
+    if revenue_year and net_profit_year:
+        year_diff = abs(int(net_profit_year) - int(revenue_year))
+        if year_diff > 0:
+            has_severe_issue = True
+            issue_reasons.append(f"收入年份({revenue_year})与净利润年份({net_profit_year})不一致")
+            if "收入与净利润年份不一致" not in flags:
+                flags.append("收入与净利润年份不一致")
+            has_issue = True
+
+    if revenue_year and gross_margin_year:
+        year_diff = abs(int(gross_margin_year) - int(revenue_year))
+        if year_diff > 0:
+            has_severe_issue = True
+            issue_reasons.append(f"收入年份({revenue_year})与毛利率年份({gross_margin_year})不一致")
+            if "收入与毛利率年份不一致" not in flags:
+                flags.append("收入与毛利率年份不一致")
+            has_issue = True
+
+    if has_issue:
+        prospectus_info['financial_data_quality_flags'] = flags
+        if has_severe_issue and confidence in ('high', 'medium'):
+            prospectus_info['financial_extract_confidence'] = 'needs_review'
+        ipo_data['financial_year_consistency_issue'] = has_severe_issue
+        ipo_data['financial_year_consistency_reasons'] = issue_reasons
+    else:
+        ipo_data['financial_year_consistency_issue'] = False
+        ipo_data['financial_year_consistency_reasons'] = []
+
+
 def _calculate_risk_penalty(prospectus_info):
     """计算重大红旗风险惩罚，避免与 fundamental_score 重复扣分。
 
@@ -229,33 +337,65 @@ def _calculate_risk_penalty(prospectus_info):
                 'reason': f"现金runway仅{cash_runway:.1f}年，融资紧迫性高"
             })
 
-    # 重大红旗风险：基于招股书文本关键词检测（替代已废弃的 risk_flags 字段）
+    _HYPOTHETICAL_PREFIXES = re.compile(
+        r'\b(may|might|could|would|if|should|potential|possible|hypothetical|assume|assuming|in\s+the\s+event)\b',
+        re.IGNORECASE,
+    )
+    _ACTUAL_EVENT_RE = re.compile(
+        r'\b(actual|existing|currently|已经|已发生|现有|正在|受到)\b',
+        re.IGNORECASE,
+    )
+
+    def _classify_risk_evidence(evidence_text, pattern_name):
+        """对风险证据进行分层分类。"""
+        et_lower = evidence_text.lower()
+        if _HYPOTHETICAL_PREFIXES.search(et_lower):
+            return 'generic_risk_factor'
+        if _ACTUAL_EVENT_RE.search(et_lower):
+            return 'actual_event'
+        return 'potential_risk'
+
     _MAJOR_RED_FLAG_PATTERNS = [
-        ('lawsuit', 3, [
-            r'重大诉讼', r'重大法律程序', r'material\s+litigation',
-            r'class\s+action', r'重大未决诉讼',
+        ('lawsuit', 3, 1, 0, [
+            re.compile(r'重大诉讼', re.IGNORECASE),
+            re.compile(r'重大法律程序', re.IGNORECASE),
+            re.compile(r'material\s+litigation', re.IGNORECASE),
+            re.compile(r'class\s+action', re.IGNORECASE),
+            re.compile(r'重大未决诉讼', re.IGNORECASE),
         ]),
-        ('going_concern', 5, [
-            r'持续经营.*重大.*不确定', r'going\s+concern.*material',
-            r'持续经营能力.*重大疑虑', r'持续经营.*重大疑问',
+        ('going_concern', 5, 2, 0, [
+            re.compile(r'持续经营.*重大.*不确定', re.IGNORECASE),
+            re.compile(r'going\s+concern.*material', re.IGNORECASE),
+            re.compile(r'持续经营能力.*重大疑虑', re.IGNORECASE),
+            re.compile(r'持续经营.*重大疑问', re.IGNORECASE),
         ]),
-        ('audit_qualification', 5, [
-            r'审计.*保留意见', r'audit\s+qualification',
-            r'核数师.*保留意见', r'审计师.*不发表意见',
-            r'disclaimer\s+of\s+opinion', r'adverse\s+opinion',
+        ('audit_qualification', 5, 2, 0, [
+            re.compile(r'审计.*保留意见', re.IGNORECASE),
+            re.compile(r'audit\s+qualification', re.IGNORECASE),
+            re.compile(r'核数师.*保留意见', re.IGNORECASE),
+            re.compile(r'审计师.*不发表意见', re.IGNORECASE),
+            re.compile(r'disclaimer\s+of\s+opinion', re.IGNORECASE),
+            re.compile(r'adverse\s+opinion', re.IGNORECASE),
         ]),
-        ('clinical_regulatory_failure', 5, [
-            r'临床.*失败', r'clinical\s+failure', r'clinical\s+hold',
-            r'监管.*拒绝', r'regulatory\s+rejection', r'CRL\b',
-            r'未获.*批准', r'上市申请.*拒绝',
+        ('clinical_regulatory_failure', 5, 2, 0, [
+            re.compile(r'临床.*失败', re.IGNORECASE),
+            re.compile(r'clinical\s+failure', re.IGNORECASE),
+            re.compile(r'clinical\s+hold', re.IGNORECASE),
+            re.compile(r'监管.*拒绝', re.IGNORECASE),
+            re.compile(r'regulatory\s+rejection', re.IGNORECASE),
+            re.compile(r'CRL\b', re.IGNORECASE),
+            re.compile(r'未获.*批准', re.IGNORECASE),
+            re.compile(r'上市申请.*拒绝', re.IGNORECASE),
         ]),
-        ('financial_irregularity', 3, [
-            r'财务.*异常', r'financial\s+irregularity',
-            r'财务报表.*重大.*错报', r'财务数据.*不一致',
+        ('financial_irregularity', 3, 1, 0, [
+            re.compile(r'财务.*异常', re.IGNORECASE),
+            re.compile(r'financial\s+irregularity', re.IGNORECASE),
+            re.compile(r'财务报表.*重大.*错报', re.IGNORECASE),
+            re.compile(r'财务数据.*不一致', re.IGNORECASE),
         ]),
     ]
 
-    for flag_type, max_penalty, patterns in _MAJOR_RED_FLAG_PATTERNS:
+    for flag_type, actual_penalty, potential_penalty, generic_penalty, patterns in _MAJOR_RED_FLAG_PATTERNS:
         if total_penalty >= rf.max_total_penalty:
             break
         dedup_keywords = {
@@ -268,13 +408,30 @@ def _calculate_risk_penalty(prospectus_info):
         if _already_in_quality(dedup_keywords.get(flag_type, [])):
             continue
         for pattern in patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                penalty = min(max_penalty, rf.max_total_penalty - total_penalty)
-                total_penalty += penalty
+            match = pattern.search(text)
+            if match:
+                # 提取上下文作为证据
+                start = max(0, match.start() - 120)
+                end = min(len(text), match.end() + 120)
+                evidence_excerpt = text[start:end].replace('\n', ' ').strip()
+                section_name = 'risk_factors' if 'risk' in text[max(0, match.start()-500):match.start()].lower() else 'unknown'
+                risk_tier = _classify_risk_evidence(evidence_excerpt, flag_type)
+                if risk_tier == 'actual_event':
+                    penalty = min(actual_penalty, rf.max_total_penalty - total_penalty)
+                elif risk_tier == 'potential_risk':
+                    penalty = min(potential_penalty, rf.max_total_penalty - total_penalty)
+                else:
+                    penalty = min(generic_penalty, rf.max_total_penalty - total_penalty)
+                if penalty > 0:
+                    total_penalty += penalty
                 penalty_breakdown.append({
                     'type': flag_type,
                     'penalty': penalty,
-                    'reason': f"招股书文本匹配到重大风险: {pattern}",
+                    'risk_tier': risk_tier,
+                    'evidence_excerpt': evidence_excerpt[:240],
+                    'confidence': 'keyword_match',
+                    'section_name': section_name,
+                    'reason': f"[{risk_tier}] 招股书文本匹配到风险: {pattern}" if risk_tier != 'actual_event' else f"[actual_event] 招股书文本匹配到已发生风险: {pattern}",
                 })
                 break
 
@@ -381,30 +538,46 @@ def _apply_final_price_basis(ipo_data, prospectus_info):
         prospectus_info['entry_fee_hkd'] = final_price * float(board_lot) * (1 + SETTINGS.fx.entry_fee_rate)
 
 
-def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, prospectus_info, prospectus_text):
+# ---------------------------------------------------------------------------
+# 分析阶段辅助函数（从 _calculate_final_score 抽取）
+# ---------------------------------------------------------------------------
 
-    _apply_final_price_basis(ipo_data, prospectus_info)
+_CORE_ANALYZERS = [
+    ('business_breakdown', BusinessBreakdownAnalyzer),
+    ('geographic', GeographicExpansionAnalyzer),
+    ('customer_supplier', CustomerSupplierAnalyzer),
+    ('cashflow', WorkingCapitalCashFlowAnalyzer),
+    ('capacity', ProductionCapacityAnalyzer),
+    ('rnd_pipeline', RnDPipelineAnalyzer),
+    ('risk_factors', RiskFactorAnalyzer),
+    ('shareholder', ShareholderAnalyzer),
+    ('order_backlog', OrderBacklogAnalyzer),
+]
 
-    # 基础分析器（可循环调用）
-    analyzers = [
-        ('business_breakdown', BusinessBreakdownAnalyzer),
-        ('geographic', GeographicExpansionAnalyzer),
-        ('customer_supplier', CustomerSupplierAnalyzer),
-        ('cashflow', WorkingCapitalCashFlowAnalyzer),
-        ('capacity', ProductionCapacityAnalyzer),
-        ('rnd_pipeline', RnDPipelineAnalyzer),
-        ('risk_factors', RiskFactorAnalyzer),
-        ('shareholder', ShareholderAnalyzer),
-        ('order_backlog', OrderBacklogAnalyzer),
-    ]
-    for key, analyzer_cls in analyzers:
-        try:
-            prospectus_info[key] = analyzer_cls().analyze(prospectus_info, prospectus_text or "")
-        except (ValueError, TypeError, KeyError, AttributeError) as e:
-            logger.warning("%s 分析异常: %s", key, e)
-            prospectus_info[key] = {"_error": str(e), "warnings": [f"分析异常: {e}"]}
 
-    # 同行对比分析 (在估值之前，为估值提供同行背景)
+def _run_single_analyzer(key, analyzer_cls, prospectus_info, prospectus_text):
+    """执行单个分析器并容错。"""
+    try:
+        return key, analyzer_cls().analyze(prospectus_info, prospectus_text or "")
+    except (ValueError, TypeError, KeyError, AttributeError) as e:
+        logger.warning("%s 分析异常: %s", key, e)
+        return key, {"_error": str(e), "warnings": [f"分析异常: {e}"]}
+
+
+def _run_parallel_analyzers(prospectus_info, prospectus_text):
+    """阶段 1：并行运行 9 个核心分析器。"""
+    with ThreadPoolExecutor(max_workers=min(len(_CORE_ANALYZERS), 4)) as executor:
+        futures = {
+            executor.submit(_run_single_analyzer, key, cls, prospectus_info, prospectus_text): key
+            for key, cls in _CORE_ANALYZERS
+        }
+        for future in as_completed(futures):
+            key, result = future.result()
+            prospectus_info[key] = result
+
+
+def _run_peer_and_valuation(prospectus_info, prospectus_text, ipo_data):
+    """阶段 2：同行对比 + 子行业修正 + 估值分析。"""
     try:
         peer_result = PeerComparableAnalyzer().analyze(prospectus_info, prospectus_text, ipo_data)
     except (ValueError, TypeError, KeyError, AttributeError) as e:
@@ -412,56 +585,158 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
         peer_result = {"warnings": [f"分析异常: {e}"], "_error": str(e)}
     prospectus_info['peer_comparison'] = peer_result
 
-    # 估值分析 (有同行数据可做相对估值)
-    valuation_result = ValuationAnalyzer().analyze(prospectus_info, prospectus_text, ipo_data)
+    # 子行业回退修正
+    subsector = (peer_result or {}).get('subsector')
+    biotech_subsectors = (
+        'innovative_drug_biotech', 'ai_drug_delivery_nanomedicine',
+        'io_oncology', 'gene_therapy', 'cell_therapy', 'adc_biotech',
+    )
+    if subsector in biotech_subsectors and prospectus_info.get('sector') != 'healthcare':
+        logger.info("子行业回退修正: %s -> healthcare (subsector=%s)", prospectus_info.get('sector'), subsector)
+        prospectus_info['sector'] = 'healthcare'
+        cf = prospectus_info.get('cashflow') or {}
+        if isinstance(cf, dict) and cf.get('cash_quality_label') == '弱':
+            runway = cf.get('cash_runway_years')
+            if _is_num(runway) and runway >= 5:
+                cf['cash_quality_label'] = '一般'
+                cf.setdefault('working_capital_trend_reasons', []).append('经营现金流为负，但现金runway充足(≥5年)')
+
+    # 估值分析
+    try:
+        valuation_result = ValuationAnalyzer().analyze(prospectus_info, prospectus_text, ipo_data)
+    except (ValueError, TypeError, KeyError, AttributeError) as e:
+        logger.warning("估值分析异常: %s", e)
+        valuation_result = {"_error": str(e), "warnings": [f"分析异常: {e}"]}
     prospectus_info['valuation'] = valuation_result
 
-    signal_result = signal_analyzer.analyze(ipo_data, prospectus_info, prospectus_text)
-    prospectus_info['advanced_framework'] = signal_result  # 兼容旧字段
+    try:
+        thesis_result = InvestmentThesisAnalyzer().analyze(prospectus_info, prospectus_text, ipo_data)
+    except (ValueError, TypeError, KeyError, AttributeError) as e:
+        logger.warning("投研叙事综合分析异常: %s", e)
+        thesis_result = {"_error": str(e), "warnings": [f"分析异常: {e}"]}
+    prospectus_info['investment_thesis'] = thesis_result
 
-    # 合并招股书解析出的发行数据到 ipo_data（优先使用招股书中的精确数据）
+
+def _run_signal_and_quality(signal_analyzer, quality_analyzer, ipo_data, prospectus_info, prospectus_text):
+    """阶段 3：信号分析与质量分析，返回 (signal_result, stock_quality)。"""
+    try:
+        signal_result = signal_analyzer.analyze(ipo_data, prospectus_info, prospectus_text)
+    except (ValueError, TypeError, KeyError, AttributeError) as e:
+        logger.warning("信号分析异常: %s", e)
+        signal_result = {"score": 0, "components": {}, "signal_breakdown": {}}
+    prospectus_info['advanced_framework'] = signal_result
+
+    # 基石占比冲突检测
+    cornerstone_analysis = prospectus_info.get('cornerstone_analysis') or {}
+    cornerstone_pct_text = cornerstone_analysis.get('cornerstone_pct')
+    cornerstone_pct_table = prospectus_info.get('cornerstone_offer_ratio_pct')
+    if cornerstone_pct_text is not None and cornerstone_pct_table is not None:
+        diff = abs(cornerstone_pct_text - cornerstone_pct_table)
+        if diff > 10:
+            logger.warning(
+                "基石占比来源差异较大: 正则提取=%.1f%%, 表格计算=%.1f%% (差异%.1f%%)",
+                cornerstone_pct_text, cornerstone_pct_table, diff,
+            )
+
+    # 合并招股书发行数据到 ipo_data
     for fld in ('public_offer', 'total_fund', 'public_offer_ratio_pct', 'cornerstone_offer_ratio_pct', 'cornerstone_pct'):
         pi_val = prospectus_info.get(fld)
-        if pi_val is not None and pi_val != 0:
-            if ipo_data.get(fld) in (None, 0, ''):
-                ipo_data[fld] = pi_val
+        if pi_val is not None and ipo_data.get(fld) in (None, ''):
+            ipo_data[fld] = pi_val
 
-    stock_quality = quality_analyzer.analyze(prospectus_info)
-    prospectus_info['stock_quality'] = stock_quality  # 供 ScoringSystem 复用，消除重复评分
+    try:
+        stock_quality = quality_analyzer.analyze(prospectus_info)
+    except (ValueError, TypeError, KeyError, AttributeError) as e:
+        logger.warning("质量分析异常: %s", e)
+        stock_quality = {"score": 0, "label": "缺失", "reasons": [f"分析异常: {e}"], "dimensions": {}}
+    prospectus_info['stock_quality'] = stock_quality
 
-    # 收集所有分析器的 _error（含后段分析的 valuation/peer/signal/quality）
-    _all_analyzer_keys = [key for key, _ in analyzers] + ['peer_comparison', 'valuation', 'advanced_framework', 'stock_quality']
-    analyzer_errors = {}
-    for key in _all_analyzer_keys:
+    return signal_result, stock_quality
+
+
+def _run_investskill_analyzers(prospectus_info):
+    """阶段 4：InvestSkill 框架（Piotroski + DCF + Sector + Profile）。"""
+    try:
+        piotroski_result = PiotroskiFAnalyzer().analyze(prospectus_info)
+        prospectus_info['piotroski_f'] = piotroski_result
+        logger.info("Piotroski F-Score: %d/%d (%s)", piotroski_result.total_score, piotroski_result.max_score, piotroski_result.grade)
+    except Exception as e:
+        logger.warning("Piotroski F-Score 分析异常: %s", e)
+
+    try:
+        dcf_result = DCFValuationAnalyzer().analyze(prospectus_info)
+        prospectus_info['dcf_valuation'] = dcf_result
+        if dcf_result.valuation_label != "缺失":
+            logger.info(
+                "DCF估值: %s (内在价值=%.0f, 上行空间=%.1f%%)",
+                dcf_result.valuation_label,
+                dcf_result.intrinsic_value_hkd or 0,
+                dcf_result.upside_pct or 0,
+            )
+    except Exception as e:
+        logger.warning("DCF 估值分析异常: %s", e)
+
+    try:
+        sector_result = SectorAnalyzer().analyze(prospectus_info)
+        prospectus_info['sector_analysis'] = sector_result
+        logger.info(
+            "行业赛道: %s (贝塔=%s, 周期=%s, 政策=%s)",
+            sector_result.sector_name,
+            sector_result.sector_beta_label,
+            sector_result.cycle_position,
+            sector_result.policy_support,
+        )
+    except Exception as e:
+        logger.warning("行业赛道分析异常: %s", e)
+
+    try:
+        profile_result = CompanyProfileAnalyzer.analyze(prospectus_info)
+        prospectus_info['company_profile'] = profile_result
+        logger.info(
+            "公司简介: %s (置信度=%s)",
+            profile_result.company_summary[:50] if profile_result.company_summary else "无",
+            profile_result.confidence,
+        )
+    except Exception as e:
+        logger.warning("公司简介提取异常: %s", e)
+
+
+def _collect_analyzer_errors(prospectus_info):
+    """收集所有分析器的 _error。"""
+    extra_keys = ['peer_comparison', 'valuation', 'investment_thesis', 'advanced_framework', 'stock_quality', 'piotroski_f', 'dcf_valuation', 'sector_analysis', 'company_profile']
+    all_keys = [key for key, _ in _CORE_ANALYZERS] + extra_keys
+    errors = {}
+    for key in all_keys:
         result = prospectus_info.get(key, {})
         if isinstance(result, dict) and result.get('_error'):
-            analyzer_errors[key] = result['_error']
-    if analyzer_errors:
-        ipo_data['analyzer_errors'] = analyzer_errors
+            errors[key] = result['_error']
+    return errors
 
+
+def _inject_market_context(prospectus_info, prospectus_text):
+    """注入市场情绪、宏观环境、回拨、孖展验证、自动同行提取。"""
+    from .ipo_sentiment import get_ipo_sentiment
+    from .macro_factors import get_macro_factors
+    from .clawback_impact import analyze_clawback_impact
+    from .margin_validator import validate_margin_data
+    from .peer_auto_expand import extract_peer_companies_from_text
+
+    prospectus_info['ipo_sentiment'] = get_ipo_sentiment()
+    prospectus_info['macro_factors'] = get_macro_factors()
+    prospectus_info['clawback_impact'] = analyze_clawback_impact(prospectus_info)
+    prospectus_info['margin_validity'] = validate_margin_data(prospectus_info)
+    prospectus_info['auto_peer_companies'] = extract_peer_companies_from_text(prospectus_text)
+
+
+def _apply_scoring_and_risk(scorer, ipo_data, prospectus_info, signal_result):
+    """阶段 5：评分计算 + 风险惩罚，返回 (final_score, scoring, risk_penalty_result)。"""
     scoring = scorer.calculate(ipo_data, prospectus_info, signal_components=signal_result.get('components'))
-
     risk_penalty_result = _calculate_risk_penalty(prospectus_info)
     total_risk_penalty = risk_penalty_result['total_penalty']
     risk_penalty_breakdown = risk_penalty_result['breakdown']
 
     final_score = max(0, min(100, scoring['score'] - total_risk_penalty))
-    if total_risk_penalty:
-        adjusted_long_term = max(0, scoring.get('long_term_score', 0) - total_risk_penalty * 2)
-        scoring['long_term_score'] = adjusted_long_term
-        if adjusted_long_term >= 70:
-            scoring['long_term_label'] = '强'
-        elif adjusted_long_term >= 55:
-            scoring['long_term_label'] = '中等'
-        elif adjusted_long_term >= 25:
-            scoring['long_term_label'] = '中等偏弱'
-        else:
-            scoring['long_term_label'] = '弱'
-        if adjusted_long_term < 55 and scoring.get('ipo_trade_score', 0) >= 70:
-            scoring['subscription_recommendation'] = '可打新，但不宜当成长线价值股处理'
-            scoring.setdefault('recommendation_reasons', []).append('存在重大红旗扣分，长期持有需降权')
 
-    # parse_success=False 时，明确提示仅热度参考
     parse_success = prospectus_info.get('parse_success', False)
     analysis_mode = 'full'
     if not parse_success:
@@ -469,18 +744,34 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
         if "仅热度参考" not in str(scoring.get('reasons', [])):
             scoring.setdefault('reasons', []).append("招股书解析失败，评分仅热度参考")
 
-    # 更新 score_trace，补入 risk_penalty 和真正的最终分数
     trace = scoring.get('score_trace', {}) or {}
     trace['risk_penalty'] = total_risk_penalty
     trace['risk_penalty_breakdown'] = [b['reason'] for b in risk_penalty_breakdown]
     trace['true_final_score'] = final_score
     scoring['score_trace'] = trace
 
-    ipo_data['score'] = final_score
+    return final_score, scoring, risk_penalty_result, analysis_mode
+
+
+def _normalize_output_fields(ipo_data, prospectus_info, scoring, risk_penalty_result, signal_result, stock_quality, analysis_mode, analyzer_errors):
+    """阶段 6：字段映射、规范化、语义转换。"""
+    total_risk_penalty = risk_penalty_result['total_penalty']
+    risk_penalty_breakdown = risk_penalty_result['breakdown']
+
+    if analyzer_errors:
+        ipo_data['analyzer_errors'] = analyzer_errors
+
+    ipo_data['score'] = max(0, min(100, scoring['score'] - total_risk_penalty))
     ipo_data['subscription_score'] = scoring.get('subscription_score', 0)
     ipo_data['ipo_trade_score'] = scoring.get('ipo_trade_score', scoring.get('trade_score', 0))
+    ipo_data['strict_ipo_score'] = scoring.get('strict_ipo_score', ipo_data['ipo_trade_score'])
+    ipo_data['raw_trade_signal_score'] = scoring.get('raw_trade_signal_score', scoring.get('trade_score', 0))
+    ipo_data['strict_scoring_profile'] = scoring.get('strict_scoring_profile', '')
     ipo_data['ipo_trade_label'] = scoring.get('ipo_trade_label', '')
-    ipo_data['long_term_score'] = scoring.get('long_term_score', scoring.get('fundamental_score', 0))
+    ipo_data['long_term_score'] = scoring.get('long_term_score', 0)
+    ipo_data['raw_long_term_score_before_penalty'] = scoring.get('raw_long_term_score_before_penalty')
+    ipo_data['long_term_penalty'] = scoring.get('long_term_penalty')
+    ipo_data['long_term_penalty_reasons'] = [r for r in (scoring.get('long_term_penalty_reasons') or []) if r]
     ipo_data['long_term_label'] = scoring.get('long_term_label', '')
     ipo_data['fisher_label'] = scoring.get('fisher_label', '')
     ipo_data['lynch_label'] = scoring.get('lynch_label', '')
@@ -493,43 +784,219 @@ def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, 
     ipo_data['score_breakdown'] = scoring.get('components', {})
     ipo_data['risk_penalty'] = total_risk_penalty
     ipo_data['risk_penalty_breakdown'] = risk_penalty_breakdown
-    # 新五维分数
     ipo_data['trade_score'] = scoring.get('trade_score', 0)
     ipo_data['valuation_score'] = scoring.get('valuation_score', 0)
     ipo_data['theme_score'] = scoring.get('theme_score', 0)
     dq_component = signal_result.get('components', {}).get('data_quality', {})
     ipo_data['data_quality_score'] = min(100, round(dq_component.get('score', 0) / 5 * 100))
-    # 权重配置信息
     ipo_data['weight_profile'] = scoring.get('weight_profile')
     ipo_data['debug_info'] = scoring.get('debug_info')
     ipo_data['score_trace'] = scoring.get('score_trace')
     ipo_data['penalty_reason'] = scoring.get('penalty_reason')
     ipo_data['analysis_mode'] = analysis_mode
-    # 兼容旧字段（deprecated）
     ipo_data['advanced_framework_score'] = signal_result.get('score', 0)
-    ipo_data['advanced_score_adjustment'] = 0  # 已废弃，固定为0
-    # 新字段
+    ipo_data['advanced_score_adjustment'] = 0
     ipo_data['signal_breakdown'] = signal_result.get('signal_breakdown', {})
     ipo_data['prospectus_info'] = prospectus_info
     ipo_data['stock_quality'] = stock_quality
+    ipo_data['investment_thesis'] = prospectus_info.get('investment_thesis')
+
     for field in _PROSPECTUS_COPY_FIELDS:
         if field in prospectus_info:
             ipo_data[field] = prospectus_info[field]
 
+    # 语义规范化
+    if _safe_float(ipo_data.get('public_offer')) is not None:
+        ipo_data['public_offer_fund_hkd_billion'] = ipo_data['public_offer']
+    if _safe_float(ipo_data.get('total_fund')) is not None:
+        ipo_data['total_fund_hkd_billion'] = ipo_data['total_fund']
+    if _safe_float(ipo_data.get('margin_total')) is not None:
+        ipo_data['margin_total_hkd_billion'] = ipo_data['margin_total']
+
+    # 截止日 fallback
+    if not ipo_data.get('apply_start_date') and prospectus_info.get('apply_start_date'):
+        ipo_data['apply_start_date'] = prospectus_info['apply_start_date']
+    if not ipo_data.get('apply_end_date') and prospectus_info.get('apply_end_date'):
+        ipo_data['apply_end_date'] = prospectus_info['apply_end_date']
+
+    _detect_valuation_profitability_conflict(ipo_data, prospectus_info)
+    _validate_financial_year_consistency(ipo_data, prospectus_info)
+
+    # 映射前端展示字段
+    if _safe_float(ipo_data.get('public_offer_ratio_pct')):
+        ipo_data['public_offer_ratio'] = ipo_data['public_offer_ratio_pct']
+    if _safe_float(ipo_data.get('international_offer_ratio_pct')):
+        ipo_data['international_offer_ratio'] = ipo_data['international_offer_ratio_pct']
+
+    _hk_shares = _safe_float(ipo_data.get('hk_offer_shares'))
+    _intl_shares = _safe_float(ipo_data.get('international_offer_shares'))
+    _total_shares = _safe_float(ipo_data.get('global_offer_shares'))
+    if not _total_shares and _hk_shares and _intl_shares:
+        _total_shares = _hk_shares + _intl_shares
+    if not _safe_float(ipo_data.get('public_offer_ratio')) and _hk_shares and _total_shares and _total_shares > 0:
+        ipo_data['public_offer_ratio'] = _hk_shares / _total_shares * 100
+    if not _safe_float(ipo_data.get('international_offer_ratio')) and _intl_shares and _total_shares and _total_shares > 0:
+        ipo_data['international_offer_ratio'] = _intl_shares / _total_shares * 100
+
+    # 公开发售手数
+    hk_offer_shares = _safe_float(ipo_data.get('hk_offer_shares'))
+    board_lot = _safe_float(ipo_data.get('board_lot')) or _safe_float(ipo_data.get('lot_size'))
+    if hk_offer_shares and board_lot and board_lot > 0:
+        ipo_data['public_offer_lots'] = hk_offer_shares / board_lot
+
+
+def _run_practical_analysis(prospectus_info, ipo_data):
+    """实战分析模块：中签率预测、甲乙组策略、绿鞋机制、暗盘信号、新股日历、卖出时机。"""
+    from .allotment_predictor import AllotmentPredictor
+    from .a_b_group_strategy import ABGroupStrategyAnalyzer
+    from .greenshoe_analyzer import GreenshoeAnalyzer
+    from .grey_market_signal import GreyMarketSignalAnalyzer
+    from .ipo_calendar import IPOCalendarCalculator
+    from .sell_timing_advisor import SellTimingAdvisor
+    
+    over_sub = ipo_data.get('over_sub_ratio') or ipo_data.get('forecast_over_sub_ratio')
+    try:
+        over_sub = float(over_sub) if over_sub else None
+    except (TypeError, ValueError):
+        over_sub = None
+    
+    allotment_predictor = AllotmentPredictor()
+    allotment_prediction = allotment_predictor.predict_one_lot_allotment(over_sub)
+    group_allotment = allotment_predictor.predict_group_allotment(over_sub)
+    steady_capital = allotment_predictor.predict_steady_one_lot_capital(over_sub)
+    
+    prospectus_info['allotment_prediction'] = {
+        'one_lot_rate_min': allotment_prediction.one_lot_rate_min,
+        'one_lot_rate_max': allotment_prediction.one_lot_rate_max,
+        'heat_label': allotment_prediction.heat_label,
+        'detail': allotment_prediction.detail,
+        'group_a': {
+            'one_lot_rate_min': group_allotment.get('group_a_one_lot_rate_min'),
+            'one_lot_rate_max': group_allotment.get('group_a_one_lot_rate_max'),
+        },
+        'group_b': {
+            'one_lot_rate_min': group_allotment.get('group_b_one_lot_rate_min'),
+            'one_lot_rate_max': group_allotment.get('group_b_one_lot_rate_max'),
+            'multiplier': group_allotment.get('group_b_multiplier'),
+        },
+        'steady_one_lot': steady_capital,
+    }
+    
+    ab_strategy = ABGroupStrategyAnalyzer()
+    ab_result = ab_strategy.analyze(
+        over_sub_ratio=over_sub,
+        public_offer_shares=prospectus_info.get('public_offer_shares'),
+        lot_size=prospectus_info.get('lot_size'),
+    )
+    prospectus_info['ab_group_strategy'] = ab_result
+    
+    greenshoe = GreenshoeAnalyzer()
+    greenshoe_result = greenshoe.analyze(prospectus_info)
+    prospectus_info['greenshoe'] = greenshoe_result
+    
+    # 暗盘交易信号（如果有暗盘数据）
+    post_listing = ipo_data.get('post_listing') or prospectus_info.get('post_listing') or {}
+    grey_market = post_listing.get('grey_market', {})
+    if grey_market.get('status') == 'ok' and grey_market.get('price'):
+        grey_analyzer = GreyMarketSignalAnalyzer()
+        grey_signal = grey_analyzer.analyze(
+            grey_price=grey_market.get('price'),
+            offer_price=ipo_data.get('offer_price') or prospectus_info.get('offer_price'),
+            grey_volume=grey_market.get('volume'),
+            public_offer_shares=prospectus_info.get('public_offer_shares'),
+        )
+        prospectus_info['grey_market_signal'] = {
+            'change_pct': grey_signal.change_pct,
+            'signal_strength': grey_signal.signal_strength,
+            'score_adjustment': grey_signal.score_adjustment,
+            'volume_ratio_pct': grey_signal.volume_ratio_pct,
+            'volume_label': grey_signal.volume_label,
+            'detail': grey_signal.detail,
+        }
+    
+    # 新股日历
+    calendar_calc = IPOCalendarCalculator()
+    calendar = calendar_calc.calculate(
+        apply_start_date=ipo_data.get('apply_start_date'),
+        apply_end_date=ipo_data.get('apply_end_date'),
+        listing_date=ipo_data.get('listing_date') or prospectus_info.get('listing_date'),
+        has_greenshoe=greenshoe_result.get('has_greenshoe'),
+    )
+    prospectus_info['ipo_calendar'] = calendar
+    
+    # 卖出时机建议
+    sell_advisor = SellTimingAdvisor()
+    sell_timing = sell_advisor.analyze(
+        sector=prospectus_info.get('sector'),
+        subsector=prospectus_info.get('peer_comparison', {}).get('subsector') if prospectus_info.get('peer_comparison') else None,
+        grey_market_change_pct=grey_market.get('change_pct') if grey_market.get('status') == 'ok' else None,
+        over_sub_ratio=over_sub,
+        cornerstone_quality=prospectus_info.get('cornerstone_analysis', {}).get('tier_label') if prospectus_info.get('cornerstone_analysis') else None,
+    )
+    prospectus_info['sell_timing'] = {
+        'recommended_hold_days': sell_timing.recommended_hold_days,
+        'sell_timing_label': sell_timing.sell_timing_label,
+        'confidence': sell_timing.confidence,
+        'reasoning': sell_timing.reasoning,
+        'detail': sell_timing.detail,
+    }
+    
+    logger.info(
+        "实战分析: 中签率=%s, 绿鞋=%s, 卖出建议=%s",
+        allotment_prediction.heat_label,
+        "有" if greenshoe_result.get("has_greenshoe") else "无" if greenshoe_result.get("has_greenshoe") is False else "未知",
+        sell_timing.sell_timing_label,
+    )
+
+
+def _calculate_final_score(scorer, quality_analyzer, signal_analyzer, ipo_data, prospectus_info, prospectus_text):
+    """评分管线主编排函数：按阶段调用各辅助函数。"""
+    _apply_final_price_basis(ipo_data, prospectus_info)
+
+    if prospectus_text and '_text_lower' not in prospectus_info:
+        prospectus_info['_text_lower'] = prospectus_text.lower()
+
+    with _PerfTimer("parallel_analyzers"):
+        _run_parallel_analyzers(prospectus_info, prospectus_text)
+    with _PerfTimer("peer_and_valuation"):
+        _run_peer_and_valuation(prospectus_info, prospectus_text, ipo_data)
+    with _PerfTimer("signal_and_quality"):
+        signal_result, stock_quality = _run_signal_and_quality(
+            signal_analyzer, quality_analyzer, ipo_data, prospectus_info, prospectus_text
+        )
+    with _PerfTimer("investskill_analyzers"):
+        _run_investskill_analyzers(prospectus_info)
+    with _PerfTimer("collect_errors"):
+        analyzer_errors = _collect_analyzer_errors(prospectus_info)
+    with _PerfTimer("market_context"):
+        _inject_market_context(prospectus_info, prospectus_text)
+    with _PerfTimer("practical_analysis"):
+        _run_practical_analysis(prospectus_info, ipo_data)
+    with _PerfTimer("scoring_and_risk"):
+        final_score, scoring, risk_penalty_result, analysis_mode = _apply_scoring_and_risk(
+            scorer, ipo_data, prospectus_info, signal_result
+        )
+    with _PerfTimer("normalize_output"):
+        _normalize_output_fields(
+            ipo_data, prospectus_info, scoring, risk_penalty_result,
+            signal_result, stock_quality, analysis_mode, analyzer_errors,
+        )
+
 
 def _run_scoring_pipeline(ipo_data, prospectus_info, prospectus_text, pdf_path=None):
     """统一评分管线：_calculate_final_score + _attach_debug_info + IPOData 规范化"""
-    scorer, quality_analyzer, advanced_analyzer = _init_analyzers()
-    _calculate_final_score(scorer, quality_analyzer, advanced_analyzer, ipo_data, prospectus_info, prospectus_text)
-    _attach_debug_info(ipo_data, pdf_path, prospectus_info, prospectus_text)
-    try:
-        from .models import IPOData
-        normalized = IPOData.from_dict(ipo_data)
-        if normalized is not None:
-            return normalized.to_dict(drop_runtime=False)
-    except (ValueError, TypeError, KeyError, AttributeError, ImportError) as e:
-        logger.warning("IPOData 模型规范化失败: %s，返回原始 dict", e)
-    return ipo_data
+    with _PerfTimer("scoring_pipeline_total"):
+        scorer, quality_analyzer, advanced_analyzer = _init_analyzers()
+        _calculate_final_score(scorer, quality_analyzer, advanced_analyzer, ipo_data, prospectus_info, prospectus_text)
+        _attach_debug_info(ipo_data, pdf_path, prospectus_info, prospectus_text)
+        try:
+            from .models import IPOData
+            normalized = IPOData.from_dict(ipo_data)
+            if normalized is not None:
+                return normalized.to_dict(drop_runtime=False)
+        except (ValueError, TypeError, KeyError, AttributeError, ImportError) as e:
+            logger.warning("IPOData 模型规范化失败: %s，返回原始 dict", e)
+        return ipo_data
 
 
 def _init_analyzers():
@@ -537,11 +1004,10 @@ def _init_analyzers():
 
 
 def _process_ipo(client, downloader, parser, ipo, output_dir, force_refresh=False):
-    ipo_data = _fetch_margin_data(client, ipo)
-    stock_code = ipo_data['hk_code']
-    company_name = ipo_data['company_name']
-
-    local_pdf = os.path.join(output_dir, f"{stock_code}_prospectus.pdf")
+    company_name = ipo.get('shortname', '') or ipo.get('shortName', '') or ipo.get('name', '')
+    stock_code = ipo.get('symbol', '') or ipo.get('stockCode', '')
+    safe_code = _sanitize_stock_code(stock_code)
+    local_pdf = os.path.join(output_dir, f"{safe_code}_prospectus.pdf")
 
     if force_refresh and os.path.exists(local_pdf):
         try:
@@ -553,11 +1019,14 @@ def _process_ipo(client, downloader, parser, ipo, output_dir, force_refresh=Fals
     if not force_refresh and os.path.exists(local_pdf):
         pdf_path = local_pdf
         logger.info(f"使用本地PDF: {local_pdf}")
+        ipo_data = _fetch_margin_data(client, ipo)
     else:
-        try:
-            pdf_path = downloader.download_from_hkex(stock_code, company_name)
-        except (ConnectionError, TimeoutError, OSError, ValueError) as e:
-            logger.warning(f"招股书下载异常: {e}")
+        with ThreadPoolExecutor(max_workers=2) as _exec:
+            margin_future = _exec.submit(client.fetch_margin_detail, stock_code)
+            pdf_future = _exec.submit(_try_download_pdf, downloader, stock_code, company_name)
+            margin_detail = margin_future.result()
+            pdf_path = pdf_future.result()
+        ipo_data = _fetch_margin_data(client, ipo, margin_detail=margin_detail)
 
     prospectus_info = {}
     if pdf_path and os.path.exists(pdf_path):
@@ -570,6 +1039,14 @@ def _process_ipo(client, downloader, parser, ipo, output_dir, force_refresh=Fals
 
     prospectus_text = prospectus_info.get('_extracted_text', '') or ""
     return _run_scoring_pipeline(ipo_data, prospectus_info, prospectus_text, pdf_path)
+
+
+def _try_download_pdf(downloader, stock_code, company_name):
+    try:
+        return downloader.download_from_hkex(stock_code, company_name)
+    except (ConnectionError, TimeoutError, OSError, ValueError) as e:
+        logger.warning(f"招股书下载异常: {e}")
+        return None
 
 
 def main():
@@ -734,6 +1211,25 @@ def _live_status(status, results=None, message=""):
     }
 
 
+def _refresh_live_blogger_consensus(results, output_dir="temp"):
+    if not results:
+        return
+
+    db_path = os.path.join(output_dir, "blogger_monitor.db")
+    service = BloggerMonitorService(db_path=db_path)
+
+    for ipo in results:
+        stock_code = str(ipo.get("hk_code", "") or "").strip()
+        company_name = str(ipo.get("company_name", "") or "").strip()
+        if not stock_code or not company_name:
+            continue
+        try:
+            logger.info("刷新博主观点: %s (%s)", company_name, stock_code)
+            service.run_full_pipeline(stock_code, company_name=company_name)
+        except Exception as e:
+            logger.warning("博主观点刷新失败 %s (%s): %s", company_name, stock_code, e)
+
+
 def analyze_live_ipos(output_dir="temp", force_refresh=False, return_status=False):
     results = []
     try:
@@ -759,20 +1255,48 @@ def analyze_live_ipos(output_dir="temp", force_refresh=False, return_status=Fals
                 except OSError:
                     pass
 
-        for ipo in live_ipos:
+        def _process_one(ipo):
             company_name = ipo.get('shortname', '') or ipo.get('shortName', '') or ipo.get('name', '')
             stock_code = ipo.get('symbol', '') or ipo.get('stockCode', '')
             logger.info("\n" + "="*60)
             logger.info("处理: %s (%s)", company_name, stock_code)
             logger.info("="*60)
             try:
-                ipo_data = _process_ipo(client, downloader, parser, ipo, output_dir, force_refresh=force_refresh)
-                results.append(ipo_data)
+                return _process_ipo(client, downloader, parser, ipo, output_dir, force_refresh=force_refresh)
             except (ValueError, TypeError, KeyError, ConnectionError, TimeoutError, OSError) as e:
                 logger.error(f"分析 {company_name} 失败: {e}")
-                continue
+                return None
 
-        results.sort(key=lambda x: x.get('score', 0), reverse=True)
+        max_workers = min(len(live_ipos), 3)
+        if max_workers <= 1:
+            for ipo in live_ipos:
+                ipo_data = _process_one(ipo)
+                if ipo_data:
+                    results.append(ipo_data)
+        else:
+            logger.info("并发处理 %d 只IPO（%d 线程）", len(live_ipos), max_workers)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(_process_one, ipo): ipo for ipo in live_ipos}
+                for future in as_completed(futures):
+                    ipo_data = future.result()
+                    if ipo_data:
+                        results.append(ipo_data)
+
+        def _sort_key(x):
+            """按截止时间排序：未截止的放前面（截止时间从近到远），已截止的放后面"""
+            from datetime import datetime
+            stock_code = str(x.get('hk_code') or x.get('stock_code') or '')
+            end_str = (x.get('apply_end_date') or '')[:10]
+            if end_str:
+                try:
+                    end_date = datetime.strptime(end_str, '%Y-%m-%d').date()
+                    now = datetime.now().date()
+                    return (0 if end_date >= now else 1, end_str, stock_code)
+                except ValueError:
+                    pass
+            return (1, '9999-99-99', stock_code)
+
+        results.sort(key=_sort_key)
     except (ValueError, TypeError, ConnectionError, TimeoutError, OSError) as e:
         logger.error(f"获取IPO列表失败: {e}")
         if return_status:
@@ -861,7 +1385,7 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
         stock_code: 股票代码（如 "09995"）
         company_name: 公司名称
         pdf_path: 本地PDF文件路径
-        uploaded_file: 上传的文件对象（如Streamlit UploadedFile），会先保存为临时文件
+        uploaded_file: 上传的文件对象，会先保存为临时文件
         historical_market_data: 历史热度数据字典，格式：
             {
                 "margin_total": 123.45,
@@ -911,6 +1435,7 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
     errors = []
     source_type = None
     pdf_path_final = pdf_path
+    _uploaded_temp_path = None
     downloader = None
 
     # 处理上传文件：先保存为临时PDF
@@ -919,6 +1444,7 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
         pdf_path_final = os.path.join(output_dir, temp_filename)
         with open(pdf_path_final, "wb") as f:
             f.write(uploaded_file.getbuffer())
+        _uploaded_temp_path = pdf_path_final
         source_type = 'uploaded_pdf'
     
     # 处理股票代码下载
@@ -929,6 +1455,11 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
             source_type = 'stock_code_download'
         except (ConnectionError, TimeoutError, OSError, ValueError) as e:
             errors.append(f"招股书下载失败: {str(e)}")
+            if _uploaded_temp_path:
+                try:
+                    os.remove(_uploaded_temp_path)
+                except OSError:
+                    pass
             return {
                 "status": "error",
                 "message": "无法自动下载招股书",
@@ -942,6 +1473,11 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
         source_type = 'local_pdf'
     
     else:
+        if _uploaded_temp_path:
+            try:
+                os.remove(_uploaded_temp_path)
+            except OSError:
+                pass
         return {
             "status": "error",
             "message": "未提供股票代码或PDF文件",
@@ -956,6 +1492,11 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
         prospectus_info = parser.parse_pdf_file(pdf_path_final, stock_code=stock_code, company_name=company_name)
     except (OSError, ValueError, TypeError) as e:
         errors.append(f"PDF解析失败: {str(e)}")
+        if _uploaded_temp_path:
+            try:
+                os.remove(_uploaded_temp_path)
+            except OSError:
+                pass
         return {
             "status": "error",
             "message": "PDF解析失败",
@@ -996,8 +1537,10 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
             if 'post_listing' in record:
                 ipo_data['post_listing'] = record['post_listing']
                 # 如果 post_listing 中有 actual_over_sub_ratio，优先使用
-                post_actual = record['post_listing'].get('final_over_sub_ratio') or record['post_listing'].get('actual_over_sub_ratio')
-                if post_actual and 'actual_over_sub_ratio' not in ipo_data:
+                post_actual = record['post_listing'].get('final_over_sub_ratio')
+                if post_actual is None:
+                    post_actual = record['post_listing'].get('actual_over_sub_ratio')
+                if post_actual is not None and 'actual_over_sub_ratio' not in ipo_data:
                     try:
                         ipo_data['actual_over_sub_ratio'] = float(post_actual)
                     except (ValueError, TypeError):
@@ -1090,6 +1633,11 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
         result = _run_scoring_pipeline(ipo_data, prospectus_info, prospectus_text, pdf_path_final)
     except (ValueError, TypeError, KeyError, AttributeError) as e:
         errors.append(f"评分计算失败: {str(e)}")
+        if _uploaded_temp_path:
+            try:
+                os.remove(_uploaded_temp_path)
+            except OSError:
+                pass
         return {
             "status": "error",
             "message": "评分计算失败",
@@ -1134,6 +1682,12 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
         suggestion = "建议人工复核分析结果"
     elif messages:
         message = "; ".join(messages)
+
+    if _uploaded_temp_path:
+        try:
+            os.remove(_uploaded_temp_path)
+        except OSError:
+            pass
 
     return {
         "status": status,

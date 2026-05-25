@@ -221,8 +221,18 @@ def classify_company(prospectus_info: dict, text: str = "") -> CompanyProfile:
         profile.is_profitable = net_profit > 0
         profile.is_unprofitable = net_profit <= 0
 
+    # 子行业回退：若 peer_comparison 已识别到 biotech 子行业，强制修正 sector
+    if subsector in _BIOTECH_SUBSECTORS:
+        sector = 'healthcare'
+        profile.sector = sector
+        profile.is_biotech = True
+        # 同步回写 prospectus_info，确保下游分析器使用正确的 sector
+        if isinstance(prospectus_info, dict):
+            prospectus_info['sector'] = sector
+
     # Biotech 判定
-    profile.is_biotech = _is_biotech(prospectus_info, text)
+    if not profile.is_biotech:
+        profile.is_biotech = _is_biotech(prospectus_info, text)
     if profile.is_biotech and _is_num(revenue) and revenue < SETTINGS.valuation.biotech_revenue_small:
         profile.is_low_revenue_biotech = True
         profile.revenue_quality = 'contains_upfront' if _text_hits(text, _LICENSE_UPFRONT_KEYWORDS) >= 2 else 'standard'

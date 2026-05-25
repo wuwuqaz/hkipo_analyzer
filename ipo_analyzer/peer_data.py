@@ -241,8 +241,27 @@ class PeerDataStore:
         return found
 
     def flatten_peers(self):
+        stale_after_days = 90
+        meta = (self.load() or {}).get("meta", {})
+        if meta.get("stale_after_days"):
+            try:
+                stale_after_days = int(meta["stale_after_days"])
+            except (ValueError, TypeError):
+                pass
+        today = date.today()
         rows = []
         for sec, sub, peer in self.iter_peers():
+            is_stale = False
+            if peer.get("needs_refresh"):
+                is_stale = True
+            else:
+                lc = peer.get("last_checked_at")
+                if lc:
+                    lc_dt = _parse_date(lc)
+                    if lc_dt and (today - lc_dt).days > stale_after_days:
+                        is_stale = True
+                if peer.get("ps") is None and peer.get("pe") is None and peer.get("type") == "listed":
+                    is_stale = True
             row = {
                 "sector": sec,
                 "subsector": sub,
@@ -256,8 +275,9 @@ class PeerDataStore:
                 "net_profit_million": peer.get("net_profit_million"),
                 "gross_margin_pct": peer.get("gross_margin_pct"),
                 "revenue_growth_pct": peer.get("revenue_growth_pct"),
-                "data_quality": peer.get("data_quality"),
+                "data_quality": peer.get("data_quality") or ("low" if (peer.get("ps") is None and peer.get("pe") is None) else "moderate"),
                 "needs_refresh": peer.get("needs_refresh", False),
+                "is_stale": is_stale,
                 "last_checked_at": peer.get("last_checked_at"),
                 "source_date": peer.get("source_date"),
                 "currency": peer.get("currency"),

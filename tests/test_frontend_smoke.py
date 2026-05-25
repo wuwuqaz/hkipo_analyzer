@@ -1,5 +1,6 @@
 import os
 import json
+import pytest
 import socket
 import subprocess
 import threading
@@ -70,6 +71,14 @@ class _FakeApiHandler(BaseHTTPRequestHandler):
 
 
 def test_frontend_homepage_smoke():
+    import shutil
+    if shutil.which("npm") is None:
+        pytest.skip("npm not found in PATH")
+    if not (FRONTEND_DIR / "node_modules").exists():
+        pytest.skip("frontend/node_modules not found; run npm install first")
+    # Avoid port conflicts with an existing Next.js dev server.
+    subprocess.run(["pkill", "-f", "next dev"], capture_output=True)
+    time.sleep(1)
     frontend_port = _find_free_port()
     api_port = _find_free_port()
 
@@ -99,7 +108,7 @@ def test_frontend_homepage_smoke():
 
     try:
         _wait_for_http(f"http://127.0.0.1:{api_port}/api/health", '"status": "ok"', timeout=10.0)
-        body = _wait_for_http(f"http://127.0.0.1:{frontend_port}/", "System Status", timeout=90.0)
+        body = _wait_for_http(f"http://127.0.0.1:{frontend_port}/", "HK IPO Analyzer", timeout=90.0)
         assert "HK IPO Analyzer" in body
     finally:
         frontend_process.terminate()

@@ -1,6 +1,7 @@
 """贝叶斯优化器：GP + EI 搜索最优五维权重"""
 import logging
 import math
+from math import erf
 import numpy as np
 from numpy.linalg import cholesky, solve
 
@@ -14,10 +15,10 @@ WEIGHT_KEYS = ["trade", "fundamental", "valuation", "theme", "data_quality"]
 N_DIM = len(WEIGHT_KEYS)
 
 
-def _lhs_sample(n, dim, lower=0.05, upper=0.80):
+def _lhs_sample(n, dim, lower=0.05, upper=0.80, rng=None):
     """Latin Hypercube Sampling"""
     samples = np.zeros((n, dim))
-    rng = np.random.default_rng(42)
+    rng = rng or np.random.RandomState(42)
     for d in range(dim):
         cut = np.linspace(0, 1, n + 1)
         for i in range(n):
@@ -75,10 +76,10 @@ def optimize_weights(
             "valuation": 0.25, "theme": 0.10, "data_quality": 0.05,
         }
 
-    np.random.seed(42)
+    rng = np.random.RandomState(42)
 
     logger.info("贝叶斯优化：LHS 初始采样 %d 组权重", initial_samples)
-    raw_samples = _lhs_sample(initial_samples, N_DIM, 0.05, 0.80)
+    raw_samples = _lhs_sample(initial_samples, N_DIM, 0.05, 0.80, rng=rng)
     X = []
     y = []
     for i in range(initial_samples):
@@ -118,7 +119,7 @@ def optimize_weights(
         y_norm = (y - y_mean) / y_std
 
         n_candidates = 500
-        candidates = _lhs_sample(n_candidates, N_DIM, 0.05, 0.80)
+        candidates = _lhs_sample(n_candidates, N_DIM, 0.05, 0.80, rng=rng)
         candidate_weights = []
         for i in range(n_candidates):
             raw = {WEIGHT_KEYS[d]: float(candidates[i, d]) for d in range(N_DIM)}
@@ -143,7 +144,6 @@ def optimize_weights(
                 ei_values[i] = 0.0
             else:
                 z = (mu - best_y * y_std - y_mean) / sigma if sigma > 1e-6 else 0.0
-                from math import erf
                 sqrt2 = math.sqrt(2.0)
                 cdf_z = 0.5 * (1.0 + erf(z / sqrt2))
                 phi_z = (1.0 / math.sqrt(2.0 * math.pi)) * math.exp(-0.5 * z * z)

@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from api.auth import require_api_token
 from api.config import APIConfig
@@ -9,6 +9,7 @@ from api.deps import get_config
 from api.schemas.analyze import (
     AnalyzeResultResponse,
     JobResponse,
+    JobsListResponse,
     JobStatusResponse,
     ReanalyzeRequest,
 )
@@ -22,12 +23,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analyze", tags=["analyze"])
 
 
-@router.post("/upload", response_model=JobResponse, dependencies=[Depends(require_api_token)])
+@router.post("/upload", response_model=JobResponse)
 async def upload_and_analyze(
-    background_tasks: BackgroundTasks,
     pdf: UploadFile = File(...),
     stock_code: Optional[str] = Form(None),
     company_name: Optional[str] = Form(None),
+    _token: str = Depends(require_api_token),
     config: APIConfig = Depends(get_config),
 ):
     if not pdf.filename or not pdf.filename.lower().endswith(".pdf"):
@@ -36,6 +37,10 @@ async def upload_and_analyze(
     file_bytes = await pdf.read()
     if len(file_bytes) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    max_size_bytes = config.max_upload_size_mb * 1024 * 1024
+    if len(file_bytes) > max_size_bytes:
+        raise HTTPException(status_code=413, detail=f"File size exceeds {config.max_upload_size_mb}MB limit")
 
     storage_svc = StorageService(config)
     upload_path = storage_svc.save_upload(file_bytes, pdf.filename)
@@ -48,14 +53,16 @@ async def upload_and_analyze(
         upload_path=str(upload_path),
     )
 
+    # Worker schedules its own asyncio task internally; no BackgroundTasks needed.
     run_upload_analysis(job["job_id"], str(upload_path), stock_code, company_name)
 
     return JobResponse(job_id=job["job_id"], status=JobStatus.QUEUED, created_at=job["created_at"])
 
 
-@router.post("/reanalyze", response_model=JobResponse, dependencies=[Depends(require_api_token)])
+@router.post("/reanalyze", response_model=JobResponse)
 async def reanalyze(
     request: ReanalyzeRequest,
+    _token: str = Depends(require_api_token),
     config: APIConfig = Depends(get_config),
 ):
     history_svc = HistoryService(str(config.db_path))
@@ -75,8 +82,39 @@ async def reanalyze(
     return JobResponse(job_id=job["job_id"], status=JobStatus.QUEUED, created_at=job["created_at"])
 
 
+@router.get("/jobs", response_model=JobsListResponse)
+async def list_jobs(
+    limit: int = 50,
+    offset: int = 0,
+    _token: str = Depends(require_api_token),
+    config: APIConfig = Depends(get_config),
+):
+    history_svc = HistoryService(str(config.db_path))
+    total = history_svc.count_jobs()
+    rows = history_svc.list_jobs(limit=limit, offset=offset)
+    jobs = [
+        JobStatusResponse(
+            job_id=row["id"],
+            status=row["status"],
+            stock_code=row.get("stock_code"),
+            company_name=row.get("company_name"),
+            error=row.get("error"),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            started_at=row.get("started_at"),
+            finished_at=row.get("finished_at"),
+        )
+        for row in rows
+    ]
+    return JobsListResponse(jobs=jobs, total=total)
+
+
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
-async def get_job_status(job_id: str, config: APIConfig = Depends(get_config)):
+async def get_job_status(
+    job_id: str,
+    _token: str = Depends(require_api_token),
+    config: APIConfig = Depends(get_config),
+):
     history_svc = HistoryService(str(config.db_path))
     job = history_svc.get_job(job_id)
     if not job:
@@ -96,7 +134,11 @@ async def get_job_status(job_id: str, config: APIConfig = Depends(get_config)):
 
 
 @router.get("/jobs/{job_id}/result", response_model=AnalyzeResultResponse)
-async def get_job_result(job_id: str, config: APIConfig = Depends(get_config)):
+async def get_job_result(
+    job_id: str,
+    _token: str = Depends(require_api_token),
+    config: APIConfig = Depends(get_config),
+):
     history_svc = HistoryService(str(config.db_path))
     job = history_svc.get_job(job_id)
     if not job:

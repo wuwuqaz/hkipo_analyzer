@@ -1,11 +1,28 @@
 import re
+from functools import lru_cache
 
+# ---- 预编译正则 ----
+_RE_NON_DIGIT = re.compile(r'\D')
+_RE_NON_ALNUM = re.compile(r'[^a-zA-Z0-9]')
+_RE_WHITESPACE = re.compile(r'\s+')
+_RE_COMPANY_CLEAN = re.compile(r'[\s\-\u3000()（）]+')
+_RE_ALNUM = re.compile(r'[a-z0-9]')
+_RE_YEAR = re.compile(r'\b(20\d{2})\b')
+_RE_TABLE_NUM = re.compile(r'(\(?\s*[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?\s*\)?)')
+_RE_CONTROL_CHARS = re.compile(r'[\x00-\x1f\x7f-\x9f]+')
+_RE_CURRENCY_UNIT = re.compile(r'^(?:US\$|HK\$|US|HK|\$)', re.IGNORECASE)
+_RE_PARENS_NUM = re.compile(r'\([0-9]+\)')
+_RE_LEADING_PARENS_NUM = re.compile(r'^\([0-9]+\)\s*')
+_RE_HAS_LETTER = re.compile(r'[a-zA-Z]')
+_RE_PARENS_ENCLOSE = re.compile(r'\([^()]*\)')
+_RE_QUOTED = re.compile(r'"([^"]+)"')
+_RE_MILLION_BILLION = re.compile(r'(million|billion)', re.IGNORECASE)
 
+# _is_num
 def _is_num(x):
     return isinstance(x, (int, float))
 
-
-is_num = _is_num  # public alias
+is_num = _is_num
 
 
 def format_iso_date(value):
@@ -25,8 +42,8 @@ def _format_cornerstone_amount(row):
         return "--"
     currency = row.get('investment_currency')
     amount_m = row.get('investment_amount_m')
-    hkd_m = row.get('investment_amount_hkd_m') or row.get('total_investment_amount_hkd_m')
-    usd_m = row.get('total_investment_amount_usd_m')
+    hkd_m = row.get('investment_amount_hkd_m')
+    usd_m = row.get('investment_amount_usd_m')
     if _is_num(amount_m) and currency:
         if currency == 'HKD':
             return f"HK${amount_m:.1f}m"
@@ -52,8 +69,9 @@ def _contains_any(text, aliases):
         alias_lower = alias.lower().strip()
         if not alias_lower:
             continue
-        if re.search(r'[a-z0-9]', alias_lower):
-            if re.search(rf'(?<![a-z0-9]){re.escape(alias_lower)}(?![a-z0-9])', lower_text):
+        if _RE_ALNUM.search(alias_lower):
+            pattern = rf'(?<![a-z0-9]){re.escape(alias_lower)}(?![a-z0-9])'
+            if re.search(pattern, lower_text):
                 return True
         elif alias_lower in lower_text:
             return True
@@ -64,11 +82,9 @@ def _find_year_headers(lines, max_scan=8):
     found_years = []
     table_start = None
 
-    # 英文 + 中文财报表头关键词
     _HEADER_PATTERNS = [
         'year ended december 31', '31 december', 'for the years ended',
         'fiscal year ended', 'for the year ended',
-        # 中文招股书财年表头
         '止年度', '止十二个月', '止六個月', '止六个月',
         '止三個月', '止三个月', '12月31日',
     ]
@@ -79,7 +95,7 @@ def _find_year_headers(lines, max_scan=8):
             table_start = i
             found_years = []
             for j in range(i, min(i + max_scan, len(lines))):
-                for m in re.finditer(r'\b(20\d{2})\b', lines[j]):
+                for m in _RE_YEAR.finditer(lines[j]):
                     y = int(m.group(1))
                     if y not in found_years:
                         found_years.append(y)
@@ -87,10 +103,9 @@ def _find_year_headers(lines, max_scan=8):
                 break
             found_years = []
 
-    # 回退：未找到表头时，扫描全文寻找连续两年份的行
     if table_start is None:
         for i, line in enumerate(lines):
-            years_in_line = [int(m.group(1)) for m in re.finditer(r'\b(20\d{2})\b', line)]
+            years_in_line = [int(m.group(1)) for m in _RE_YEAR.finditer(line)]
             if len(set(years_in_line)) >= 2:
                 table_start = i
                 found_years = sorted(set(years_in_line))
@@ -101,7 +116,7 @@ def _find_year_headers(lines, max_scan=8):
 
 def _extract_table_nums(text_block, n_years, min_val=500):
     nums = []
-    for m in re.finditer(r'(\(?\s*[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?\s*\)?)', text_block):
+    for m in _RE_TABLE_NUM.finditer(text_block):
         raw = m.group(1).strip('( )')
         raw = raw.replace(',', '')
         try:
@@ -119,7 +134,6 @@ def _extract_table_nums(text_block, n_years, min_val=500):
 
 
 def extract_text_excerpts(text, patterns, *, window=220, max_chars=800, limit=3):
-    """Extract compact original-text snippets around the first few pattern hits."""
     if not text:
         return []
     snippets = []
@@ -135,7 +149,7 @@ def extract_text_excerpts(text, patterns, *, window=220, max_chars=800, limit=3)
             continue
         start = max(0, match.start() - window)
         end = min(len(text), match.end() + window)
-        snippet = re.sub(r'\s+', ' ', text[start:end]).strip()
+        snippet = _RE_WHITESPACE.sub(' ', text[start:end]).strip()
         if not snippet:
             continue
         key = snippet[:160].lower()
@@ -192,24 +206,30 @@ def _infer_sector(text):
     return max(scores, key=scores.get)
 
 
+@lru_cache(maxsize=128)
 def _normalize_company_name(company_name):
     normalized = company_name.upper()
     for suffix in ['－Ｗ', '－Ｐ', '－Ｂ', '-W', '-P', '-B', ' W', ' P', ' B']:
         normalized = normalized.replace(suffix, '')
-    normalized = re.sub(r'[\s\-\u3000()（）]+', '', normalized)
+    normalized = _RE_COMPANY_CLEAN.sub('', normalized)
     return normalized.strip()
 
 
+@lru_cache(maxsize=128)
 def _normalize_stock_code(stock_code):
-    code = re.sub(r'\D', '', str(stock_code or ''))
+    code = _RE_NON_DIGIT.sub('', str(stock_code or ''))
     return code.lstrip('0') or code
 
 
-_RUNTIME_ONLY_FIELDS = {'_extracted_text'}
+@lru_cache(maxsize=128)
+def _sanitize_stock_code(stock_code: str) -> str:
+    return _RE_NON_ALNUM.sub('', str(stock_code or ''))
+
+
+_RUNTIME_ONLY_FIELDS = {'_extracted_text', '_text_lower'}
 
 
 def strip_runtime_fields(value):
-    """Return a copy without large runtime-only fields before caching/exporting."""
     if isinstance(value, dict):
         return {
             key: strip_runtime_fields(item)
@@ -222,7 +242,6 @@ def strip_runtime_fields(value):
 
 
 def classify_market_heat(over_sub_ratio):
-    """根据超购倍数返回市场热度标签，消除多处重复的 if/elif 分类逻辑。"""
     from .settings import SETTINGS
     if over_sub_ratio is None:
         return None

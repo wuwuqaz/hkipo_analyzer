@@ -145,6 +145,27 @@ def test_market_cap_table_with_header_unit_extracted():
     assert info["market_cap_source"] == "company_shares_table"
 
 
+def test_chinese_offering_statistics_market_cap_not_overridden_by_offer_shares():
+    """中文全球发售统计中的股份市值应优先于全球发售股数×发售价。"""
+    from ipo_analyzer.prospectus_basic_extractor import extract_prospectus_basic_info
+
+    info = {}
+    text = """
+    全球發售統計數據
+    下表所有統計數據均基於假設全球發售已完成且根據全球發售發行73,427,550股股份
+    按發售價每股發售股份18.80港元計算
+    股份市值(1) . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8,776.6 百萬港元
+    """
+
+    extract_prospectus_basic_info(text, info)
+
+    assert info["offer_price"] == 18.8
+    assert info["global_offer_shares"] == 73427550
+    assert info["market_cap_hkd_million"] == 8776.6
+    assert info["market_cap_source"] == "company_shares_table_zh"
+    assert info["shares_in_issue_post_listing"] == 466840426
+
+
 def test_chapter_18c_public_offer_clawback_flag():
     """18C/特专科技 IPO 应标注公开发售可回拨至20%。"""
     from ipo_analyzer.prospectus_basic_extractor import extract_prospectus_basic_info
@@ -303,7 +324,9 @@ def test_signal_component_analyzer_biotech():
     }
     text = "18A biotech clinical stage AI drug delivery platform"
 
-    signal = SignalComponentAnalyzer().analyze(ipo, prospectus_info, text)
+    from unittest.mock import patch
+    with patch('ipo_analyzer.signal_analyzer.LiveMarketHeatAnalyzer.analyze', return_value={}):
+        signal = SignalComponentAnalyzer().analyze(ipo, prospectus_info, text)
     sb = signal.get('signal_breakdown', {})
 
     # 1. 不再输出独立 100 分“进阶框架”
@@ -372,7 +395,9 @@ def test_signal_component_analyzer_none_quant_count():
         "financial_data_quality_flags": [],
     }
 
-    signal = SignalComponentAnalyzer().analyze(ipo, prospectus_info, prospectus_info["_extracted_text"])
+    from unittest.mock import patch
+    with patch('ipo_analyzer.signal_analyzer.LiveMarketHeatAnalyzer.analyze', return_value={}):
+        signal = SignalComponentAnalyzer().analyze(ipo, prospectus_info, prospectus_info["_extracted_text"])
     valuation = signal.get("components", {}).get("valuation_framework", {})
 
     assert valuation.get("score") is not None, "应正常返回 valuation_framework 分数"
@@ -436,7 +461,9 @@ def test_advanced_framework_adjustment_removed():
         "financial_data_quality_flags": [],
     }
     text = "biotech"
-    signal = SignalComponentAnalyzer().analyze(ipo, prospectus_info, text)
+    from unittest.mock import patch
+    with patch('ipo_analyzer.signal_analyzer.LiveMarketHeatAnalyzer.analyze', return_value={}):
+        signal = SignalComponentAnalyzer().analyze(ipo, prospectus_info, text)
 
     # 兼容字段 advanced_framework_score 仍可输出，但不应作为独立主指标
     assert 'score' in signal  # 兼容
@@ -633,6 +660,7 @@ def test_jitai_pre_ipo_score_not_too_low():
     }
     text = '18C biotech AI drug delivery NanoForge LNP RNA targeted delivery pre-NDA'
 
+    from unittest.mock import patch
     from ipo_analyzer.scoring import ScoringSystem, SignalComponentAnalyzer, ProspectusQualityAnalyzer
     from ipo_analyzer.peer_comps import PeerComparableAnalyzer
     from ipo_analyzer.analyzers import ValuationAnalyzer
@@ -641,7 +669,9 @@ def test_jitai_pre_ipo_score_not_too_low():
     pi['peer_comparison'] = PeerComparableAnalyzer().analyze(pi, text, ipo)
     pi['valuation'] = ValuationAnalyzer().analyze(pi, text, ipo)
 
-    signal = SignalComponentAnalyzer().analyze(ipo, pi, text)
+    # mock 避免测试中触发 yfinance 网络请求
+    with patch('ipo_analyzer.signal_analyzer.LiveMarketHeatAnalyzer.analyze', return_value={}):
+        signal = SignalComponentAnalyzer().analyze(ipo, pi, text)
     quality = ProspectusQualityAnalyzer().analyze(pi)
     pi['stock_quality'] = quality
 
@@ -739,7 +769,9 @@ def test_jitai_hot_with_strong_cornerstone():
     pi['peer_comparison'] = PeerComparableAnalyzer().analyze(pi, text, ipo)
     pi['valuation'] = ValuationAnalyzer().analyze(pi, text, ipo)
 
-    signal = SignalComponentAnalyzer().analyze(ipo, pi, text)
+    from unittest.mock import patch
+    with patch('ipo_analyzer.signal_analyzer.LiveMarketHeatAnalyzer.analyze', return_value={}):
+        signal = SignalComponentAnalyzer().analyze(ipo, pi, text)
     quality = ProspectusQualityAnalyzer().analyze(pi)
     pi['stock_quality'] = quality
 
@@ -775,6 +807,41 @@ def test_yifei_no_cornerstone_misidentified():
     assert result.get('matched_investors') == [], f"无基石时 matched_investors 应为空，实际: {result.get('matched_investors')}"
     assert result.get('red_flags') == [], f"无基石时 red_flags 应为空，实际: {result.get('red_flags')}"
     print("✅ test_yifei_no_cornerstone_misidentified passed")
+
+
+def test_negative_cornerstone_sentence_not_treated_as_disclosure():
+    """否定句提到 cornerstone investors 时，不应被当作已披露基石章节。"""
+    from ipo_analyzer.cornerstone import CornerstoneAnalyzer
+
+    text = (
+        "The Company did not introduce any cornerstone investors in connection "
+        "with the Global Offering."
+    )
+
+    result = CornerstoneAnalyzer().analyze(text)
+
+    assert result.get('has_cornerstone_section') is False
+    assert result.get('score') == 0
+    assert result.get('label') == '未披露'
+    assert result.get('recommendation') == '无基石'
+
+
+def test_late_negative_cornerstone_sentence_not_treated_as_disclosure():
+    """长文本正文后段出现无基石否定句，也不应被当作基石章节。"""
+    from ipo_analyzer.cornerstone import CornerstoneAnalyzer
+
+    text = (
+        "\n".join(["ordinary prospectus content"] * 220)
+        + "\nThe Company did not introduce any cornerstone investors in connection "
+        "with the Global Offering.\n"
+        + "Other section\n" * 600
+    )
+
+    result = CornerstoneAnalyzer().analyze(text)
+
+    assert result.get('has_cornerstone_section') is False
+    assert result.get('score') == 0
+    assert result.get('label') == '未披露'
 
 
 def test_jitai_cornerstone_detected_correctly():
@@ -924,9 +991,9 @@ def test_no_heat_data_weight_profile():
 
     wp = result.get('weight_profile', {})
     assert wp.get('name') == 'prospectus_only', f"期望 prospectus_only，实际: {wp.get('name')}"
-    assert wp.get('weights', {}).get('trade') == 0.20, f"trade 权重应为 0.20，实际: {wp.get('weights', {}).get('trade')}"
-    assert wp.get('weights', {}).get('fundamental') == 0.35, f"fundamental 权重应为 0.35，实际: {wp.get('weights', {}).get('fundamental')}"
-    assert wp.get('weights', {}).get('data_quality') == 0.10, f"data_quality 权重应为 0.10，实际: {wp.get('weights', {}).get('data_quality')}"
+    assert wp.get('weights', {}).get('trade') == 0.15, f"trade 权重应为 0.15，实际: {wp.get('weights', {}).get('trade')}"
+    assert wp.get('weights', {}).get('fundamental') == 0.40, f"fundamental 权重应为 0.40，实际: {wp.get('weights', {}).get('fundamental')}"
+    assert wp.get('weights', {}).get('data_quality') == 0.05, f"data_quality 权重应为 0.05，实际: {wp.get('weights', {}).get('data_quality')}"
     assert wp.get('weights', {}).get('theme') == 0.15, f"theme 权重应为 0.15，实际: {wp.get('weights', {}).get('theme')}"
     assert "未检测到有效热度数据" in wp.get('reason', ''), f"reason 应说明未检测到热度数据: {wp.get('reason')}"
     print("✅ test_no_heat_data_weight_profile passed")
@@ -954,8 +1021,8 @@ def test_live_heat_weight_profile():
 
     wp = result.get('weight_profile', {})
     assert wp.get('name') == 'live_heat', f"期望 live_heat，实际: {wp.get('name')}"
-    assert wp.get('weights', {}).get('trade') == 0.35, f"trade 权重应为 0.35，实际: {wp.get('weights', {}).get('trade')}"
-    assert wp.get('weights', {}).get('fundamental') == 0.30, f"fundamental 权重应为 0.30，实际: {wp.get('weights', {}).get('fundamental')}"
+    assert wp.get('weights', {}).get('trade') == 0.25, f"trade 权重应为 0.25，实际: {wp.get('weights', {}).get('trade')}"
+    assert wp.get('weights', {}).get('fundamental') == 0.35, f"fundamental 权重应为 0.35，实际: {wp.get('weights', {}).get('fundamental')}"
     assert wp.get('weights', {}).get('data_quality') == 0.05, f"data_quality 权重应为 0.05，实际: {wp.get('weights', {}).get('data_quality')}"
     assert wp.get('weights', {}).get('theme') == 0.10, f"theme 权重应为 0.10，实际: {wp.get('weights', {}).get('theme')}"
     assert "检测到有效超购" in wp.get('reason', ''), f"reason 应说明检测到超购数据: {wp.get('reason')}"
@@ -1121,7 +1188,7 @@ def test_historical_actual_over_sub_ratio_source():
 
     wp = result.get('weight_profile', {})
     assert wp.get('name') == 'live_heat', f"期望 live_heat，实际: {wp.get('name')}"
-    assert wp.get('weights', {}).get('trade') == 0.35, "trade 权重应为 0.35"
+    assert wp.get('weights', {}).get('trade') == 0.25, "trade 权重应为 0.25"
     print("✅ test_historical_actual_over_sub_ratio_source passed")
 
 
@@ -1144,7 +1211,7 @@ def test_historical_forecast_over_sub_ratio_source():
 
     wp = result.get('weight_profile', {})
     assert wp.get('name') == 'live_heat', f"期望 live_heat，实际: {wp.get('name')}"
-    assert wp.get('weights', {}).get('trade') == 0.35, "trade 权重应为 0.35"
+    assert wp.get('weights', {}).get('trade') == 0.25, "trade 权重应为 0.25"
     print("✅ test_historical_forecast_over_sub_ratio_source passed")
 
 
@@ -1238,7 +1305,7 @@ def test_reanalysis_no_heat_data_uses_prospectus_only():
             'hk_code': '09995',
             'company_name': 'TestCo',
             'score': 58,
-            'weight_profile': {'name': 'prospectus_only', 'weights': {'trade': 0.20, 'theme': 0.15}},
+            'weight_profile': {'name': 'prospectus_only', 'weights': {'trade': 0.15, 'theme': 0.15}},
             '_reanalysis': {
                 'analysis_mode': 'reanalysis',
                 'heat_data_source': 'missing',
@@ -1251,7 +1318,7 @@ def test_reanalysis_no_heat_data_uses_prospectus_only():
         
         assert latest.get('heat_data_source') == 'missing'
         assert latest.get('weight_profile', {}).get('name') == 'prospectus_only'
-        assert latest.get('weight_profile', {}).get('weights', {}).get('trade') == 0.20
+        assert latest.get('weight_profile', {}).get('weights', {}).get('trade') == 0.15
         assert latest.get('weight_profile', {}).get('weights', {}).get('theme') == 0.15
         
         print("✅ test_reanalysis_no_heat_data_uses_prospectus_only passed")

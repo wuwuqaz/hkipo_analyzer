@@ -2,13 +2,36 @@ import copy
 import json
 import logging
 import os
-import tempfile
+import sqlite3
+from functools import lru_cache
 from datetime import date, datetime
 
-from .utils import strip_runtime_fields, classify_market_heat
+from .utils import strip_runtime_fields, classify_market_heat, _sanitize_stock_code
 from .settings import SETTINGS
+from .json_utils import fast_dump_file, fast_dumps
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=16)
+def _load_json_snapshot(path: str, mtime: float, size: int):
+    with open(path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def _json_to_db_record(item: dict) -> tuple:
+    """将 dict 转为 SQLite 行数据 (code, data_json, updated_at, has_post_listing, score)。"""
+    code = str((item or {}).get('hk_code') or (item or {}).get('stock_code') or '').strip()
+    if code.isdigit():
+        code = code.zfill(5)
+    updated_at = item.get('_archived_at') or item.get('_post_listing_updated_at') or datetime.now().isoformat()
+    has_post = 1 if item.get('post_listing') else 0
+    score = item.get('score')
+    try:
+        score = float(score) if score is not None else None
+    except (ValueError, TypeError):
+        score = None
+    return (code, fast_dumps(item, compact=False), updated_at, has_post, score)
 
 
 def _is_dict_effectively_empty(d: dict) -> bool:
@@ -35,16 +58,111 @@ class HistoryStore:
         self.history_dir = history_dir
         self.history_file = os.path.join(history_dir, 'ipo_history.json')
         self.reanalysis_dir = os.path.join(history_dir, 'reanalysis')
+        self.db_path = os.path.join(history_dir, 'history.db')
         os.makedirs(history_dir, exist_ok=True)
         os.makedirs(self.reanalysis_dir, exist_ok=True)
+        self._init_db()
+        self._migrate_from_json_if_needed()
+
+    # ------------------------------------------------------------------
+    # SQLite 存储层
+    # ------------------------------------------------------------------
+
+    def _init_db(self):
+        """初始化 SQLite 表结构。"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS local_ipo_history (
+                    code TEXT PRIMARY KEY,
+                    data_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    has_post_listing INTEGER DEFAULT 0,
+                    score REAL
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_updated_at ON local_ipo_history(updated_at)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_has_post_listing ON local_ipo_history(has_post_listing)
+            """)
+            conn.commit()
+
+    def _migrate_from_json_if_needed(self):
+        """如果 SQLite 为空且 JSON 文件存在，执行一次性迁移。"""
+        if not os.path.exists(self.history_file):
+            return
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM local_ipo_history")
+            if cursor.fetchone()[0] > 0:
+                return
+        try:
+            stat = os.stat(self.history_file)
+            records = copy.deepcopy(_load_json_snapshot(self.history_file, stat.st_mtime, stat.st_size))
+            if not isinstance(records, list):
+                return
+            with sqlite3.connect(self.db_path) as conn:
+                for item in records:
+                    if not isinstance(item, dict):
+                        continue
+                    code = str((item or {}).get('hk_code') or (item or {}).get('stock_code') or '').strip()
+                    if not code:
+                        continue
+                    if code.isdigit():
+                        code = code.zfill(5)
+                    row = _json_to_db_record(item)
+                    conn.execute(
+                        "INSERT OR REPLACE INTO local_ipo_history (code, data_json, updated_at, has_post_listing, score) VALUES (?, ?, ?, ?, ?)",
+                        row,
+                    )
+                conn.commit()
+            logger.info("历史库迁移完成: %d 条记录从 JSON 迁移到 SQLite", len(records))
+        except Exception as e:
+            logger.warning("JSON 到 SQLite 迁移失败: %s", e)
+
+    def _db_read_all(self):
+        """从 SQLite 读取所有记录。"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT data_json FROM local_ipo_history ORDER BY updated_at DESC")
+            rows = cursor.fetchall()
+        records = []
+        for (data_json,) in rows:
+            try:
+                item = json.loads(data_json)
+                if isinstance(item, dict):
+                    records.append(strip_runtime_fields(item))
+            except Exception:
+                continue
+        return records
+
+    def _db_write_all(self, records):
+        """批量写入 SQLite，同时保留 JSON 备份。"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM local_ipo_history")
+            for item in records:
+                if not isinstance(item, dict):
+                    continue
+                code = str((item or {}).get('hk_code') or (item or {}).get('stock_code') or '').strip()
+                if not code:
+                    continue
+                row = _json_to_db_record(item)
+                conn.execute(
+                    "INSERT OR REPLACE INTO local_ipo_history (code, data_json, updated_at, has_post_listing, score) VALUES (?, ?, ?, ?, ?)",
+                    row,
+                )
+            conn.commit()
+        # 保留 JSON 作为备份
+        fast_dump_file(self.history_file, records)
 
     def _get_reanalysis_latest_path(self, stock_code):
         """获取重新分析最新版本文件路径"""
-        return os.path.join(self.reanalysis_dir, f"{stock_code}_latest.json")
+        safe_code = _sanitize_stock_code(stock_code)
+        return os.path.join(self.reanalysis_dir, f"{safe_code}_latest.json")
 
     def _get_reanalysis_timestamp_path(self, stock_code, timestamp):
         """获取重新分析时间戳版本文件路径"""
-        return os.path.join(self.reanalysis_dir, f"{stock_code}_{timestamp}.json")
+        safe_code = _sanitize_stock_code(stock_code)
+        return os.path.join(self.reanalysis_dir, f"{safe_code}_{timestamp}.json")
 
     def _read_reanalysis_latest(self, stock_code):
         """读取上次重新分析结果"""
@@ -52,8 +170,8 @@ class HistoryStore:
         if not os.path.exists(latest_path):
             return None
         try:
-            with open(latest_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            stat = os.stat(latest_path)
+            return copy.deepcopy(_load_json_snapshot(latest_path, stat.st_mtime, stat.st_size))
         except Exception as e:
             logger.warning(f"读取reanalysis latest失败: {e}")
             return None
@@ -61,36 +179,14 @@ class HistoryStore:
     def _save_reanalysis_record(self, stock_code, record, timestamp):
         """保存重新分析记录（时间戳版本）"""
         timestamp_path = self._get_reanalysis_timestamp_path(stock_code, timestamp)
-        fd, tmp_file = tempfile.mkstemp(prefix=f'reanalysis_{stock_code}_', suffix='.tmp', dir=self.reanalysis_dir)
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                json.dump(record, f, ensure_ascii=False, indent=2, default=str)
-            os.replace(tmp_file, timestamp_path)
-            return timestamp_path
-        except Exception:
-            if os.path.exists(tmp_file):
-                try:
-                    os.remove(tmp_file)
-                except Exception:
-                    pass
-            raise
+        fast_dump_file(timestamp_path, record)
+        return timestamp_path
 
     def _save_reanalysis_latest(self, stock_code, record):
         """保存重新分析最新版本"""
         latest_path = self._get_reanalysis_latest_path(stock_code)
-        fd, tmp_file = tempfile.mkstemp(prefix=f'reanalysis_{stock_code}_latest_', suffix='.tmp', dir=self.reanalysis_dir)
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                json.dump(record, f, ensure_ascii=False, indent=2, default=str)
-            os.replace(tmp_file, latest_path)
-            return latest_path
-        except Exception:
-            if os.path.exists(tmp_file):
-                try:
-                    os.remove(tmp_file)
-                except Exception:
-                    pass
-            raise
+        fast_dump_file(latest_path, record)
+        return latest_path
 
     def _calculate_version_delta(self, previous_result, current_result):
         """计算版本对比delta"""
@@ -148,7 +244,8 @@ class HistoryStore:
             logger.warning("无法保存reanalysis记录：缺少股票代码")
             return None, None
         
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        now = datetime.now()
+        timestamp = now.strftime('%Y%m%d_%H%M%S')
         
         # 1. 先读取旧latest
         previous_result = self._read_reanalysis_latest(stock_code)
@@ -162,13 +259,15 @@ class HistoryStore:
             'stock_code': stock_code,
             'company_name': result.get('company_name'),
             'analysis_mode': reanalysis_info.get('analysis_mode', 'reanalysis'),
-            'reanalyzed_at': datetime.now().isoformat(),
+            'reanalyzed_at': now.isoformat(),
             'analyzer_version': self.HISTORY_VERSION,
             'source_version': SETTINGS.version if hasattr(SETTINGS, 'version') else 'unknown',
             'weight_profile': result.get('weight_profile'),
             'score': result.get('score'),
             'score_breakdown': {
                 'ipo_trade_score': result.get('ipo_trade_score'),
+                'strict_ipo_score': result.get('strict_ipo_score'),
+                'raw_trade_signal_score': result.get('raw_trade_signal_score'),
                 'long_term_score': result.get('long_term_score'),
                 'trade_score': result.get('trade_score'),
                 'fundamental_score': result.get('fundamental_score'),
@@ -235,6 +334,7 @@ class HistoryStore:
                 'stock_quality_score', 'score_reasons', 'score_breakdown',
                 'risk_penalty', 'risk_penalty_breakdown',
                 'trade_score', 'valuation_score', 'theme_score',
+                'strict_ipo_score', 'raw_trade_signal_score', 'strict_scoring_profile',
                 'weight_profile', 'debug_info', 'score_trace', 'penalty_reason',
                 'analysis_mode', 'over_sub_ratio', 'over_sub_ratio_source',
                 'market_heat', 'stock_quality', 'signal_breakdown',
@@ -274,8 +374,8 @@ class HistoryStore:
             if filename.startswith(f"{stock_code}_") and filename != f"{stock_code}_latest.json":
                 filepath = os.path.join(self.reanalysis_dir, filename)
                 try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        records.append(json.load(f))
+                    stat = os.stat(filepath)
+                    records.append(copy.deepcopy(_load_json_snapshot(filepath, stat.st_mtime, stat.st_size)))
                 except Exception as e:
                     logger.warning(f"读取reanalysis记录失败 {filepath}: {e}")
         
@@ -320,11 +420,16 @@ class HistoryStore:
         return end_date is not None and end_date >= date.today()
 
     def _read_all(self):
+        """优先从 SQLite 读取，失败时回退到 JSON。"""
+        try:
+            return self._db_read_all()
+        except Exception as e:
+            logger.warning("SQLite 读取失败，回退到 JSON: %s", e)
         if not os.path.exists(self.history_file):
             return []
         try:
-            with open(self.history_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            stat = os.stat(self.history_file)
+            data = copy.deepcopy(_load_json_snapshot(self.history_file, stat.st_mtime, stat.st_size))
             if not isinstance(data, list):
                 return []
             return [strip_runtime_fields(item) for item in data if isinstance(item, dict)]
@@ -333,18 +438,12 @@ class HistoryStore:
             return []
 
     def _write_all(self, records):
-        fd, tmp_file = tempfile.mkstemp(prefix='ipo_history_', suffix='.tmp', dir=self.history_dir)
+        """写入 SQLite（主存储）并保留 JSON 备份。"""
         try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                json.dump(records, f, ensure_ascii=False, indent=2, default=str)
-            os.replace(tmp_file, self.history_file)
-        except Exception:
-            if os.path.exists(tmp_file):
-                try:
-                    os.remove(tmp_file)
-                except Exception:
-                    pass
-            raise
+            self._db_write_all(records)
+        except Exception as e:
+            logger.warning("SQLite 写入失败，仅保留 JSON: %s", e)
+            fast_dump_file(self.history_file, records)
 
     def _sort_records(self, records):
         return sorted(
@@ -387,6 +486,12 @@ class HistoryStore:
                     item[field] = fr.get(field)
             if not item.get('post_listing') and fr.get('post_listing'):
                 item['post_listing'] = copy.deepcopy(fr['post_listing'])
+            # 恢复 _extracted_text：strip_runtime_fields 已剥离顶层文本，从 _full_result 恢复
+            if not item.get('prospectus_info', {}).get('_extracted_text'):
+                fr_pi = fr.get('prospectus_info', {})
+                extracted = fr_pi.get('_extracted_text', '') if isinstance(fr_pi, dict) else ''
+                if extracted and isinstance(item.get('prospectus_info'), dict):
+                    item['prospectus_info']['_extracted_text'] = extracted
 
         groups = {}
         for item in records:
@@ -417,6 +522,8 @@ class HistoryStore:
             base = copy.deepcopy(original_items[0]) if original_items else copy.deepcopy(group[0])
 
             if reanalysis_items:
+                # 按 reanalyzed_at 降序排序，取最新的记录
+                reanalysis_items.sort(key=lambda x: x.get('reanalyzed_at', ''), reverse=True)
                 ra = reanalysis_items[0]
                 # 总是合并市场数据
                 for field in _MARKET_FIELDS:
@@ -433,12 +540,16 @@ class HistoryStore:
                 ra_parse_ok = ra_prospectus.get('parse_success', False) or ra.get('score') is not None
                 if ra_parse_ok:
                     for field in ('score', 'trade_score', 'valuation_score', 'theme_score',
-                                  'ipo_trade_score', 'ipo_trade_label', 'long_term_score',
+                                  'ipo_trade_score', 'strict_ipo_score', 'raw_trade_signal_score',
+                                  'strict_scoring_profile', 'ipo_trade_label', 'long_term_score',
                                   'long_term_label', 'subscription_recommendation',
                                   'recommendation_reasons', 'subscription_score',
                                   'weight_profile', 'score_trace'):
                         if ra.get(field) is not None:
                             base[field] = ra.get(field)
+
+            for item in merged:
+                item.pop('_full_result', None)
 
             merged.append(base)
 
@@ -469,7 +580,9 @@ class HistoryStore:
             # 保护重新分析产生的数据不被缓存覆盖
             existing_record = existing.get(code, {})
             if existing_record.get('_reanalysis'):
-                for re_field in ('score', 'ipo_trade_score', 'long_term_score', 'trade_score',
+                for re_field in ('score', 'ipo_trade_score', 'strict_ipo_score',
+                                 'raw_trade_signal_score', 'strict_scoring_profile',
+                                 'long_term_score', 'trade_score',
                                  'fundamental_score', 'valuation_score', 'theme_score',
                                  'subscription_recommendation', 'recommendation_reasons',
                                  'score_reasons', 'actual_over_sub_ratio', 'over_sub_ratio_source'):
@@ -576,14 +689,17 @@ class HistoryStore:
         # _read_all 已剥离 _extracted_text，重读原始 JSON 恢复它以便评分重算
         saved_text = ''
         try:
-            with open(self.history_file, 'r', encoding='utf-8') as f:
-                raw_data = json.load(f)
+            stat = os.stat(self.history_file)
+            raw_data = copy.deepcopy(_load_json_snapshot(self.history_file, stat.st_mtime, stat.st_size))
+            code_normalized = code.zfill(5) if code.isdigit() else code
             for item in raw_data if isinstance(raw_data, list) else []:
-                if isinstance(item, dict) and item.get('hk_code') == stock_code:
-                    pi = item.get('prospectus_info', {})
-                    if isinstance(pi, dict):
-                        saved_text = pi.get('_extracted_text', '') or ''
-                    break
+                if isinstance(item, dict):
+                    item_code = str(item.get('hk_code', '')).zfill(5) if str(item.get('hk_code', '')).isdigit() else str(item.get('hk_code', ''))
+                    if item_code == code_normalized:
+                        pi = item.get('prospectus_info', {})
+                        if isinstance(pi, dict):
+                            saved_text = pi.get('_extracted_text', '') or ''
+                        break
         except Exception:
             pass
         if saved_text and isinstance(record.get('prospectus_info'), dict):
@@ -602,7 +718,7 @@ class HistoryStore:
         # 从 post_listing 数据中提取真实公配倍数，填充到 actual_over_sub_ratio
         # 始终用配发公告的真实值覆盖旧的估算值
         public_sub = post_listing.get('public_subscription_level') if post_listing else None
-        if public_sub:
+        if public_sub is not None:
             record['actual_over_sub_ratio'] = public_sub
             record['over_sub_ratio'] = public_sub
             record['over_sub_ratio_source'] = 'post_listing_actual'
@@ -611,4 +727,43 @@ class HistoryStore:
         
         existing[code] = record
         self._write_all(self._sort_records(existing.values()))
+        self._sync_post_listing_to_cache(code, record, post_listing)
         return record
+
+    def _sync_post_listing_to_cache(self, code, record, post_listing):
+        """将 post_listing 更新同步到 results_cache.json，确保首页显示最新数据。"""
+        import os
+        from datetime import datetime
+
+        cache_file = os.path.join(self.history_dir, 'results_cache.json')
+        if not os.path.exists(cache_file):
+            return
+
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                cached_data = json.load(f)
+            if not isinstance(cached_data, list):
+                return
+
+            normalized_code = code.zfill(5) if code.isdigit() else code
+            found = False
+            for item in cached_data:
+                if not isinstance(item, dict):
+                    continue
+                item_code = str(item.get('hk_code', '')).zfill(5) if str(item.get('hk_code', '')).isdigit() else str(item.get('hk_code', ''))
+                if item_code == normalized_code:
+                    item['post_listing'] = copy.deepcopy(record.get('post_listing', {}))
+                    if post_listing and post_listing.get('public_subscription_level') is not None:
+                        item['actual_over_sub_ratio'] = post_listing['public_subscription_level']
+                        item['over_sub_ratio'] = post_listing['public_subscription_level']
+                        item['over_sub_ratio_source'] = 'post_listing_actual'
+                        item['market_heat'] = classify_market_heat(post_listing['public_subscription_level'])
+                    item['_cached_at'] = datetime.now().isoformat()
+                    found = True
+                    break
+
+            if found:
+                fast_dump_file(cache_file, cached_data)
+                logger.info("已同步 post_listing 更新到 results_cache.json: %s", code)
+        except Exception as e:
+            logger.warning("同步 post_listing 到缓存文件失败: %s", e)

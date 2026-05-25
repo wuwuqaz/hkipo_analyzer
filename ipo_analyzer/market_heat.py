@@ -341,6 +341,17 @@ class LiveMarketHeatAnalyzer:
             snapshot.sector_board_source = board_info.get("sector_board_source", "none")
             snapshot.sector_board_confidence = board_info.get("sector_board_confidence", "missing")
             snapshot.sector_heat_detail = snapshot.sector_board_detail or "未获取到可比公司行情"
+            # Fallback: derive flow/momentum from board data when no peers available
+            board_flow = snapshot.sector_board_flow_label
+            board_change = board_info.get("sector_board_change_pct")
+            board_turnover = board_info.get("sector_board_turnover")
+            board_company_count = board_info.get("sector_board_company_count") or 0
+            snapshot.sector_flow_label = board_flow if board_flow != "缺失" else _label_from_flow(board_change, board_turnover, board_company_count)
+            snapshot.sector_flow_score = _score_from_flow_label(snapshot.sector_flow_label)
+            snapshot.sector_flow_detail = snapshot.sector_board_detail or "未获取到可比公司行情"
+            snapshot.sector_momentum_label = _label_from_momentum(board_change, board_turnover, board_company_count) if board_change is not None or board_turnover is not None else "缺失"
+            snapshot.sector_momentum_score = _score_from_momentum_label(snapshot.sector_momentum_label)
+            snapshot.sector_momentum_detail = snapshot.sector_board_detail or "未获取到可比公司行情"
             payload = snapshot.to_dict()
             _cache_set(cache_key, payload)
             return payload
@@ -397,11 +408,33 @@ class LiveMarketHeatAnalyzer:
                 sector_heat_source="eastmoney_push2" if any(q.get("source") == "eastmoney" for q in quotes) else "yfinance",
             )
         else:
+            board_change = board_info.get("sector_board_change_pct")
+            board_turnover = board_info.get("sector_board_turnover")
+            board_company_count = board_info.get("sector_board_company_count") or 0
+            fallback_samples = [
+                {
+                    "ticker": str(p.get("ticker") or ""),
+                    "name": p.get("name") or p.get("ticker") or "",
+                    "source": "local_peer_library",
+                }
+                for p in peers[:6]
+                if str(p.get("ticker") or "").strip() and str(p.get("ticker") or "").strip().upper() != "PRIVATE"
+            ]
+            flow_label = board_info.get("sector_board_flow_label")
+            if not flow_label or flow_label == "缺失":
+                flow_label = _label_from_flow(board_change, board_turnover, board_company_count)
+            momentum_label = _label_from_momentum(board_change, board_turnover, board_company_count) if board_change is not None or board_turnover is not None else "缺失"
             snapshot = MarketHeatSnapshot(
-                sector_heat_label="缺失",
+                sector_heat_label=board_info.get("sector_board_heat_label", "缺失"),
                 sector_heat_score=0,
-                sector_heat_detail=board_info.get("sector_board_detail") or "未获取到可比公司行情",
-                sector_heat_confidence="missing",
+                sector_heat_detail=(board_info.get("sector_board_detail") or "实时同行行情不可用，已降级使用本地同行库与板块热度") + "；实时同行行情不可用，已降级使用本地同行库",
+                sector_heat_confidence=board_info.get("sector_board_confidence", "local_peer_fallback"),
+                sector_flow_label=flow_label,
+                sector_flow_score=_score_from_flow_label(flow_label),
+                sector_flow_detail=board_info.get("sector_board_detail") or "实时同行行情不可用，使用板块资金流替代",
+                sector_momentum_label=momentum_label,
+                sector_momentum_score=_score_from_momentum_label(momentum_label),
+                sector_momentum_detail=board_info.get("sector_board_detail") or "实时同行行情不可用，使用板块动能替代",
                 sector_board_label=board_info.get("sector_board_label", "缺失"),
                 sector_board_type=board_info.get("sector_board_type", "缺失"),
                 sector_board_change_pct=board_info.get("sector_board_change_pct"),
@@ -413,8 +446,8 @@ class LiveMarketHeatAnalyzer:
                 sector_board_source=board_info.get("sector_board_source", "none"),
                 sector_board_confidence=board_info.get("sector_board_confidence", "missing"),
                 sector_peer_count=0,
-                sector_samples=quotes[:6],
-                sector_heat_source="none",
+                sector_samples=fallback_samples or quotes[:6],
+                sector_heat_source="local_peer_library_fallback",
             )
 
         payload = snapshot.to_dict()

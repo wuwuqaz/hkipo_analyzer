@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Optional
 
 from api.config import APIConfig, get_config
+from ipo_analyzer.json_utils import fast_dump_file
+
+_RESULT_READ_CACHE: dict[str, tuple[float, dict]] = {}
+_READ_CACHE_MAX = 20
 
 
 class StorageService:
@@ -28,7 +32,7 @@ class StorageService:
         return self.uploads_dir / f"{file_uuid}.pdf"
 
     def result_path(self, stock_code: str, timestamp: str) -> Path:
-        safe_code = stock_code.replace("/", "_").replace("\\", "_")
+        safe_code = stock_code.replace("/", "_").replace("\\", "_").replace("..", "_")
         safe_ts = timestamp.replace(":", "-").replace(" ", "_")
         return self.results_dir / f"{safe_code}_{safe_ts}.json"
 
@@ -43,14 +47,44 @@ class StorageService:
         self.ensure_dirs()
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = self.result_path(stock_code, ts)
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        fast_dump_file(str(path), data)
         return path
 
+    def validate_path(self, file_path: str) -> Path:
+        p = Path(file_path).resolve()
+        base = self.base.resolve()
+        try:
+            p.relative_to(base)
+        except ValueError:
+            raise ValueError("Path traversal detected")
+        return p
+
     def read_result(self, result_path: str) -> dict:
-        p = Path(result_path)
+        p = self.validate_path(result_path)
         if not p.exists():
             raise FileNotFoundError(f"Result file not found: {p}")
-        return json.loads(p.read_text(encoding="utf-8"))
+
+        key = str(p)
+        try:
+            mtime = p.stat().st_mtime
+            cached = _RESULT_READ_CACHE.get(key)
+            if cached and cached[0] == mtime:
+                return cached[1]
+        except OSError:
+            pass
+
+        data = json.loads(p.read_text(encoding="utf-8"))
+
+        try:
+            mtime = p.stat().st_mtime
+            if len(_RESULT_READ_CACHE) >= _READ_CACHE_MAX:
+                oldest_key = next(iter(_RESULT_READ_CACHE))
+                del _RESULT_READ_CACHE[oldest_key]
+            _RESULT_READ_CACHE[key] = (mtime, data)
+        except OSError:
+            pass
+
+        return data
 
     def cleanup_tmp(self):
         if self.tmp_dir.exists():

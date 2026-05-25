@@ -16,6 +16,15 @@ from .settings import SETTINGS
 
 logger = logging.getLogger(__name__)
 
+_DL_RE_TR = re.compile(r'<tr\b[^>]*>(.*?)</tr>', re.IGNORECASE | re.DOTALL)
+_DL_RE_TD = re.compile(r'<td\b[^>]*>(.*?)</td>', re.IGNORECASE | re.DOTALL)
+_DL_RE_HREF = re.compile(r'href="([^"]+)"', re.IGNORECASE)
+_DL_RE_STRIP_HTML = re.compile(r'<[^>]+>')
+_DL_RE_WHITESPACE = re.compile(r'\s+')
+_DL_RE_NORMALIZE_TEXT = re.compile(r'[\s\-\u3000()（）]+')
+_DL_RE_VERIFICATION_TOKEN = re.compile(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"')
+_DL_RE_CHINESE_MARKER = re.compile(r'(_c\.pdf$|[_/-](?:c|tc|zh|chi)(?:[_./-]|$)|中文|繁體|繁体|招股章程)', re.IGNORECASE)
+
 
 def _retry_request(method, url, max_retries=None, backoff_factor=None, **kwargs):
     nc = SETTINGS.network
@@ -30,11 +39,6 @@ def _retry_request(method, url, max_retries=None, backoff_factor=None, **kwargs)
                 return response
             last_error = RuntimeError(f"HTTP {response.status_code}")
         except httpx.ConnectError as e:
-            # SSL 错误时回退到不验证证书
-            if kwargs.get('verify') is not False and 'ssl' in str(e).lower():
-                logger.warning("SSL验证失败，尝试跳过证书验证: %s", e)
-                kwargs['verify'] = False
-                continue
             last_error = e
         except Exception as e:
             last_error = e
@@ -66,7 +70,7 @@ class AiPOMarginClient:
         try:
             response = _retry_request(httpx.get, f"{self.base_url}/margin/index", headers=self.headers, timeout=SETTINGS.network.default_timeout)
             if response.status_code == 200:
-                match = re.search(r'name="__RequestVerificationToken"\s+type="hidden"\s+value="([^"]+)"', response.text)
+                match = _DL_RE_VERIFICATION_TOKEN.search(response.text)
                 if match:
                     self.token = match.group(1).strip()
                     return True
@@ -177,8 +181,13 @@ class AiPOMarginClient:
 
 class ProspectusDownloader:
     """招股书下载器"""
-    
-    def __init__(self, cache_dir='/tmp/hkipo_prospectus'):
+
+    _listing_cache = {}
+
+    def __init__(self, cache_dir=None):
+        if cache_dir is None:
+            import tempfile
+            cache_dir = os.path.join(tempfile.gettempdir(), "hkipo_prospectus")
         self.cache_dir = cache_dir
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
@@ -190,38 +199,61 @@ class ProspectusDownloader:
 
     @staticmethod
     def _strip_html(text):
-        text = re.sub(r'<[^>]+>', ' ', text or '')
+        text = _DL_RE_STRIP_HTML.sub(' ', text or '')
         text = unescape(text)
-        return re.sub(r'\s+', ' ', text).strip()
+        return _DL_RE_WHITESPACE.sub(' ', text).strip()
 
     def _fetch_new_listing_rows(self, page_url):
-        """抓取新上市信息页的表格行"""
+        """抓取新上市信息页的表格行（带缓存）"""
+        if page_url in self._listing_cache:
+            return self._listing_cache[page_url]
         try:
             response = _retry_request(httpx.get, page_url, headers=self.headers, timeout=SETTINGS.network.default_timeout, follow_redirects=True)
             if response.status_code != 200:
+                self._listing_cache[page_url] = []
                 return []
 
             html = response.text
             rows = []
-            for row_html in re.findall(r'<tr\b[^>]*>(.*?)</tr>', html, re.IGNORECASE | re.DOTALL):
-                cells = re.findall(r'<td\b[^>]*>(.*?)</td>', row_html, re.IGNORECASE | re.DOTALL)
+            for row_html in _DL_RE_TR.findall(html):
+                cells = _DL_RE_TD.findall(row_html)
                 if len(cells) < 4:
                     continue
 
                 row = {
                     'stock_code': self._strip_html(cells[0]),
                     'stock_name': self._strip_html(cells[1]),
-                    'announcement_links': re.findall(r'href="([^"]+)"', cells[2], re.IGNORECASE),
-                    'prospectus_links': re.findall(r'href="([^"]+)"', cells[3], re.IGNORECASE),
-                    'allotment_links': re.findall(r'href="([^"]+)"', cells[4], re.IGNORECASE) if len(cells) > 4 else [],
+                    'announcement_links': _DL_RE_HREF.findall(cells[2]),
+                    'prospectus_links': _DL_RE_HREF.findall(cells[3]),
+                    'allotment_links': _DL_RE_HREF.findall(cells[4]) if len(cells) > 4 else [],
                     'raw_html': row_html,
                 }
                 rows.append(row)
+            self._listing_cache[page_url] = rows
             return rows
         except Exception as e:
             logger = logging.getLogger(__name__)
             logger.warning(f"_fetch_new_listing_rows 失败 ({page_url}): {e}")
+            self._listing_cache[page_url] = []
             return []
+
+    @staticmethod
+    def _new_listing_page_urls():
+        """港交所新上市页 URL，中文优先，英文作为回退。"""
+        return [
+            "https://www2.hkexnews.hk/New-Listings/New-Listing-Information/Main-Board?sc_lang=zh-HK",
+            "https://www2.hkexnews.hk/New-Listings/New-Listing-Information/GEM?sc_lang=zh-HK",
+            "https://www2.hkexnews.hk/New-Listings/New-Listing-Information/Main-Board?sc_lang=en",
+            "https://www2.hkexnews.hk/New-Listings/New-Listing-Information/GEM?sc_lang=en",
+        ]
+
+    @staticmethod
+    def _is_chinese_pdf_candidate(href, text=""):
+        return bool(_DL_RE_CHINESE_MARKER.search(" ".join([href or "", text or ""])))
+
+    @classmethod
+    def _sort_prospectus_links(cls, hrefs):
+        return sorted(hrefs or [], key=lambda href: 0 if cls._is_chinese_pdf_candidate(href) else 1)
 
     def _find_prospectus_from_new_listing_page(self, stock_code, company_name, page_url):
         normalized_code = _normalize_stock_code(stock_code)
@@ -239,7 +271,7 @@ class ProspectusDownloader:
             if not (code_match or name_match):
                 continue
 
-            prospectus_links = row.get('prospectus_links', [])
+            prospectus_links = self._sort_prospectus_links(row.get('prospectus_links', []))
             for href in prospectus_links:
                 if not href:
                     continue
@@ -264,7 +296,7 @@ class ProspectusDownloader:
         for url in candidate_urls:
             try:
                 response = _retry_request(httpx.get, url, timeout=SETTINGS.network.pdf_download_timeout, follow_redirects=True)
-                if response.status_code == 200 and response.content[:4] == b'%PDF':
+                if response.status_code == 200 and response.content.lstrip()[:4] == b'%PDF':
                     return response, url
             except Exception as e:
                 last_error = e
@@ -277,7 +309,7 @@ class ProspectusDownloader:
                 os.close(fd)
                 cmd = [
                     'curl',
-                    '-kL',
+                    '-L',
                     '--silent',
                     '--show-error',
                     '--fail',
@@ -295,7 +327,7 @@ class ProspectusDownloader:
                         logger.warning("  ✗ PDF 超出大小限制: %.2f MB > %d MB", size_mb, max_size)
                         last_error = RuntimeError(f"PDF 超出大小限制: {size_mb:.1f} MB > {max_size} MB")
                         continue
-                    if content[:4] == b'%PDF':
+                    if content.lstrip()[:4] == b'%PDF':
                         return SimpleNamespace(content=content), url
                     last_error = RuntimeError("curl 下载结果不是有效 PDF")
             except Exception as e:
@@ -315,10 +347,7 @@ class ProspectusDownloader:
         """从港交所下载招股书"""
         logger.info("\n  从港交所搜索招股书: %s(%s)", company_name, stock_code)
 
-        listing_pages = [
-            "https://www2.hkexnews.hk/New-Listings/New-Listing-Information/Main-Board?sc_lang=en",
-            "https://www2.hkexnews.hk/New-Listings/New-Listing-Information/GEM?sc_lang=en",
-        ]
+        listing_pages = self._new_listing_page_urls()
 
         for page_url in listing_pages:
             try:
@@ -339,19 +368,23 @@ class ProspectusDownloader:
             except Exception as e:
                 logger.warning("  通过新上市信息页下载失败: %s", e)
 
+        from .playwright_browser import get_browser
+
+        browser = get_browser()
+        if browser is None:
+            return None
+
         try:
-            from playwright.sync_api import sync_playwright
+            page = browser.new_page()
             
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
-                
-                pages_to_try = [
-                    "https://www2.hkexnews.hk/new-listings/new-listing-information/main-board?sc_lang=en",
-                    "https://www2.hkexnews.hk/new-listings/new-listing-information/growth-enterprise-market?sc_lang=en",
-                ]
-                
-                for page_url in pages_to_try:
+            pages_to_try = [
+                "https://www2.hkexnews.hk/new-listings/new-listing-information/main-board?sc_lang=zh-HK",
+                "https://www2.hkexnews.hk/new-listings/new-listing-information/growth-enterprise-market?sc_lang=zh-HK",
+                "https://www2.hkexnews.hk/new-listings/new-listing-information/main-board?sc_lang=en",
+                "https://www2.hkexnews.hk/new-listings/new-listing-information/growth-enterprise-market?sc_lang=en",
+            ]
+            
+            for page_url in pages_to_try:
                     try:
                         page.goto(page_url, timeout=60000)
                         page.wait_for_load_state('networkidle', timeout=60000)
@@ -393,7 +426,7 @@ class ProspectusDownloader:
                                 link.get('text', ''),
                                 link.get('parentText', ''),
                             ]).upper()
-                            normalized_text = re.sub(r'[\s\-\u3000()（）]+', '', search_text)
+                            normalized_text = _DL_RE_NORMALIZE_TEXT.sub('', search_text)
                             href_name = _normalize_company_name(search_text)
 
                             is_prospectus = any(
@@ -407,6 +440,11 @@ class ProspectusDownloader:
 
                             if is_prospectus and (company_match or stock_match):
                                 prospectus_candidates.append(full_url)
+
+                        prospectus_candidates = sorted(
+                            prospectus_candidates,
+                            key=lambda url: 0 if self._is_chinese_pdf_candidate(url) else 1,
+                        )
 
                         for full_url in prospectus_candidates:
                             try:
@@ -428,9 +466,9 @@ class ProspectusDownloader:
                     except Exception as e:
                         logger.warning("  访问页面失败: %s", e)
                         continue
-                
-                browser.close()
-        except ImportError:
-            logger.info("  Playwright未安装，跳过港交所搜索")
+            
+            page.close()
+        except Exception as e:
+            logger.warning("  Playwright 页面操作失败: %s", e)
         
         return None

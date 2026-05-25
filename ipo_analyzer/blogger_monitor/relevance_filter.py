@@ -21,15 +21,22 @@ class RelevanceFilter:
         contains_opinion, opinion_reason = self._check_opinion(content)
         is_fresh, freshness_reason = self._check_freshness(article.published_at)
         is_quality, quality_reason = self._check_content_quality(content)
+        short_but_strong = (
+            ipo_relevant
+            and is_fresh
+            and not is_quality
+            and len(content) >= 50
+            and self._has_strong_ipo_context(article, stock_code, company_name)
+        )
 
-        is_relevant = ipo_relevant and is_fresh and is_quality
+        is_relevant = ipo_relevant and is_fresh and (is_quality or short_but_strong)
 
         reasons = []
         if not ipo_relevant:
             reasons.append(ipo_reason)
         if not is_fresh:
             reasons.append(freshness_reason)
-        if not is_quality:
+        if not is_quality and not short_but_strong:
             reasons.append(quality_reason)
         reason = "; ".join(reasons) if reasons else "通过所有过滤条件"
 
@@ -37,6 +44,8 @@ class RelevanceFilter:
             relevance_score += 0.1
         if is_quality:
             relevance_score += 0.1
+        elif short_but_strong:
+            relevance_score += 0.05
         relevance_score = max(0.0, min(1.0, relevance_score))
 
         logger.debug(
@@ -109,6 +118,16 @@ class RelevanceFilter:
         if len(content) < self.config.min_content_length:
             return False, f"内容长度不足{self.config.min_content_length}字"
         return True, ""
+
+    def _has_strong_ipo_context(self, article: SearchResultModel, stock_code: str, company_name: str) -> bool:
+        headline = f"{article.title} {article.snippet}"
+        has_company = company_name in headline
+        has_stock_code = stock_code in headline
+        matched_ipo_keywords = [kw for kw in self.config.ipo_keywords if kw in headline]
+        matched_opinion_keywords = [kw for kw in self.config.opinion_keywords if kw in headline]
+        return (has_company or has_stock_code) and bool(matched_ipo_keywords) and (
+            len(matched_ipo_keywords) >= 2 or bool(matched_opinion_keywords)
+        )
 
     @staticmethod
     def _parse_datetime(date_str: str) -> datetime:

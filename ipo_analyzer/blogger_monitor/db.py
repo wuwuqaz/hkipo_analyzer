@@ -85,6 +85,16 @@ _POSTS_JSON_FIELDS = frozenset()
 _ANALYSIS_JSON_FIELDS = frozenset({"main_reasons", "risk_points", "evidence_quotes"})
 _CONSENSUS_JSON_FIELDS = frozenset({"top_reasons", "top_risks", "representative_posts"})
 
+
+# SQLite does not support parameterized column names, so we maintain an
+# explicit allow-list and validate every column before use.
+def _validate_columns(columns: list[str], allowed: list[str]) -> list[str]:
+    allowed_set = set(allowed)
+    for c in columns:
+        if c not in allowed_set:
+            raise ValueError(f"Invalid column name: {c!r}")
+    return columns
+
 _POST_COLUMNS = [
     "stock_code",
     "keyword",
@@ -185,7 +195,7 @@ class BloggerMonitorDB:
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(str(self.db_path))
+            self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
@@ -236,13 +246,13 @@ class BloggerMonitorDB:
             data["analyzed_at"] = _now_iso()
         if "is_actionable" in data and isinstance(data["is_actionable"], bool):
             data["is_actionable"] = int(data["is_actionable"])
-        columns = [c for c in _ANALYSIS_COLUMNS if c in data]
+        columns = _validate_columns([c for c in _ANALYSIS_COLUMNS if c in data], _ANALYSIS_COLUMNS)
         placeholders = ", ".join(["?"] * len(columns))
         col_str = ", ".join(columns)
         values = [data[c] for c in columns]
         with self.get_cursor() as cursor:
             cursor.execute(
-                f"INSERT INTO blogger_analysis ({col_str}) VALUES ({placeholders})",
+                f"INSERT INTO blogger_analysis ({col_str}) VALUES ({placeholders})",  # nosec B608
                 values,
             )
             return cursor.lastrowid
@@ -251,15 +261,16 @@ class BloggerMonitorDB:
         data = _serialize_json_fields(consensus, _CONSENSUS_JSON_FIELDS)
         if "updated_at" not in data or not data["updated_at"]:
             data["updated_at"] = _now_iso()
-        columns = [c for c in _CONSENSUS_COLUMNS if c in data]
+        columns = _validate_columns([c for c in _CONSENSUS_COLUMNS if c in data], _CONSENSUS_COLUMNS)
         col_str = ", ".join(columns)
         placeholders = ", ".join(["?"] * len(columns))
         values = [data[c] for c in columns]
-        update_sets = ", ".join(f"{c} = excluded.{c}" for c in columns if c != "stock_code")
+        update_cols = _validate_columns([c for c in columns if c != "stock_code"], _CONSENSUS_COLUMNS)
+        update_sets = ", ".join(f"{c} = excluded.{c}" for c in update_cols)
         with self.get_cursor() as cursor:
             cursor.execute(
-                f"INSERT INTO ipo_blogger_consensus ({col_str}) VALUES ({placeholders}) "
-                f"ON CONFLICT(stock_code) DO UPDATE SET {update_sets}",
+                f"INSERT INTO ipo_blogger_consensus ({col_str}) VALUES ({placeholders}) "  # nosec B608
+                f"ON CONFLICT(stock_code) DO UPDATE SET {update_sets}",  # nosec B608
                 values,
             )
 

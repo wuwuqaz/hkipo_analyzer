@@ -28,6 +28,9 @@ def _make_analysis(stance="positive", stance_score=80, **overrides):
         "evidence_quotes": ["引用1", "引用2"],
         "title": "测试文章",
         "author": "博主A",
+        "source": "xueqiu.com",
+        "summary": "看好这只新股",
+        "apply_suggestion": "积极申购",
     }
     data.update(overrides)
     return data
@@ -202,6 +205,11 @@ class TestCalculateFullFlow:
         assert 0.0 <= result.consensus_score <= 100.0
         assert 0.0 <= result.coverage_score <= 100.0
         assert len(result.top_reasons) > 0
+        assert result.representative_posts
+        rep = result.representative_posts[0]
+        assert rep["source"] == "xueqiu.com"
+        assert rep["summary"] == "看好这只新股"
+        assert rep["apply_suggestion"] == "积极申购"
 
     def test_empty_analyses_and_posts(self, calculator):
         result = calculator.calculate("09999", [], [])

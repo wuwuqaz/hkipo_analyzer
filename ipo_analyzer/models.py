@@ -89,6 +89,7 @@ class ValuationResult:
     valuation_type: str = "absolute_only"
     valuation_framework_type: Optional[str] = None
     valuation_framework_label: Optional[str] = None
+    primary_valuation_metric: Optional[str] = None
     valuation_profitability_type: Optional[str] = None
     revenue_hkd_million: Optional[float] = None
     market_cap_hkd_million: Optional[float] = None
@@ -139,6 +140,10 @@ class BusinessSegment:
     growth_pct: Optional[float] = None
     share_pct: Optional[float] = None
     share_pct_previous: Optional[float] = None
+    gross_profit_latest: Optional[float] = None
+    gross_profit_previous: Optional[float] = None
+    gross_margin_pct: Optional[float] = None
+    gross_profit_share_pct: Optional[float] = None
     year_latest: Optional[int] = None
 
 
@@ -174,7 +179,11 @@ class BusinessBreakdown:
             return None
         # segments 需要手动转换
         seg_raw = data.get("segments", [])
-        segs = [BusinessSegment(**s) if isinstance(s, dict) else s for s in seg_raw]
+        seg_keys = {f.name for f in BusinessSegment.__dataclass_fields__.values()}
+        segs = [
+            BusinessSegment(**{k: v for k, v in s.items() if k in seg_keys}) if isinstance(s, dict) else s
+            for s in seg_raw
+        ]
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
         data = {k: v for k, v in data.items() if k != "segments" and k in valid_keys}
         return cls(segments=segs, **data)
@@ -338,6 +347,7 @@ class RiskCategory:
     risk_level: str = "低"
     evidence_count: int = 0
     evidence_sample: list[str] = field(default_factory=list)
+    tiered_evidence: list[dict[str, Any]] = field(default_factory=list)
     score_penalty: int = 0
 
 
@@ -355,7 +365,11 @@ class RiskFactorResult:
         if data is None:
             return None
         risks_raw = data.get("risks", {})
-        risks = {k: RiskCategory(**v) if isinstance(v, dict) else v for k, v in risks_raw.items()}
+        risk_keys = {f.name for f in RiskCategory.__dataclass_fields__.values()}
+        risks = {
+            k: RiskCategory(**{kk: vv for kk, vv in v.items() if kk in risk_keys}) if isinstance(v, dict) else v
+            for k, v in risks_raw.items()
+        }
         other = {k: v for k, v in data.items() if k != "risks"}
         return cls(risks=risks, **other)
 
@@ -749,6 +763,11 @@ class ProspectusInfo:
     sector_analysis: Optional[SectorAnalysisResult] = None
     # 公司简介
     company_profile: Optional[CompanyProfileResult] = None
+    # 质地增强分析器
+    management_governance: Optional[dict[str, Any]] = None
+    balance_sheet: Optional[dict[str, Any]] = None
+    profit_sustainability: Optional[dict[str, Any]] = None
+    investment_thesis: Optional[dict[str, Any]] = None
 
     def to_dict(self, drop_runtime: bool = True) -> dict[str, Any]:
         d = asdict(self)
@@ -793,6 +812,9 @@ class ProspectusInfo:
 @dataclass
 class ScoreBreakdownComponent:
     score: int = 0
+    max_score: int = 100
+    normalized_score: Optional[float] = None
+    weight: Optional[float] = None
     label: str = "缺失"
     detail: str = "未获取"
 
@@ -859,6 +881,7 @@ class IPOData:
     advanced_score_adjustment: int = 0
     # 交易信号拆解（供 UI 展示）
     signal_breakdown: dict[str, Any] = field(default_factory=dict)
+    investment_thesis: dict[str, Any] = field(default_factory=dict)
 
     # 商业分析
     profit_driver_segment: Optional[str] = None
@@ -925,7 +948,11 @@ class IPOData:
         # score_breakdown 手动处理
         sb_raw = data.get("score_breakdown", {})
         if isinstance(sb_raw, dict):
-            sb = {k: ScoreBreakdownComponent(**v) if isinstance(v, dict) else v for k, v in sb_raw.items()}
+            sb_keys = {f.name for f in ScoreBreakdownComponent.__dataclass_fields__.values()}
+            sb = {
+                k: ScoreBreakdownComponent(**{kk: vv for kk, vv in v.items() if kk in sb_keys}) if isinstance(v, dict) else v
+                for k, v in sb_raw.items()
+            }
         else:
             sb = {}
         data = {k: v for k, v in data.items() if k != "score_breakdown"}
@@ -987,4 +1014,30 @@ class ProfitSustainabilityResult:
     sustainability_score: int = 50
     label: str = "缺失"
     quality_flags: list[str] = field(default_factory=list)
+    confidence: str = "missing"
+
+# ---------------------------------------------------------------------------
+# 保荐人战绩 + 定价价差数据模型
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SponsorRecord:
+    """保荐人战绩记录"""
+    name: str = ""
+    tier: str = "C"
+    aliases: list[str] = field(default_factory=list)
+    recent_ipo_count: int = 0
+    break_rate: float = 0.50
+    avg_first_day_return: float = 0.0
+    avg_oversub_ratio: float = 0.0
+    sector_strength: list[str] = field(default_factory=list)
+    note: str = ""
+
+@dataclass
+class PricingGapResult:
+    """定价价差分析结果"""
+    mid_price: Optional[float] = None
+    pricing_gap: Optional[float] = None
+    gap_score: int = 0
+    gap_label: str = "数据不足"
     confidence: str = "missing"

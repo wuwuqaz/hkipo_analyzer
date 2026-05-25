@@ -7,7 +7,6 @@ import yaml
 
 from .collector import collect_backtest_dataset
 from .engine import run_backtest
-from .metrics import compute_objective
 from .optimizer import optimize_weights
 from .store import BacktestStore
 from ..settings import SETTINGS
@@ -29,7 +28,7 @@ def _get_default_weights():
 def cmd_run(args):
     bt = SETTINGS.backtest
     dataset = collect_backtest_dataset(
-        history_dir="temp",
+        history_dir=args.history_dir,
         data_quality_threshold=args.data_quality or bt.data_quality_threshold,
     )
     if len(dataset) < (args.min_samples or 1):
@@ -53,7 +52,7 @@ def cmd_run(args):
 def cmd_optimize(args):
     bt = SETTINGS.backtest
     dataset = collect_backtest_dataset(
-        history_dir="temp",
+        history_dir=args.history_dir,
         data_quality_threshold=args.data_quality or bt.data_quality_threshold,
     )
     min_samples = args.min_samples or bt.min_samples
@@ -73,7 +72,7 @@ def cmd_optimize(args):
         default_weights=default_weights,
     )
 
-    print(f"\n=== 优化结果 ===")
+    print("\n=== 优化结果 ===")
     print(f"最优权重: {opt_result.weights}")
     print(f"优化目标值: {opt_result.objective:.4f}")
     print(f"默认目标值: {opt_result.default_objective:.4f}")
@@ -137,7 +136,7 @@ def cmd_status(args):
     bt = SETTINGS.backtest
 
     dataset = collect_backtest_dataset(
-        history_dir="temp",
+        history_dir=args.history_dir,
         data_quality_threshold=bt.data_quality_threshold,
     )
     print(f"历史数据集: {len(dataset)} 条有效样本")
@@ -153,11 +152,11 @@ def cmd_status(args):
     if os.path.exists(opt_path):
         print(f"\n优化配置文件已存在: {opt_path}")
     else:
-        print(f"\n优化配置文件不存在，使用默认权重")
+        print("\n优化配置文件不存在，使用默认权重")
 
 
 def _print_result(result, weights):
-    print(f"=== 回测结果 ===")
+    print("=== 回测结果 ===")
     print(f"样本数: {result.sample_count}")
     print(f"权重: {weights}")
     print(f"Qualified (score≥50): {result.qualified_count}")
@@ -179,12 +178,14 @@ def build_parser():
     sub = parser.add_subparsers(dest="command", help="子命令")
 
     p_run = sub.add_parser("run", help="运行回测")
+    p_run.add_argument("--history-dir", default=os.getenv("BACKTEST_HISTORY_DIR", "storage"), help="历史数据目录")
     p_run.add_argument("--weights", type=str, help="权重 YAML 文件路径")
     p_run.add_argument("--min-samples", type=int, help="最小样本数")
     p_run.add_argument("--data-quality", type=int, help="数据质量阈值")
     p_run.add_argument("--no-save", action="store_true", help="不保存到数据库")
 
     p_opt = sub.add_parser("optimize", help="贝叶斯优化权重")
+    p_opt.add_argument("--history-dir", default=os.getenv("BACKTEST_HISTORY_DIR", "storage"), help="历史数据目录")
     p_opt.add_argument("--iterations", type=int, help="优化迭代轮数 (默认30)")
     p_opt.add_argument("--no-cv", action="store_true", help="禁用交叉验证")
     p_opt.add_argument("--min-samples", type=int, help="最小样本数")
@@ -195,7 +196,8 @@ def build_parser():
     p_report.add_argument("--last", action="store_true", help="最近一次（默认）")
     p_report.add_argument("--best", action="store_true", help="历史最优")
 
-    sub.add_parser("status", help="回测系统状态查询")
+    p_status = sub.add_parser("status", help="回测系统状态查询")
+    p_status.add_argument("--history-dir", default=os.getenv("BACKTEST_HISTORY_DIR", "storage"), help="历史数据目录")
 
     return parser
 

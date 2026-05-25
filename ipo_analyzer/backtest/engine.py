@@ -65,7 +65,7 @@ def run_backtest(dataset, weights, qualify_threshold=50):
 
     if q_count > 0:
         win_rate = sum(1 for ret in qualified_returns if ret >= 0) / q_count
-        expected_return = sum(qualified_returns) / n
+        expected_return = sum(qualified_returns) / q_count
         max_drawdown = abs(min(0.0, min(qualified_returns)))
         sharpe_like = (
             expected_return / statistics.stdev(qualified_returns)
