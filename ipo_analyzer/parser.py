@@ -771,38 +771,37 @@ class ProspectusParser:
 
         return self.parse_pdf_file(pdf_path, stock_code=stock_code, company_name=company_name)
     
-    def _extract_metric_with_fallback(self, text, info_key, year_bound_keywords, line_fallback_keywords, percent=False, sanity_check=None):
+    def _extract_metric_with_fallback(self, text, info, info_key, year_bound_keywords, line_fallback_keywords, percent=False, sanity_check=None):
         series = self._extract_year_bound_series(text, year_bound_keywords, percent=percent)
         use_fallback = False
-        if series and info_key not in self._current_info:
+        if series and info_key not in info:
             latest = series['latest_value']
             previous = series['previous_value']
             if sanity_check:
                 use_fallback = sanity_check(latest, previous)
             if not use_fallback:
-                self._current_info[info_key] = latest
-                self._current_info[f'{info_key}_y1'] = previous
-                self._current_info[f'{info_key}_year'] = series['latest_year']
-                self._current_info[f'{info_key}_y1_year'] = series['previous_year']
-                self._current_info['financial_extract_confidence'] = 'year_bound'
+                info[info_key] = latest
+                info[f'{info_key}_y1'] = previous
+                info[f'{info_key}_year'] = series['latest_year']
+                info[f'{info_key}_y1_year'] = series['previous_year']
+                info['financial_extract_confidence'] = 'year_bound'
                 return True
 
-        if (info_key not in self._current_info) and (not series or use_fallback):
+        if (info_key not in info) and (not series or use_fallback):
             values = self._extract_financial_series(text, line_fallback_keywords)
             if values:
                 if sanity_check and len(values) >= 2 and sanity_check(values[0], values[1]):
                     return False
-                self._current_info[info_key] = values[0]
+                info[info_key] = values[0]
                 if len(values) > 1:
-                    self._current_info[f'{info_key}_y1'] = values[1]
-                self._current_info.setdefault('financial_extract_confidence', 'line_fallback')
+                    info[f'{info_key}_y1'] = values[1]
+                info.setdefault('financial_extract_confidence', 'line_fallback')
                 return True
         return False
 
     def extract_info(self, text):
         """提取关键信息"""
         info = {}
-        self._current_info = info
 
         for pattern in _PRICE_PATTERNS:
             matches = pattern.findall(text)
@@ -855,14 +854,14 @@ class ProspectusParser:
                         break
 
         self._extract_metric_with_fallback(
-            text, 'revenue',
+            text, info, 'revenue',
             ['revenue', 'total revenue', 'sales', '收益', '收入', '營業收入', '营业收入'],
             ['revenue', 'total revenue', 'sales', 'turnover', '收益', '收入', '營業收入', '营业收入'],
             sanity_check=_revenue_sanity,
         )
 
         self._extract_metric_with_fallback(
-            text, 'net_profit',
+            text, info, 'net_profit',
             ['net profit', 'profit for the year', 'profit attributable', 'loss for the year', 'net loss',
              'profit/(loss) for the year', 'profit for the period', 'loss for the period',
              '净利润', '淨利潤', '純利', '年內利潤', '年內虧損', '年内利润', '年内亏损',
