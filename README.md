@@ -1,6 +1,6 @@
 # 港股 IPO 打新分析 (hkipo_analyzer)
 
-**当前版本：0.5.3-alpha；状态：开发中，仅供研究参考**
+**当前版本：0.5.6-alpha；状态：开发中，仅供研究参考**
 
 > 🤖 本项目由 AI（Claude Code + deepseek）全流程驱动完成，从需求分析、架构设计、代码实现到测试和部署，均为 AI 自主生成。
 
@@ -70,6 +70,8 @@ hkipo_analyzer/
 │   ├── models.py                   # 核心数据模型（dataclass + dict 兼容层）
 │   ├── settings.py                 # 配置与阈值集中管理
 │   ├── core.py                     # 核心编排（数据流 + 评分 pipeline）
+│   ├── _threadsafe_cache.py         # 线程安全 LRU 缓存（替代散落的 OrderedDict/dict）
+│   ├── _url_validation.py           # URL 域名白名单 + 文件名清理（防 SSRF/路径遍历）
 │   ├── peer_comps.py               # 同行对比与相对估值分析（懒加载 pyyaml）
 │   ├── peer_data.py                # 同行库数据服务层（YAML 读写/备份/行情更新）
 │   ├── downloader.py               # AiPO 孖展数据 + HKEX 招股书下载
@@ -161,6 +163,37 @@ hkipo_analyzer/
 综合结论覆盖"偏贵但可解释"、"赛道合理"、"PS辅助"等场景，避免成长型/稀缺赛道公司被简单阈值误判。
 
 ## 更新日志
+
+### 0.5.6-alpha — 2026-05-25
+
+- **concurrency: 线程安全缓存全量替换**：消除 FastAPI 并发场景下的数据竞争风险
+  - 新建 `_threadsafe_cache.py`：带锁 LRU 缓存 `ThreadSafeLRUCache`（maxsize + eviction + contains + len）
+  - `parser.py`：模块级 `OrderedDict` → `ThreadSafeLRUCache(maxsize=8)`，消除 `_PARSE_CACHE` 无锁访问
+  - `scoring.py`：全局 `_optimized_weights_cache` / `_optimized_weights_cache_time` → `ThreadSafeLRUCache`（单 key "weights" 缓存）
+  - `downloader.py`：类级 `_listing_cache: dict = {}` → `ThreadSafeLRUCache(maxsize=128)`
+  - `parser.py`：消除 `self._current_info` 可变实例状态，`_extract_metric_with_fallback` 改为接收 `info` 参数而非读写实例属性
+- **security: URL 校验防 SSRF**：新建 `_url_validation.py`
+  - `validate_download_url()`：域名白名单（仅允许 hkexnews.hk / hkex.com.hk / aipo.com 等），拒绝 ftp/未知域名
+  - `sanitize_filename()`：去除路径遍历字符（`../`）、多余点号、特殊字符
+  - `downloader.py` 集成：`_download_pdf_with_fallback`（httpx + curl）和 `_find_matching_row` 中所有网络 URL 均经校验
+- **security: API 认证与 CORS 加固**
+  - `auth.py`：`HKIPO_REQUIRE_API_TOKEN` 默认开启（`false` → `true`），显式设置 `false` 才关闭
+  - `main.py`：CORS `allow_methods=["*"]` → `["GET","POST","PUT","DELETE","OPTIONS"]`，`allow_headers=["*"]` → `["Authorization","Content-Type","X-API-Token"]`
+- **security: 文件上传安全**
+  - `analyze.py`：`await pdf.read()` 全量读入内存 → 1MB 分块流式读取 + 渐进大小检查
+  - `storage_service.py`：`save_upload` 集成 `sanitize_filename()`，记录文件名日志但不用于存储路径（存储路径使用 UUID）
+- **tests: 新增 20 个测试**：`test_threadsafe_cache.py`（7 个，含并发压力测试）、`test_url_validation.py`（13 个，覆盖合法/非法 URL 和文件名清理）
+- 全部变更零回归：480 通过（+20 新增），7 个预存失败不变
+
+### 0.5.5-alpha — 2026-05-25
+
+- **fix: 创想三维基石投资者解析与画像审核**：修复繁体中文基石表格中首行被表头吞掉的问题，创想三维基石名单由 14 家修正为 15 家，补回泰康人寿。
+- **data: 补全创想三维基石词库**：新增/补充泰康人寿繁体别名、中信兴业国际、Martis Fund、博约基金、GBAHIL、Apex、Oasis Fund、Jump Trading、Polymer、鼎鑫证券、Colloway、Seven Grand、ICSA/Millennium、Optimas Capital 等画像。
+- **fix: 基石评级口径修正**：创想三维当前复核结果为基石占比 49.9%，共 15 家基石（A 级 5 家+B 级 10 家），基石评分约 75/100、评级 A 级；摘要改为“多策略/对冲基金 + 量化做市商 + 国家队 + 保险长线资金 + 一线PE/VC + 产业资本；无国际主权”。
+- **fix: 行名直接匹配优先**：基石行名直接命中词库时优先于叙述窗口匹配，避免后续投资者描述污染当前行评级。
+- **fix: live 刷新防回退**：修复“更新IPO（使用缓存）”后，运行中 API 进程用旧基石词库/旧 PDF 解析缓存覆盖正确结果的问题；基石词库签名变更会触发热加载，PDF 解析缓存也纳入词库签名，live worker 在写入前会保留质量更高的既有基石分析。
+- **fix: 前端日期容错**：前端日期格式化遇到空值或非法日期时显示 `--`，避免 `Invalid time value` 运行时崩溃。
+- **tests: 新增创想三维基石回归测试**：覆盖繁体中文表头首行提取、传统字别名识别、新增机构画像分类、运行中词库 reload、live 刷新防回退。
 
 ### 0.5.4-alpha — 2026-05-22
 
