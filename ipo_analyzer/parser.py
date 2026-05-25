@@ -2,13 +2,14 @@ import re
 import os
 import logging
 import copy
-from collections import OrderedDict
 from datetime import datetime
 from typing import Optional
 
+from ._threadsafe_cache import ThreadSafeLRUCache
+
 from .utils import _is_num
 from .table_extraction import extract_financial_table_by_row
-from .cornerstone import CornerstoneAnalyzer
+from .cornerstone import CornerstoneAnalyzer, investor_profiles_signature
 from .text_extractor import extract_pdf_text
 from .identity_validator import validate_pdf_identity
 from .prospectus_basic_extractor import extract_prospectus_basic_info
@@ -133,8 +134,7 @@ _PARSER_CURRENCY_PATTERNS = [
 
 class ProspectusParser:
     """招股书解析器"""
-    _PARSE_CACHE: "OrderedDict[tuple[str, float, int, Optional[str], Optional[str]], dict]" = OrderedDict()
-    _PARSE_CACHE_MAX = 8
+    _PARSE_CACHE = ThreadSafeLRUCache(maxsize=8)
 
     def __init__(self, cache_dir=None):
         if cache_dir is None:
@@ -672,10 +672,16 @@ class ProspectusParser:
         cache_key = None
         try:
             stat = os.stat(pdf_path)
-            cache_key = (os.path.abspath(pdf_path), stat.st_mtime, stat.st_size, stock_code, company_name)
+            cache_key = (
+                os.path.abspath(pdf_path),
+                stat.st_mtime,
+                stat.st_size,
+                stock_code,
+                company_name,
+                investor_profiles_signature(),
+            )
             cached = self._PARSE_CACHE.get(cache_key)
             if cached is not None:
-                self._PARSE_CACHE.move_to_end(cache_key)
                 return copy.deepcopy(cached)
         except OSError:
             cache_key = None
@@ -752,9 +758,7 @@ class ProspectusParser:
         info['parse_success'] = True
 
         if cache_key is not None:
-            if len(self._PARSE_CACHE) >= self._PARSE_CACHE_MAX:
-                self._PARSE_CACHE.popitem(last=False)
-            self._PARSE_CACHE[cache_key] = copy.deepcopy(info)
+            self._PARSE_CACHE.put(cache_key, copy.deepcopy(info))
 
         return info
 
