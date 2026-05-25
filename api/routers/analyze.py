@@ -34,13 +34,22 @@ async def upload_and_analyze(
     if not pdf.filename or not pdf.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
 
-    file_bytes = await pdf.read()
-    if len(file_bytes) == 0:
+    max_size_bytes = config.max_upload_size_mb * 1024 * 1024
+    chunks = []
+    total_size = 0
+    while True:
+        chunk = await pdf.read(1024 * 1024)
+        if not chunk:
+            break
+        total_size += len(chunk)
+        if total_size > max_size_bytes:
+            raise HTTPException(status_code=413, detail=f"File size exceeds {config.max_upload_size_mb}MB limit")
+        chunks.append(chunk)
+
+    if total_size == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
-    max_size_bytes = config.max_upload_size_mb * 1024 * 1024
-    if len(file_bytes) > max_size_bytes:
-        raise HTTPException(status_code=413, detail=f"File size exceeds {config.max_upload_size_mb}MB limit")
+    file_bytes = b"".join(chunks)
 
     storage_svc = StorageService(config)
     upload_path = storage_svc.save_upload(file_bytes, pdf.filename)
