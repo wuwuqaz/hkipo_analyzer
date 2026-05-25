@@ -10,7 +10,7 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 
 def _token_required() -> bool:
     value = os.getenv("HKIPO_REQUIRE_API_TOKEN", "true").strip().lower()
-    return value not in {"0", "false", "off", "no"}
+    return value in {"1", "true", "yes", "on"}
 
 
 async def require_api_token(

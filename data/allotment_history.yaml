@@ -1,0 +1,74 @@
+# 港股IPO中签率历史数据
+# 来源: HKEX配发公告、雪球、TradeSmart等
+# 基于2024-2026年港股IPO统计
+
+allotment_ranges:
+  very_cold:
+    over_sub_min: 0
+    over_sub_max: 5
+    one_lot_rate_min: 80
+    one_lot_rate_max: 100
+    sample_count: 45
+    description: "冷门"
+  
+  cold:
+    over_sub_min: 5
+    over_sub_max: 15
+    one_lot_rate_min: 50
+    one_lot_rate_max: 80
+    sample_count: 62
+    description: "温和"
+  
+  normal:
+    over_sub_min: 15
+    over_sub_max: 50
+    one_lot_rate_min: 20
+    one_lot_rate_max: 50
+    sample_count: 88
+    description: "一般"
+  
+  hot:
+    over_sub_min: 50
+    over_sub_max: 100
+    one_lot_rate_min: 6
+    one_lot_rate_max: 20
+    sample_count: 54
+    description: "热门"
+  
+  very_hot:
+    over_sub_min: 100
+    over_sub_max: 500
+    one_lot_rate_min: 2
+    one_lot_rate_max: 10
+    sample_count: 76
+    description: "极热"
+  
+  crazy:
+    over_sub_min: 500
+    over_sub_max: 1000
+    one_lot_rate_min: 0.5
+    one_lot_rate_max: 3
+    sample_count: 32
+    description: "疯狂"
+  
+  extreme:
+    over_sub_min: 1000
+    over_sub_max: null
+    one_lot_rate_min: 0.03
+    one_lot_rate_max: 1
+    sample_count: 18
+    description: "极端"
+
+steady_one_lot_capital:
+  very_cold: 20000
+  cold: 100000
+  normal: 300000
+  hot: 1500000
+  very_hot: 3000000
+  crazy: 5000000
+  extreme: 10000000
+
+group_ratio:
+  group_b_multiplier: 1.5
+  group_a_tail_rate: 0.05
+  group_b_head_rate: 0.3

@@ -2,7 +2,7 @@ meta:
   model_version: cornerstone_v2_2026_05
   last_updated: '2026-05-16'
   description: 基石投资者数据库 — 用于港股IPO基石质量评估
-  total_investors: 71
+  total_investors: 83
 investors:
 - name: GIC
   tier: S
@@ -392,10 +392,13 @@ investors:
   - consumer
 - name: Millennium
   tier: A
-  category: 全球顶级长线资管
+  category: 全球多策略对冲基金
   aliases:
   - millennium
   - millennium management
+  - millennium capital
+  - integrated core strategies
+  - icsa
   - 千禧年
   - 千禧年基金
   role_note: 全球头部多策略对冲基金，港股基石参投活跃
@@ -665,7 +668,138 @@ investors:
   - taikang life insurance
   - 泰康人寿
   - 泰康人寿保险
+  - 泰康人壽
+  - 泰康人壽保險
   role_note: 头部保险资金，2025-2026年险资入场港股基石代表，长线属性强
+  sector_tags:
+  - all
+- name: 中信兴业国际
+  tier: B
+  category: 国资/产业资本
+  aliases:
+  - citic industrial international
+  - citic industry international
+  - 中信兴业国际
+  - 中信興業國際
+  - 中信興業
+  role_note: 中信股份间接全资投资控股平台，母集团覆盖综合金融、先进智能制造及先进材料等，国资产业资本属性明确
+  sector_tags:
+  - all
+  - hardtech
+- name: Martis Fund
+  tier: B
+  category: PE/VC/成长基金
+  aliases:
+  - martis fund
+  - martis fund l.p.
+  role_note: 专注医疗、TMT、科技及消费品行业投资的基金，科技消费赛道匹配度中等
+  sector_tags:
+  - hardtech
+  - healthcare
+  - consumer
+- name: 博约基金
+  tier: B
+  category: 国资/产业基金
+  aliases:
+  - boyu fund
+  - hong kong boyue
+  - 博约基金
+  - 博約基金
+  role_note: 深圳国资相关产业投贷基金，主要从事产业投资、投资管理及咨询服务，区域产业资本属性较强
+  sector_tags:
+  - all
+  - hardtech
+- name: GBAHIL
+  tier: B
+  category: 产业战略/区域基金
+  aliases:
+  - gbahil
+  - gba homeland
+  - gba homeland investment
+  - greater bay area homeland
+  - 大湾区共同家园
+  - 大灣區共同家園
+  role_note: 大湾区共同家园平台，聚焦科技创新、产业升级、智慧城市等，硬科技与区域产业协同匹配度较高
+  sector_tags:
+  - hardtech
+- name: Apex Insight
+  tier: B
+  category: 产业战略/消费电子
+  aliases:
+  - apex insight
+  - apex
+  - crestline yield
+  role_note: 有消费电子行业背景及人脉的投资人参与，对创想三维硬件消费电子属性有一定协同价值
+  sector_tags:
+  - hardtech
+  - consumer
+- name: Oasis Fund
+  tier: A
+  category: 全球多策略/事件驱动基金
+  aliases:
+  - oasis fund
+  - oasis investments
+  - oasis management
+  role_note: Oasis Management 管理的国际机构基金，重点布局亚洲并跨资本结构投资，独立机构背书较强
+  sector_tags:
+  - all
+- name: Jump Trading
+  tier: A
+  category: 量化做市商/自营交易
+  aliases:
+  - jump trading
+  - jump trading pacific
+  - jump trading group
+  role_note: 1999年成立的全球自营交易/量化交易集团，资本市场投资团队参与股权融资，流动性和定价锚信号较强
+  sector_tags:
+  - all
+- name: Polymer Capital
+  tier: B
+  category: 多策略对冲基金
+  aliases:
+  - polymer
+  - polymer asia fund
+  - polymer capital
+  role_note: 泛亚洲公募市场投资解决方案提供商，专注股票与量化策略，机构资金属性明确但产业协同有限
+  sector_tags:
+  - all
+- name: 鼎鑫证券
+  tier: B
+  category: 券商/资管平台
+  aliases:
+  - dingxin securities
+  - 鼎鑫证券
+  - 鼎鑫證券
+  role_note: 香港证监会持牌券商及资管平台，持第1/4/9类牌照，自营参与，背书偏财务型
+  sector_tags:
+  - all
+- name: Colloway
+  tier: B
+  category: 产业战略/家族办公室
+  aliases:
+  - colloway
+  - cj wang family office
+  role_note: 王旭宁家族办公室旗下全球投资实体，消费硬件产业背景明显，对智能硬件赛道有参考价值
+  sector_tags:
+  - hardtech
+  - consumer
+- name: Seven Grand
+  tier: B
+  category: 事件驱动基金
+  aliases:
+  - seven grand
+  - seven grand managers
+  role_note: 事件驱动投资管理人，关注IPO、基石份额、大宗交易、私募配售等新发行机会，偏财务投资者
+  sector_tags:
+  - all
+- name: Optimas Capital
+  tier: B
+  category: 亚洲资管平台
+  aliases:
+  - optimas capital
+  - optimas acm fund
+  - optimas capital management
+  role_note: 香港/新加坡持牌资管平台，管理对冲基金及科技成长型私募股权产品，兼具财务型和成长投资属性
   sector_tags:
   - all
 - name: 平安人寿

@@ -36,7 +36,7 @@ def test_peer_fallback_when_only_one_hk_peer():
     ]
     quant, qual, basis, q_count, ql_count = _split_peer_samples(mock_peers)
     assert q_count >= 2, f"期望 quantitative_peer_count >= 2，实际 {q_count}"
-    assert basis == "hk_plus_non_hk", f"期望 fallback 到 hk_plus_non_hk，实际 {basis}"
+    assert basis == "composite_listed_peers", f"期望 fallback 到 composite_listed_peers，实际 {basis}"
     # 不应触发强样本不足
     assert len(quant) >= 2
     print(f"✅ test_peer_fallback_when_only_one_hk_peer passed (q_count={q_count}, basis={basis})")

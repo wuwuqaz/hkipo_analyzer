@@ -1,0 +1,338 @@
+# GICS → peer_comps subsector mapping
+# 当招股书提供 GICS 行业代码时，用于自动匹配同行赛道
+# 最后更新: 2026-05
+
+meta:
+  source: GICS (Global Industry Classification Standard)
+  version: "2024-march"
+  description: "将 GICS 代码映射到 peer_comps.yaml 中的 subsector 键名"
+
+# --- 能源 (10) ---
+"1010":
+  sector_key: energy
+  subsector_key: green_energy_solar
+  note: "石油天然气 → 能源/光伏可能更相关"
+
+"101020":
+  sector_key: energy
+  subsector_key: green_energy_solar
+
+# --- 材料 (15) ---
+"1510":
+  sector_key: hardtech
+  subsector_key: ai_chip_semiconductor
+  note: "材料→化工，暂不精确匹配"
+
+"151040":
+  sector_key: hardtech
+  subsector_key: green_energy_solar
+  note: "多晶硅材料供应商"
+
+# --- 工业 (20) ---
+"2010":
+  sector_key: hardtech
+  subsector_key: ai_chip_semiconductor
+  note: "资本货物→工业设备"
+
+"201060":
+  sector_key: hardtech
+  subsector_key: robotics_visual_perception
+
+"20106010":
+  sector_key: hardtech
+  subsector_key: robotics_visual_perception
+
+"20106020":
+  sector_key: hardtech
+  subsector_key: robotics_visual_perception
+
+"2020":
+  sector_key: hardtech
+  subsector_key: robotics_visual_perception
+  note: "商业和专业服务"
+
+"2030":
+  sector_key: logistics_supply_chain
+  subsector_key: logistics_supply_chain
+
+"203020":
+  sector_key: logistics_supply_chain
+  subsector_key: logistics_supply_chain
+
+"2040":
+  sector_key: logistics_supply_chain
+  subsector_key: logistics_supply_chain
+
+# --- 可选消费 (25) ---
+"2510":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"251010":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"251020":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"2520":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"252010":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"252020":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"252030":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"2530":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"253010":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"253020":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"2550":
+  sector_key: consumer
+  subsector_key: ev_smart_driving
+
+"255030":
+  sector_key: consumer
+  subsector_key: ev_smart_driving
+
+"255040":
+  sector_key: consumer
+  subsector_key: ev_smart_driving
+
+# --- 必选消费 (30) ---
+"3010":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"301010":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"301020":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"3020":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"302010":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"302020":
+  sector_key: consumer
+  subsector_key: food_beverage_retail
+
+"3030":
+  sector_key: healthcare
+  subsector_key: drug_pharma
+
+"303010":
+  sector_key: healthcare
+  subsector_key: drug_pharma
+
+"303020":
+  sector_key: healthcare
+  subsector_key: drug_pharma
+
+"30302010":
+  sector_key: healthcare
+  subsector_key: medical_aesthetics_consumables
+
+"3510":
+  sector_key: healthcare
+  subsector_key: healthcare_it
+
+"351020":
+  sector_key: healthcare
+  subsector_key: healthcare_it
+
+# --- 医疗保健 (35) ---
+"351010":
+  sector_key: healthcare
+  subsector_key: drug_pharma
+
+"351020":
+  sector_key: healthcare
+  subsector_key: biopharmaceutical
+
+"351030":
+  sector_key: healthcare
+  subsector_key: medical_aesthetics_consumables
+  note: "医疗技术→含医美器械"
+
+"3520":
+  sector_key: healthcare
+  subsector_key: drug_pharma
+
+"352010":
+  sector_key: healthcare
+  subsector_key: drug_pharma
+
+"352020":
+  sector_key: healthcare
+  subsector_key: biopharmaceutical
+
+"352030":
+  sector_key: healthcare
+  subsector_key: drug_pharma
+  note: "生物技术→生物制药/CDMO"
+
+# --- 金融 (40) ---
+"4010":
+  sector_key: financials
+  subsector_key: property_management
+
+"4020":
+  sector_key: financials
+  subsector_key: property_management
+
+"402010":
+  sector_key: financials
+  subsector_key: property_management
+  note: "REITs"
+
+"402020":
+  sector_key: financials
+  subsector_key: property_management
+  note: "物业管理"
+
+# --- 信息技术 (45) ---
+"4510":
+  sector_key: hardtech
+  subsector_key: ai_chip_semiconductor
+
+"451020":
+  sector_key: hardtech
+  subsector_key: ai_chip_semiconductor
+
+"45102010":
+  sector_key: hardtech
+  subsector_key: ai_chip_semiconductor
+
+"45102020":
+  sector_key: hardtech
+  subsector_key: ai_chip_semiconductor
+
+"451030":
+  sector_key: hardtech
+  subsector_key: ai_chip_semiconductor
+
+"45103020":
+  sector_key: consumer
+  subsector_key: gaming_entertainment
+  note: "消费电子可关联游戏娱乐"
+
+"4520":
+  sector_key: hardtech
+  subsector_key: ai_chip_semiconductor
+
+"452010":
+  sector_key: hardtech
+  subsector_key: ai_chip_semiconductor
+
+"452020":
+  sector_key: hardtech
+  subsector_key: ai_chip_semiconductor
+
+"452030":
+  sector_key: hardtech
+  subsector_key: ai_chip_semiconductor
+
+"4530":
+  sector_key: hardtech
+  subsector_key: ai_chip_semiconductor
+
+# --- 通信服务 (50) ---
+"5010":
+  sector_key: consumer
+  subsector_key: gaming_entertainment
+
+"501010":
+  sector_key: consumer
+  subsector_key: gaming_entertainment
+
+"501020":
+  sector_key: consumer
+  subsector_key: gaming_entertainment
+
+"50102010":
+  sector_key: consumer
+  subsector_key: gaming_entertainment
+
+"50102020":
+  sector_key: consumer
+  subsector_key: gaming_entertainment
+
+"5020":
+  sector_key: consumer
+  subsector_key: gaming_entertainment
+
+"502010":
+  sector_key: consumer
+  subsector_key: gaming_entertainment
+
+"502030":
+  sector_key: consumer
+  subsector_key: gaming_entertainment
+  note: "电影娱乐"
+
+"5030":
+  sector_key: consumer
+  subsector_key: gaming_entertainment
+
+# --- 公用事业 (55) ---
+"5510":
+  sector_key: energy
+  subsector_key: green_energy_solar
+
+"551010":
+  sector_key: energy
+  subsector_key: green_energy_solar
+
+"551020":
+  sector_key: energy
+  subsector_key: green_energy_solar
+
+"551030":
+  sector_key: energy
+  subsector_key: green_energy_solar
+
+# --- 房地产 (60) ---
+"6010":
+  sector_key: financials
+  subsector_key: property_management
+
+"601010":
+  sector_key: financials
+  subsector_key: property_management
+
+"601020":
+  sector_key: financials
+  subsector_key: property_management
+
+"6020":
+  sector_key: financials
+  subsector_key: property_management
+
+"602010":
+  sector_key: financials
+  subsector_key: property_management

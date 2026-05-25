@@ -35,6 +35,7 @@ from ._company_profile import CompanyProfileAnalyzer  # noqa: E402
 from ._management_governance import ManagementGovernanceAnalyzer  # noqa: E402
 from ._balance_sheet import BalanceSheetAnalyzer  # noqa: E402
 from ._profit_sustainability import ProfitSustainabilityAnalyzer  # noqa: E402
+from ._earnings_quality import EarningsQualityAnalyzer  # noqa: E402
 from ._sponsor_track_record import SponsorTrackRecordAnalyzer  # noqa: E402
 from ._investment_thesis import InvestmentThesisAnalyzer  # noqa: E402
 
@@ -58,6 +59,7 @@ __all__ = [
     "ManagementGovernanceAnalyzer",
     "BalanceSheetAnalyzer",
     "ProfitSustainabilityAnalyzer",
+    "EarningsQualityAnalyzer",
     # 保荐人战绩
     "SponsorTrackRecordAnalyzer",
     "InvestmentThesisAnalyzer",

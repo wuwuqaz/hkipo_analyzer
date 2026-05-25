@@ -190,5 +190,5 @@ class ScoringResult:
     dimension_grades: dict[str, str] = field(default_factory=dict)
 
     score_trace: ScoreTrace = field(default_factory=ScoreTrace)
-    weight_profile: str = ""
+    weight_profile: dict[str, Any] = field(default_factory=dict)
     debug_info: dict[str, Any] = field(default_factory=dict)

@@ -234,6 +234,7 @@ class CustomerSupplierResult:
     concentration_risk_label: str = "缺失"
     concentration_score_penalty: int = 0
     confidence: str = "missing"
+    data_availability: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -270,6 +271,7 @@ class CashFlowResult:
     financing_dependency_label: str = "缺失"
     working_capital_risks: list[str] = field(default_factory=list)
     confidence: str = "missing"
+    data_availability: dict[str, Any] = field(default_factory=dict)
     evidence_excerpt: str = ""
     # 补充缺失字段
     adjusted_net_profit: Optional[float] = None
@@ -294,6 +296,7 @@ class CapacityResult:
     capacity_score: int = 0
     capacity_summary: str = "缺失"
     confidence: str = "missing"
+    data_availability: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -333,6 +336,7 @@ class RnDResult:
     hardtech_moat_reasons: list[str] = field(default_factory=list)
     hardtech_moat_score: int = 0
     evidence_excerpt: str = ""
+    data_availability: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -408,11 +412,24 @@ class PeerComparisonResult:
     semantic_id: str = "peer_comparison"
     relative_market_cap_pct: Optional[float] = None
     company_market_cap_vs_peer_pct: Optional[float] = None
+    market_concentration: Optional[dict[str, Any]] = None
+    relative_market_position: Optional[dict[str, Any]] = None
+    llm_market_share_data: list[dict[str, Any]] = field(default_factory=list)
+    market_share_data: list[dict[str, Any]] = field(default_factory=list)
+    market_size_data: list[dict[str, Any]] = field(default_factory=list)
+    dominant_segment: Optional[str] = None
+    dominant_share_pct: Optional[float] = None
+    scarcity_detail: Optional[str] = None
+    scarcity_specific_point: Optional[str] = None
+    scarcity_peers_count: Optional[int] = None
     quantitative_peers: list[dict[str, Any]] = field(default_factory=list)
     qualitative_peers: list[dict[str, Any]] = field(default_factory=list)
     quantitative_basis: str = "none"
     quantitative_peer_count: int = 0
     qualitative_peer_count: int = 0
+    comparison_mode: str = "by_market"
+    primary_comparison_market: str = "composite"
+    market_peer_stats: dict[str, Any] = field(default_factory=dict)
     peer_sample_warning: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:

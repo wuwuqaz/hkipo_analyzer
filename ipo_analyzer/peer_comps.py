@@ -121,6 +121,61 @@ def _build_peer_meta(peer_data):
     }
 
 
+_GICS_MAPPING_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data",
+    "gics_mapping.yaml",
+)
+
+_GICS_CACHE = None
+
+
+def _load_gics_mapping(path=None):
+    global _GICS_CACHE
+    if _GICS_CACHE is not None:
+        return _GICS_CACHE
+    path = path or _GICS_MAPPING_PATH
+    if not os.path.exists(path):
+        return {}
+    yaml_mod = _ensure_yaml()
+    if yaml_mod is None:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml_mod.safe_load(f)
+        mapping = {}
+        if isinstance(data, dict):
+            for code, val in data.items():
+                if code == "meta":
+                    continue
+                if isinstance(val, dict) and "sector_key" in val and "subsector_key" in val:
+                    mapping[str(code)] = (val["sector_key"], val["subsector_key"])
+        _GICS_CACHE = mapping
+        return mapping
+    except Exception as e:
+        logger.warning("GICS 映射加载失败: %s", e)
+        return {}
+
+
+def lookup_gics_subsector(gics_code):
+    """根据 GICS 代码查找对应的 peer_comps sector/subsector
+
+    支持 2/4/6/8 位 GICS 代码，优先匹配最长的代码（最精确）。
+    返回 (sector_key, subsector_key) 或 (None, None)
+    """
+    if not gics_code:
+        return None, None
+    code = str(gics_code).strip()
+    mapping = _load_gics_mapping()
+    if code in mapping:
+        return mapping[code]
+    for prefix_len in (6, 4, 2):
+        prefix = code[:prefix_len]
+        if prefix in mapping:
+            return mapping[prefix]
+    return None, None
+
+
 def _strip_corp_suffix(name):
     """去掉公司后缀，用于发行人别名匹配"""
     s = name.strip()
@@ -607,6 +662,10 @@ def _extract_keywords_subsector(prospectus_info, text, peer_data=None):
         peer_data = _load_peer_data()
     if not peer_data or not isinstance(peer_data, dict):
         return "unknown", None, None, [], 0
+
+    gics_code = prospectus_info.get("gics_industry_code") or prospectus_info.get("gics_sector_code")
+    gics_sec, gics_sub = lookup_gics_subsector(gics_code)
+
     biz = prospectus_info.get("business_breakdown", {}) or {}
     seg_text = " ".join(s.get("name", "") for s in biz.get("segments", []))
     rnd = prospectus_info.get("rnd_pipeline", {}) or {}
@@ -637,7 +696,6 @@ def _extract_keywords_subsector(prospectus_info, text, peer_data=None):
         for sk, sd, hits in matches:
             all_matches.append((sec_key, sk, sd, hits))
     if not all_matches:
-        # Fallback：需要至少2个关键词命中，或1个核心关键词（sector名称本身）
         for sec_key, sec_data in peer_data.items():
             if sec_key == "meta":
                 continue
@@ -646,15 +704,28 @@ def _extract_keywords_subsector(prospectus_info, text, peer_data=None):
                     continue
                 kws = sd.get("keywords", [])
                 hit_count = sum(1 for kw in kws if kw.lower() in combined)
-                # 核心关键词：赛道名称本身（如 "robotics"、"healthcare"）
                 is_core = sec_key.replace("_", " ") in combined.lower()
                 if hit_count >= 2 or is_core:
                     all_matches.append((sec_key, sk, sd, hit_count))
             if all_matches:
                 break
-    all_matches.sort(key=lambda x: x[3], reverse=True)
+
+    def _gics_boost(sec, sub):
+        if gics_sec and gics_sub:
+            return 3 if sec == gics_sec and sub == gics_sub else 0
+        return 0
+
+    all_matches.sort(key=lambda x: x[3] + _gics_boost(x[0], x[1]), reverse=True)
     if all_matches:
         best_sec, best_sk, best_sd, best_hits = all_matches[0]
+        if gics_sec and gics_sub:
+            gics_sub_data = peer_data.get(gics_sec, {}).get(gics_sub)
+            if gics_sub_data:
+                gics_kw = gics_sub_data.get("keywords", [])
+                gics_hit = sum(1 for kw in gics_kw if kw.lower() in combined)
+                gics_score = gics_hit + 3
+                if gics_score > best_hits:
+                    return gics_sec, gics_sub, gics_sub_data, [(m[0], m[1]) for m in all_matches] + [(gics_sec, gics_sub)], gics_score
         return best_sec, best_sk, best_sd, [(m[0], m[1]) for m in all_matches], best_hits
     return "unknown", None, None, [], 0
 
@@ -665,44 +736,68 @@ def _extract_keywords_subsector(prospectus_info, text, peer_data=None):
 
 def _is_hk_peer(peer):
     """判断是否为港股同行（.HK 结尾或纯数字代码）"""
-    ticker = str(peer.get("ticker", "")).strip()
-    if not ticker or ticker == "private":
+    ticker = str(peer.get("ticker", "")).strip().upper()
+    if not ticker or ticker == "PRIVATE":
         return False
     return ticker.endswith(".HK") or ticker.isdigit()
+
+
+def _peer_market_key(peer):
+    """识别上市地市场，用于分市场同行估值。"""
+    ticker = str(peer.get("ticker", "")).strip().upper()
+    if not ticker or ticker == "PRIVATE" or peer.get("type") == "private":
+        return "private"
+    if ticker.endswith(".HK") or ticker.isdigit():
+        return "hk"
+    if ticker.endswith((".SH", ".SZ", ".SS")) or re.match(r"^[036]\d{5}$", ticker):
+        return "a_share"
+    if re.match(r"^[A-Z][A-Z0-9.-]{0,9}$", ticker):
+        return "us"
+    return "other"
+
+
+def _peer_market_label(peer):
+    return {
+        "hk": "港股",
+        "a_share": "A股",
+        "us": "美股",
+        "private": "未上市",
+        "other": "其他",
+    }.get(_peer_market_key(peer), "其他")
+
+
+def _with_peer_market(peer):
+    p = dict(peer)
+    p["market_key"] = _peer_market_key(p)
+    p["market"] = _peer_market_label(p)
+    return p
+
+
+def _is_quantitative_peer(peer):
+    return (
+        peer.get("type") == "listed"
+        and not (peer.get("ps") is None and peer.get("pe") is None and peer.get("market_cap_hkd_million") is None)
+        and peer.get("data_quality") != "low"
+        and not peer.get("needs_refresh", False)
+    )
 
 
 def _split_peer_samples(matched_peers):
     """将 peers 分为 quantitative（可参与中位数计算）和 qualitative（仅参考）
 
     策略：
-    - hk_quant >= 2 时，只用 hk_quant；
-    - hk_quant < 2 且 all listed quant >= 2 时，fallback 到 hk_quant + non_hk_quant；
+    - 使用全部高质量上市同行作为综合 quantitative 样本；
+    - 港股/A股/美股的分市场强弱判断由 market_peer_stats 负责；
     - 只有一个可用样本时允许输出，但 quantitative_basis 标记为 single_reference。
 
     返回: (quantitative_peers, qualitative_peers, quantitative_basis,
            quantitative_peer_count, qualitative_peer_count)
     """
-    def _is_quantitative(p):
-        return (
-            p.get("type") == "listed"
-            and not (p.get("ps") is None and p.get("pe") is None and p.get("market_cap_hkd_million") is None)
-            and p.get("data_quality") != "low"
-            and not p.get("needs_refresh", False)
-        )
+    all_listed_quant = [p for p in matched_peers if _is_quantitative_peer(p)]
 
-    hk_peers = [p for p in matched_peers if _is_hk_peer(p)]
-    non_hk_peers = [p for p in matched_peers if not _is_hk_peer(p)]
-
-    hk_quant = [p for p in hk_peers if _is_quantitative(p)]
-    non_hk_quant = [p for p in non_hk_peers if _is_quantitative(p)]
-    all_listed_quant = hk_quant + non_hk_quant
-
-    if len(hk_quant) >= 2:
-        quantitative_peers = hk_quant
-        quantitative_basis = "hk_peers"
-    elif len(all_listed_quant) >= 2:
+    if len(all_listed_quant) >= 2:
         quantitative_peers = all_listed_quant
-        quantitative_basis = "hk_plus_non_hk"
+        quantitative_basis = "composite_listed_peers"
     elif len(all_listed_quant) == 1:
         quantitative_peers = all_listed_quant
         quantitative_basis = "single_reference"
@@ -710,17 +805,14 @@ def _split_peer_samples(matched_peers):
         quantitative_peers = []
         quantitative_basis = "none"
 
-    # 使用 stock_code 作为唯一标识符（避免 id(p) 的内存地址语义错误）
-    quantitative_codes = set()
+    quantitative_keys = set()
     for p in quantitative_peers:
-        code = p.get("stock_code")
-        if code:
-            quantitative_codes.add(str(code))
+        quantitative_keys.add((str(p.get("ticker", "")), str(p.get("name", ""))))
 
     qualitative_peers = []
     for p in matched_peers:
-        code = p.get("stock_code")
-        if code and str(code) in quantitative_codes:
+        key = (str(p.get("ticker", "")), str(p.get("name", "")))
+        if key in quantitative_keys:
             continue
         qualitative_peers.append(p)
 
@@ -761,6 +853,68 @@ def _calc_company_market_cap_metric(company_mc, peer_median_mc):
     if not _is_num(company_mc) or not _is_num(peer_median_mc) or peer_median_mc <= 0:
         return None
     return round(company_mc / peer_median_mc * 100, 1)
+
+
+def _calc_market_peer_stats(quantitative_peers, company_ps, company_pe, company_pb, scarcity):
+    market_order = ("hk", "a_share", "us", "other")
+    grouped = {k: [] for k in market_order}
+    for peer in quantitative_peers:
+        key = _peer_market_key(peer)
+        if key == "private":
+            continue
+        grouped.setdefault(key if key in grouped else "other", []).append(_with_peer_market(peer))
+
+    stats = {}
+    for key in market_order:
+        peers = grouped.get(key, [])
+        medians = _calc_peer_medians(peers)
+        ps_median = medians["peer_median_ps"]
+        pe_median = medians["peer_median_pe"]
+        pb_median = medians["peer_median_pb"]
+        ps_premium = None
+        pe_premium = None
+        pb_premium = None
+        if _is_num(company_ps) and _is_num(ps_median) and ps_median > 0:
+            ps_premium = round((company_ps - ps_median) / ps_median * 100, 1)
+        if _is_num(company_pe) and _is_num(pe_median) and pe_median > 0:
+            pe_premium = round((company_pe - pe_median) / pe_median * 100, 1)
+        if _is_num(company_pb) and _is_num(pb_median) and pb_median > 0:
+            pb_premium = round((company_pb - pb_median) / pb_median * 100, 1)
+
+        if len(peers) >= 2:
+            position = _calc_valuation_position(company_ps, ps_median, scarcity, ps_premium)
+        elif len(peers) == 1:
+            position = "单一样本参考"
+        else:
+            position = "样本不足，仅作定性参考"
+
+        stats[key] = {
+            "market": {"hk": "港股", "a_share": "A股", "us": "美股", "other": "其他"}[key],
+            "peer_count": len(peers),
+            "peer_median_ps": ps_median,
+            "peer_median_pe": pe_median,
+            "peer_median_pb": pb_median,
+            "peer_ps_count": medians["peer_ps_count"],
+            "peer_pe_count": medians["peer_pe_count"],
+            "peer_pb_count": medians["peer_pb_count"],
+            "relative_ps_premium_pct": ps_premium,
+            "relative_pe_premium_pct": pe_premium,
+            "relative_pb_premium_pct": pb_premium,
+            "valuation_position": position,
+            "peers": peers,
+        }
+    return stats
+
+
+def _market_position_bucket(position):
+    position = str(position or "")
+    if "明显偏贵" in position or "偏贵" in position:
+        return "expensive"
+    if "相对低估" in position:
+        return "cheap"
+    if "合理" in position:
+        return "fair"
+    return None
 
 
 def _financial_fx_to_hkd(currency):
@@ -805,19 +959,22 @@ def _calc_scarcity_score(prospectus_info, matched_peers, sector):
     score = 0
     rnd = prospectus_info.get("rnd_pipeline", {}) or {}
     ca = prospectus_info.get("cornerstone_analysis", {}) or {}
+
+    # --- 维度1: 港股同行数量（最高+2）---
     listed = [p for p in matched_peers if p.get("type") == "listed"]
     if len(listed) <= 2:
-        score += 3
+        score += 2
     elif len(listed) <= 4:
         score += 1
+
+    # --- 维度2: 技术壁垒（最高+2）---
     moat = rnd.get("technology_moat_score", 0)
     if moat >= 7:
-        score += 3
+        score += 2
     elif moat >= 5:
         score += 1
-    # 医疗赛道港股上市公司较少，适度加分（低于 _calc_peer_score 的 +2，避免重复计算）
-    if sector == "healthcare":
-        score += 1
+
+    # --- 维度3: 基石投资者质量（最高+2）---
     cornerstone_rows = ca.get("cornerstone_investors") or []
     tiers = {row.get("tier", "") for row in cornerstone_rows if row.get("tier")}
     if not tiers:
@@ -827,14 +984,62 @@ def _calc_scarcity_score(prospectus_info, matched_peers, sector):
         score += 2
     elif "A" in tiers:
         score += 1
+
+    # --- 维度4: 营收增长（最高+1）---
     rev = prospectus_info.get("revenue")
     rev_y1 = prospectus_info.get("revenue_y1")
     if _is_num(rev) and _is_num(rev_y1) and rev_y1 > 0:
         g = (rev - rev_y1) / rev_y1
         if g > 1.0:
-            score += 2
-        elif g > 0.5:
             score += 1
+        elif g > 0.5:
+            score += 0.5
+
+    # --- 新增维度5: 市场份额/行业地位（最高+3）---
+    market_share = prospectus_info.get("market_share_data") or []
+    dominant_pct = prospectus_info.get("dominant_share_pct")
+    dominant_rank = None
+    if market_share:
+        for ms in market_share:
+            if ms.get("rank") is not None and ms.get("share_pct") is not None:
+                if dominant_rank is None or ms["rank"] < dominant_rank:
+                    dominant_rank = ms["rank"]
+
+    if dominant_rank is not None:
+        if dominant_rank == 1:
+            score += 3
+        elif dominant_rank <= 3:
+            score += 2
+        else:
+            score += 1
+    elif _is_num(dominant_pct) and dominant_pct > 10:
+        if dominant_pct > 30:
+            score += 3
+        elif dominant_pct > 15:
+            score += 2
+        else:
+            score += 1
+
+    # --- 新增维度6: 相对市场地位（同行收入排名，最高+2）---
+    rmp = prospectus_info.get("relative_market_position") or {}
+    rmp_rank = rmp.get("rank")
+    rmp_peer_count = rmp.get("peer_count", 0)
+    if rmp_rank is not None and rmp_peer_count >= 3:
+        if rmp_rank == 1:
+            score += 2
+        elif rmp_rank <= 2:
+            score += 1
+
+    # --- 新增维度7: 行业集中度（最高+1）---
+    conc = prospectus_info.get("market_concentration") or {}
+    cr3 = conc.get("cr3_pct")
+    if _is_num(cr3) and cr3 >= 60:
+        score += 1
+
+    # 医疗赛道港股上市公司较少，适度加分
+    if sector == "healthcare":
+        score += 1
+
     return min(10, score)
 
 
@@ -1038,12 +1243,141 @@ class PeerComparableAnalyzer:
     def _extract_market_share_data(self, text):
         if not text:
             return []
+        # 规范化: PDF提取常在中文字符间插入换行
+        text = re.sub(r'(?<=[\u4e00-\u9fff])\s*\n\s*(?=[\u4e00-\u9fff，。、；：])', '', text)
+        logger.debug("_extract_market_share_data: text_len=%d", len(text))
         results = []
         seen_segments = set()
+
+        def _find_segment(context, lang="en"):
+            """从上下文中提取细分市场/行业名称"""
+            # 优先尝试: 中文 "在X市场/行业/领域"
+            zh_pat = re.search(
+                r'(?:在|於|于)'
+                r'([A-Za-z0-9\u4e00-\u9fff（）()、及與与\-\s]{2,50}?)'
+                r'(?:市[場场]|行[業业]|領域|领域)',
+                context,
+            )
+            if zh_pat:
+                return re.sub(r'\s+', '', zh_pat.group(1)).strip("，。；：、 ")
+            # 英文 "in the X market/sector"
+            seg_pat = re.search(
+                r'(?:in\s+the\s+|of\s+the\s+|within\s+the\s+|across\s+the\s+)'
+                r'([\w\u4e00-\u9fff\s]{2,40}?)(?:\s+market|市[場场]|行[業业]|sector|segment|industry)',
+                context, re.IGNORECASE,
+            )
+            if seg_pat:
+                return seg_pat.group(1).strip()
+            # 从 "全球消费级3D打印机市场" 等直接提取，保留数字/空格打断的英文缩写
+            direct_zh_matches = re.findall(
+                r'((?:全球|中國|中国|香港|亞洲|亚洲|亞太|亚太|國內|国内)?'
+                r'[A-Za-z0-9\u4e00-\u9fff（）()、及與与\-\s]{2,50}?)'
+                r'(?:市[場场]|行[業业]|領域|领域)',
+                context,
+            )
+            direct_zh_matches = [
+                re.sub(r'\s+', '', name).strip("，。；：、的之")
+                for name in direct_zh_matches
+            ]
+            direct_zh_matches = [
+                name for name in direct_zh_matches
+                if name and name not in ("整个", "全球", "中国", "国内", "海外", "该", "此", "本", "其")
+                and not name.endswith(("佔有率", "占有率", "份額", "份额"))
+            ]
+            if direct_zh_matches:
+                name = max(direct_zh_matches, key=len)
+                metric_segment = re.findall(
+                    r'\d{4}年([A-Za-z0-9\u4e00-\u9fff（）()、及與与\-\s]{2,30}?)(?:GMV|收益|收入)',
+                    name,
+                )
+                if metric_segment:
+                    name = metric_segment[-1]
+                region = re.search(r'(全球|中國|中国|香港|亞洲|亚洲|亞太|亚太|國內|国内).+', name)
+                if region:
+                    name = region.group(0)
+                if len(name) > 30:
+                    name = name[-30:]
+                    name = re.sub(r'^.*?[，。；：]', '', name)
+                if name and name not in ("整个", "全球", "中国", "国内", "海外", "该", "此", "本", "其"):
+                    return name
+            # 新增: 从 "X market/industry" 直接提取
+            direct_en = re.search(
+                r'\b([A-Z][a-z]+(?:\s+[A-Z]?[a-z]+)*)\s+(?:market|industry|sector)\b',
+                context,
+            )
+            if direct_en:
+                return direct_en.group(1).strip()
+            return "unknown"
+
+        def _find_source(context):
+            if re.search(r'frost\s*&\s*sullivan', context, re.IGNORECASE):
+                return "Frost & Sullivan"
+            if re.search(r'弗若斯特(?:沙利文|利文)', context):
+                return "Frost & Sullivan"
+            if re.search(r'IDC|Gartner|灼识|沙利文', context, re.IGNORECASE):
+                m = re.search(r'(IDC|Gartner|灼识(?:咨询)?|沙利文)', context)
+                return m.group(1) if m else None
+            return None
+
+        def _add_share_result(segment, share_pct, rank=None, source=None):
+            key = (segment.lower(), share_pct, rank)
+            if key not in seen_segments:
+                seen_segments.add(key)
+                results.append({
+                    "segment": segment,
+                    "share_pct": share_pct,
+                    "rank": rank,
+                    "source": source,
+                })
+
+        def _merge_or_add(segment, share_pct=None, rank=None, source=None):
+            """尝试合并到已有同 segment+同share_pct 记录，否则新增"""
+            for r_item in results:
+                if r_item["segment"].lower() == segment.lower():
+                    # 相同 share_pct 或 rank 时合并；不同份额则独立新增
+                    same_share = (share_pct is not None and r_item["share_pct"] is not None
+                                  and abs(r_item["share_pct"] - share_pct) < 0.01)
+                    same_rank = (rank is not None and r_item["rank"] is not None
+                                 and r_item["rank"] == rank)
+                    if same_share or same_rank:
+                        if share_pct is not None and r_item["share_pct"] is None:
+                            r_item["share_pct"] = share_pct
+                        if rank is not None and r_item["rank"] is None:
+                            r_item["rank"] = rank
+                        if source and not r_item["source"]:
+                            r_item["source"] = source
+                        return
+                    # 如果既有 share_pct 又有 rank，且两者都匹配才合并
+                    if share_pct is not None and rank is not None:
+                        if same_share and same_rank:
+                            if source and not r_item["source"]:
+                                r_item["source"] = source
+                            return
+                    # 都不匹配 → 继续查找，都不匹配则 fall through 到新增
+            _add_share_result(segment, share_pct, rank, source)
+
+        # --- 市占率百分比模式 ---
         share_patterns = [
-            r'(?:market\s+share\s+of|accounted\s+for)\s+([\d.]+)\s*%',
-            r'市占率\s*([\d.]+)\s*%',
-            r'市场份额\s*([\d.]+)\s*%',
+            # 原有英文模式
+            r'(?:market\s+share\s+(?:of|was|is|at|reached)|accounted\s+for)\s+(?:approximately\s+|about\s+|around\s+)?([\d.]+)\s*%',
+            # 繁体+简体: "市占率为X%" / "市場佔有率為X%" / 缩写 "市占率X%"
+            r'(?:市[場场]?[占佔]有率|市[占佔]率|[市市]场占有率)\s*(?:約|约|約為|约为|達到|达到|為|为)?\s*([\d.]+)\s*%',
+            # 繁体+简体: "市场份额为X%" / "市場份額為X%"
+            r'(?:市[場场]份[额額]|[市市]场份额)\s*(?:約|约|約為|约为|達到|达到|為|为|为约)?\s*([\d.]+)\s*%',
+            # 新增: "holds/approximately X% of the market"
+            r'(?:holds?|had|has|with)\s+(?:approximately\s+|about\s+|around\s+)?([\d.]+)\s*%\s*(?:of\s+the\s+|market)',
+            # 新增: "X% market share"
+            r'([\d.]+)\s*%\s+market\s+share',
+            # 新增: "占/佔市场份额约X%"
+            r'[占佔]\s*(?:了\s*)?(?:其\s*)?(?:市[場场]|行業|行业)\s*(?:份[额額]|市場)\s*(?:約|约|約為|约为|達到|达到|為|为|的)?\s*([\d.]+)\s*%',
+            # 新增: "市场占有率为X%" / "市場佔有率為X%"
+            r'(?:市[場场][占佔]有率|市[占佔]率|[市市]场占有率)\s*(?:約|约|約為|约为|達到|达到|為|为)?\s*([\d.]+)\s*%',
+            # 新增: "X%的市场份额/占有率"
+            r'([\d.]+)\s*%\s*(?:的\s*)?(?:市场\s*)?(?:份[额額]|占[有率]|佔有率|占有率)',
+            # 新增: "占据X%" / "佔據X%"
+            r'[占佔][据據]?\s*(?:了\s*)?([\d.]+)\s*%',
+            # 新增: "representing/approximately X%"
+            r'(?:representing|constituting|comprising)\s+(?:approximately\s+)?([\d.]+)\s*%',
         ]
         for pat in share_patterns:
             for m in re.finditer(pat, text, re.IGNORECASE):
@@ -1051,31 +1385,28 @@ class PeerComparableAnalyzer:
                     share_pct = float(m.group(1))
                 except (ValueError, IndexError):
                     continue
-                start = max(0, m.start() - 150)
-                end = min(len(text), m.end() + 50)
+                if share_pct > 100:
+                    continue
+                start = max(0, m.start() - 200)
+                end = min(len(text), m.end() + 100)
                 context = text[start:end]
-                segment = "unknown"
-                seg_pat = re.search(
-                    r'(?:in\s+the\s+|of\s+the\s+|在|)([\w\u4e00-\u9fff\s]{2,40}?)(?:\s+market|市场|行业|sector|segment)',
-                    context, re.IGNORECASE,
-                )
-                if seg_pat:
-                    segment = seg_pat.group(1).strip()
-                source = None
-                if re.search(r'frost\s*&\s*sullivan', context, re.IGNORECASE):
-                    source = "Frost & Sullivan"
-                key = (segment.lower(), share_pct)
-                if key not in seen_segments:
-                    seen_segments.add(key)
-                    results.append({
-                        "segment": segment,
-                        "share_pct": share_pct,
-                        "rank": None,
-                        "source": source,
-                    })
+                segment = _find_segment(context)
+                source = _find_source(context)
+                _merge_or_add(segment, share_pct=share_pct, source=source)
+
+        # --- 排名模式 ---
         rank_patterns = [
             (r'ranked\s+(\d+)(?:st|nd|rd|th)\s+in', "en"),
             (r'排名第\s*(\d+)', "zh"),
+            # 新增: "the Nth largest"
+            (r'the\s+(\d+)(?:st|nd|rd|th)\s+largest', "en"),
+            # 新增: "第N大"
+            (r'第\s*(\d+)\s*大', "zh"),
+            # 新增: "one of the leading / among the top N"
+            (r'among\s+the\s+top\s+(\d+)', "en"),
+            (r'top\s+(\d+)\s+(?:player|provider|company|participant)', "en"),
+            # 新增: 繁体/简体 "全球第N大"
+            (r'全球第\s*(\d+)\s*[大]', "zh"),
         ]
         for pat, lang in rank_patterns:
             for m in re.finditer(pat, text, re.IGNORECASE):
@@ -1083,43 +1414,35 @@ class PeerComparableAnalyzer:
                     rank = int(m.group(1))
                 except (ValueError, IndexError):
                     continue
-                start = max(0, m.start() - 150)
-                end = min(len(text), m.end() + 50)
+                if rank > 100:
+                    continue
+                start = max(0, m.start() - 200)
+                end = min(len(text), m.end() + 100)
                 context = text[start:end]
-                segment = "unknown"
-                if lang == "en":
-                    seg_pat = re.search(
-                        r'in\s+the\s+([\w\s]{2,40}?)(?:\s+market|sector|industry)',
-                        context, re.IGNORECASE,
-                    )
-                else:
-                    seg_pat = re.search(
-                        r'在([\u4e00-\u9fff]{2,40}?)(?:市场|行业|领域)',
-                        context,
-                    )
-                if seg_pat:
-                    segment = seg_pat.group(1).strip()
-                source = None
-                if re.search(r'frost\s*&\s*sullivan', context, re.IGNORECASE):
-                    source = "Frost & Sullivan"
-                matched = False
-                for r_item in results:
-                    if r_item["segment"].lower() == segment.lower():
-                        r_item["rank"] = rank
-                        if source and not r_item["source"]:
-                            r_item["source"] = source
-                        matched = True
-                        break
-                if not matched:
-                    key = (segment.lower(), rank)
-                    if key not in seen_segments:
-                        seen_segments.add(key)
-                        results.append({
-                            "segment": segment,
-                            "share_pct": None,
-                            "rank": rank,
-                            "source": source,
-                        })
+                segment = _find_segment(context, lang)
+                source = _find_source(context)
+                _merge_or_add(segment, rank=rank, source=source)
+
+        # --- "领先/leading" 定性描述 ---
+        leading_patterns = [
+            (r'(?:one\s+of\s+)?(?:the\s+)?(?:leading|largest|dominant|major)\s+'
+             r'(?:player|provider|company|participant|operator)s?\s+in\s+the\s+'
+             r'([\w\u4e00-\u9fff\s]{2,40}?)(?:\s+market|行业|市场|sector|segment|industry)', "en"),
+            (r'(?:是|作為)\s*(?:中國|全球|國内|国内|亞太|亚太|亞洲|亚洲)?\s*(?:領先|领先|最大|主要|龍頭|龙头|頭部|头部)\s*的\s*'
+             r'([\u4e00-\u9fff]{2,30}?)(?:公司|企業|企业|廠商|厂商|供應商|供应商|服務商|服务商|運營商|运营商|參與者|参与者)', "zh"),
+        ]
+        for pat, lang in leading_patterns:
+            for m in re.finditer(pat, text, re.IGNORECASE):
+                segment = m.group(1).strip()
+                if len(segment) < 2:
+                    continue
+                start = max(0, m.start() - 200)
+                end = min(len(text), m.end() + 100)
+                context = text[start:end]
+                source = _find_source(context)
+                _merge_or_add(segment, rank=1, source=source)
+
+        logger.debug("_extract_market_share_data: found %d results", len(results))
         return results
 
     def _extract_market_size_data(self, text):
@@ -1212,6 +1535,243 @@ class PeerComparableAnalyzer:
                         })
         return results
 
+    def _extract_market_concentration(self, text):
+        """提取行业集中度数据 (CR3/CR5/前N大参与者合计份额)
+
+        返回: {"cr3_pct": float|None, "cr5_pct": float|None, "top_n_share": list[dict]}
+        """
+        if not text:
+            return {"cr3_pct": None, "cr5_pct": None, "top_n_share": []}
+
+        # 规范化: PDF提取的中文文本中常有换行符插入，先合并
+        text_norm = re.sub(r'(?<=[\u4e00-\u9fff])\s*\n\s*(?=[\u4e00-\u9fff，。、；：])', '', text)
+
+        top_n_share = []
+        seen = set()
+
+        # 中文数字 → 阿拉伯数字映射
+        _CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+                    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+
+        def _parse_n(s):
+            """解析中文或阿拉伯数字"""
+            try:
+                return int(s)
+            except ValueError:
+                return _CN_NUM.get(s)
+
+        def _add_top_n(n, pct):
+            if n is None:
+                return
+            key = (n, pct)
+            if key not in seen and 1 <= n <= 20 and 0 < pct <= 100:
+                seen.add(key)
+                top_n_share.append({"top_n": n, "combined_share_pct": pct})
+
+        # "the top N players/companies account for X%"
+        cr_en_patterns = [
+            r'(?:the\s+)?top\s+(\d+)\s+(?:player|company|participant|competitor|provider|operator)s?\s+'
+            r'(?:account(?:ed)?\s+for|represent|comprising|held|had|with)\s+'
+            r'(?:approximately\s+|about\s+|around\s+)?([\d.]+)\s*%',
+            r'(?:the\s+)?(\d+)\s+(?:largest|leading)\s+(?:player|company|participant)s?\s+'
+            r'(?:account(?:ed)?\s+for|represent)\s+(?:approximately\s+)?([\d.]+)\s*%',
+            r'(?:top|leading)\s+(\d+)\s+.*?(?:合计|总共|共)\s*(?:占|占据)\s*([\d.]+)\s*%',
+        ]
+        for pat in cr_en_patterns:
+            for m in re.finditer(pat, text_norm, re.IGNORECASE):
+                try:
+                    n = int(m.group(1))
+                    pct = float(m.group(2))
+                except (ValueError, IndexError):
+                    continue
+                _add_top_n(n, pct)
+
+        # 中文: "前N大/前N名 合计占 X%" (支持简体+繁体+中文数字)
+        cr_zh_patterns = [
+            # (pattern, is_one_group) - True 表示只有1个捕获组(pct)，N隐含为1
+            (r'最大\s*(?:參與者|参与者)\s*(?:佔據|占据|佔|占)\s*(?:總|总)?\s*(?:GMV\s*)?(?:超過|超过)?\s*(?:了\s*)?(?:約|约)?\s*([\d.]+)\s*%', True),
+            # 标准双组模式: (N, pct)
+            (r'前\s*([\d一二三四五六七八九十]+)\s*(?:大|名|位|家|強)\s*(?:參與者|参与者|公司|企業|企业|廠商|厂商|供應商|供应商)?\s*(?:合計|合计|總共|总共|共|累計|累计)?\s*'
+             r'(?:[占佔]|佔據|占据|擁有|拥有)\s*(?:了\s*)?(?:超過|超过\s*)?(?:其\s*)?(?:市場\s*份额|市场\s*份額|市場\s*份額|市场\s*份额)?\s*(?:的\s*)?(?:約|约|約為|约为|達到|达到|為|为)?\s*([\d.]+)\s*%', False),
+            (r'前\s*([\d一二三四五六七八九十]+)\s*(?:大|名|位|家)\s*.*?(?:市場份额|市场份額|占有率|佔有率)\s*(?:合計|合计|總共|总共|共)?\s*(?:為|为|達到|达到|約|约)?\s*([\d.]+)\s*%', False),
+            (r'(?:其餘|其余|而其餘|而其餘的)\s*(?:前\s*([\d一二三四五六七八九十]+)\s*[大名家]?\s*[參与参與与]與?者?)\s*(?:各[占佔]|各佔)\s*(?:約|约)?\s*([\d.]+)\s*%', False),
+            (r'前\s*([\d一二三四五六七八九十]+)\s*[大名家位]\s*(?:參與者|参与者)\s*各\s*[占佔]\s*(?:約|约)?\s*([\d.]+)\s*%', False),
+        ]
+        for pat, is_one_group in cr_zh_patterns:
+            for m in re.finditer(pat, text_norm, re.IGNORECASE):
+                is_each = bool(re.search(r'各\s*[占佔]', m.group(0)))
+                try:
+                    if is_one_group:
+                        n = 1
+                        pct = float(m.group(1))
+                    else:
+                        n = _parse_n(m.group(1))
+                        pct = float(m.group(2))
+                except (ValueError, IndexError):
+                    continue
+                if n is None:
+                    continue
+                if is_each:
+                    continue
+                _add_top_n(n, pct)
+
+        # CR3/CR5 专用
+        cr_cr_patterns = [
+            r'CR(\d+)\s*(?:=|：|:|为|达到|约|约为)?\s*([\d.]+)\s*%',
+            r'(?:concentration\s+ratio|集中度)\s*(?:CR)?(\d+)\s*(?:=|：|:|is|was|at)?\s*([\d.]+)\s*%',
+        ]
+        for pat in cr_cr_patterns:
+            for m in re.finditer(pat, text_norm, re.IGNORECASE):
+                try:
+                    n = int(m.group(1))
+                    pct = float(m.group(2))
+                except (ValueError, IndexError):
+                    continue
+                key = (n, pct)
+                if key not in seen and n in (3, 5) and 0 < pct <= 100:
+                    seen.add(key)
+                    top_n_share.append({"top_n": n, "combined_share_pct": pct})
+
+        cr3_pct = None
+        cr5_pct = None
+        for item in top_n_share:
+            if item["top_n"] == 3 and cr3_pct is None:
+                cr3_pct = item["combined_share_pct"]
+            if item["top_n"] == 5 and cr5_pct is None:
+                cr5_pct = item["combined_share_pct"]
+
+        return {"cr3_pct": cr3_pct, "cr5_pct": cr5_pct, "top_n_share": top_n_share}
+
+    def _extract_competitive_landscape_via_llm(self, text):
+        """用 LLM 从竞争格局段落提取结构化市场份额数据。
+
+        返回: list[dict] 每项包含 segment, company, share_pct, rank, source
+        """
+        try:
+            import httpx as _httpx
+        except ImportError:
+            return []
+
+        api_key = os.environ.get('LLM_API_KEY', '')
+        if not api_key:
+            return []
+
+        # 从全文中截取竞争格局相关段落
+        chunks = _extract_competitor_chunks(text)
+        if not chunks:
+            return []
+        # 合并去重，限制长度
+        combined = "\n---\n".join(chunks)
+        if len(combined) > 6000:
+            combined = combined[:6000]
+
+        base_url = os.environ.get('LLM_BASE_URL', 'https://api.openai.com/v1')
+        model = os.environ.get('LLM_MODEL', 'gpt-4o-mini')
+
+        system_prompt = (
+            "你是港股IPO分析师。从招股书竞争格局文本中提取市场份额数据。"
+            "只输出JSON数组，不要其他内容。每项格式："
+            '{"segment":"细分市场名","company":"公司名","share_pct":数字,"rank":数字或null,"source":"数据来源或null"}'
+            "\n如果文本中没有具体份额数据，输出空数组 []"
+        )
+        user_prompt = f"请从以下招股书竞争格局文本中提取所有公司/参与者的市场份额数据：\n\n{combined}"
+
+        url = f"{base_url.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        body = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.1,
+            "max_tokens": 1500,
+        }
+
+        try:
+            with _httpx.Client(timeout=30.0) as client:
+                resp = client.post(url, headers=headers, json=body)
+                resp.raise_for_status()
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"].strip()
+                # 提取 JSON 数组
+                json_match = re.search(r'\[.*\]', content, re.DOTALL)
+                if json_match:
+                    import json
+                    parsed = json.loads(json_match.group())
+                    if isinstance(parsed, list):
+                        # 过滤合理数据
+                        valid = []
+                        for item in parsed[:20]:
+                            if not isinstance(item, dict):
+                                continue
+                            sp = item.get("share_pct")
+                            if sp is not None:
+                                try:
+                                    sp = float(sp)
+                                    if sp > 100 or sp < 0:
+                                        sp = None
+                                except (ValueError, TypeError):
+                                    sp = None
+                            rk = item.get("rank")
+                            if rk is not None:
+                                try:
+                                    rk = int(rk)
+                                    if rk > 100 or rk < 1:
+                                        rk = None
+                                except (ValueError, TypeError):
+                                    rk = None
+                            valid.append({
+                                "segment": str(item.get("segment", "unknown"))[:50],
+                                "company": str(item.get("company", "unknown"))[:80],
+                                "share_pct": sp,
+                                "rank": rk,
+                                "source": item.get("source"),
+                            })
+                        return valid
+        except Exception as e:
+            logger.debug("LLM竞争格局提取失败: %s", e)
+        return []
+
+    def _calc_relative_market_position(self, company_revenue, matched_peers, financial_currency="RMB"):
+        """从同行收入反推发行人相对市场地位。
+
+        使用同行库中同赛道已上市公司的收入排名作为代理指标。
+        返回: {"rank": int, "peer_count": int, "revenue_percentile": float|None, "relative_share_pct": float|None}
+        """
+        if not _is_num(company_revenue) or company_revenue <= 0:
+            return {"rank": None, "peer_count": 0, "revenue_percentile": None, "relative_share_pct": None}
+
+        fx = _financial_fx_to_hkd(financial_currency)
+        company_rev_hkd = company_revenue * fx
+
+        peer_revenues = []
+        for p in matched_peers:
+            rev = p.get("revenue_million")
+            if _is_num(rev) and rev > 0:
+                peer_revenues.append(rev)
+
+        if not peer_revenues:
+            return {"rank": None, "peer_count": 0, "revenue_percentile": None, "relative_share_pct": None}
+
+        all_revs = sorted([company_rev_hkd] + peer_revenues, reverse=True)
+        rank = all_revs.index(company_rev_hkd) + 1
+        peer_count = len(peer_revenues)
+        total = sum(peer_revenues) + company_rev_hkd
+        relative_share_pct = round(company_rev_hkd / total * 100, 1) if total > 0 else None
+        # 收入百分位: 比多少比例的同行收入高
+        revenue_percentile = round((peer_count - (rank - 1)) / peer_count * 100, 1) if peer_count > 0 else None
+
+        return {
+            "rank": rank,
+            "peer_count": peer_count,
+            "revenue_percentile": revenue_percentile,
+            "relative_share_pct": relative_share_pct,
+        }
+
     def analyze(self, prospectus_info, text='', ipo_data=None):
         """执行同行对比分析"""
         result = {
@@ -1229,6 +1789,14 @@ class PeerComparableAnalyzer:
             "quantitative_basis": "none",
             "quantitative_peer_count": 0,
             "qualitative_peer_count": 0,
+            "comparison_mode": "by_market",
+            "primary_comparison_market": "composite",
+            "market_peer_stats": {
+                "hk": {"market": "港股", "peer_count": 0, "valuation_position": "样本不足，仅作定性参考", "peers": []},
+                "a_share": {"market": "A股", "peer_count": 0, "valuation_position": "样本不足，仅作定性参考", "peers": []},
+                "us": {"market": "美股", "peer_count": 0, "valuation_position": "样本不足，仅作定性参考", "peers": []},
+                "other": {"market": "其他", "peer_count": 0, "valuation_position": "样本不足，仅作定性参考", "peers": []},
+            },
             "company_ps": None, "company_pe": None, "company_pb": None,
             "peer_median_ps": None, "peer_median_pe": None, "peer_median_pb": None,
             "peer_ps_count": 0, "peer_pe_count": 0,
@@ -1266,6 +1834,61 @@ class PeerComparableAnalyzer:
             logger.warning("竞争章节提取失败: %s", e)
             comp_chunks = []
 
+        # 1.5. 市场份额 / 市场规模 / 集中度提取（在赛道匹配之前，确保始终运行）
+        try:
+            ms_result = self._extract_market_share_data(text)
+            result["market_share_data"] = ms_result
+        except Exception as e:
+            logger.warning("市场份额提取异常: %s", e)
+
+        try:
+            result["market_size_data"] = self._extract_market_size_data(text)
+        except Exception as e:
+            logger.warning("市场规模提取异常: %s", e)
+
+        try:
+            result["market_concentration"] = self._extract_market_concentration(text)
+        except Exception as e:
+            logger.warning("行业集中度提取异常: %s", e)
+
+        if len(result.get("market_share_data") or []) < 2:
+            try:
+                llm_data = self._extract_competitive_landscape_via_llm(text)
+                if llm_data:
+                    result["llm_market_share_data"] = llm_data
+                    existing_keys = {
+                        (ms.get("segment", "").lower(), ms.get("share_pct"))
+                        for ms in result.get("market_share_data") or []
+                    }
+                    for item in llm_data:
+                        key = (item.get("segment", "unknown").lower(), item.get("share_pct"))
+                        if key not in existing_keys:
+                            result.setdefault("market_share_data", []).append({
+                                "segment": item.get("segment", "unknown"),
+                                "share_pct": item.get("share_pct"),
+                                "rank": item.get("rank"),
+                                "source": item.get("source") or "LLM提取",
+                            })
+                            existing_keys.add(key)
+            except Exception as e:
+                logger.debug("LLM竞争格局提取异常: %s", e)
+
+        # 计算 dominant segment（提前到赛道匹配前）
+        dominant = None
+        for ms in result.get("market_share_data") or []:
+            if ms.get("share_pct") is not None:
+                dominant_unknown = (dominant or {}).get("segment") in (None, "", "unknown")
+                ms_known = ms.get("segment") not in (None, "", "unknown")
+                if (
+                    dominant is None
+                    or ms["share_pct"] > dominant["share_pct"]
+                    or (ms["share_pct"] == dominant["share_pct"] and dominant_unknown and ms_known)
+                ):
+                    dominant = ms
+        if dominant:
+            result["dominant_segment"] = dominant["segment"]
+            result["dominant_share_pct"] = dominant["share_pct"]
+
         # 2. 赛道匹配
         try:
             matched_sector, sk, sd, all_matches, best_hits = _extract_keywords_subsector(
@@ -1285,6 +1908,19 @@ class PeerComparableAnalyzer:
 
         if not sk or not sd:
             result["warnings"].append("未匹配到细分赛道")
+            # 即使未匹配赛道，仍保留已提取的市场占有率数据
+            detail_parts = []
+            if result.get("dominant_segment") and result.get("dominant_share_pct") is not None:
+                detail_parts.append(f"在{result['dominant_segment']}市场份额{result['dominant_share_pct']}%")
+            if dominant and dominant.get("rank") is not None:
+                detail_parts.append(f"排名第{dominant['rank']}")
+            conc = result.get("market_concentration") or {}
+            if conc.get("cr3_pct") is not None:
+                detail_parts.append(f"CR3={conc['cr3_pct']}%")
+            elif conc.get("cr5_pct") is not None:
+                detail_parts.append(f"CR5={conc['cr5_pct']}%")
+            if detail_parts:
+                result["scarcity_detail"] = " + ".join(detail_parts)
             return result
 
         result["matched_sector"] = matched_sector
@@ -1318,6 +1954,7 @@ class PeerComparableAnalyzer:
                 "matched_by": "行业数据库匹配" if n not in {m.get("name") for m in mentioned}
                 else "招股书明确提及",
             })
+        matched = [_with_peer_market(p) for p in matched]
 
         result["matched_peers"] = matched
         result["extracted_competitors"] = [
@@ -1341,6 +1978,9 @@ class PeerComparableAnalyzer:
         result["company_ps"] = company_ps
         result["company_pe"] = company_pe
         result["company_pb"] = company_pb
+        result["market_peer_stats"] = _calc_market_peer_stats(
+            quantitative_peers, company_ps, company_pe, company_pb, scarcity=0,
+        )
 
         # 6-7. 同行中位数 + 相对溢价 (仅基于 quantitative peers)
         medians = _calc_peer_medians(quantitative_peers)
@@ -1379,12 +2019,31 @@ class PeerComparableAnalyzer:
             peer_mc = result.get("peer_median_market_cap")
             result["relative_market_cap_pct"] = _calc_company_market_cap_metric(company_mc, peer_mc)
 
-        # 8-10. 稀缺性 / 评分 / 估值定位
+        # 8. 相对市场地位（需要 matched_peers，在赛道匹配后才能算）
         try:
-            scarcity = _calc_scarcity_score(prospectus_info, matched, matched_sector)
+            company_revenue = prospectus_info.get("revenue")
+            result["relative_market_position"] = self._calc_relative_market_position(
+                company_revenue, matched, prospectus_info.get("financial_currency", "RMB"),
+            )
+        except Exception as e:
+            logger.debug("相对市场地位计算异常: %s", e)
+
+        # 将提取的市场份额数据注入 prospectus_info 供稀缺性评分使用
+        prospectus_info_for_scoring = {**prospectus_info}
+        prospectus_info_for_scoring["market_share_data"] = result.get("market_share_data") or []
+        prospectus_info_for_scoring["dominant_share_pct"] = result.get("dominant_share_pct")
+        prospectus_info_for_scoring["relative_market_position"] = result.get("relative_market_position")
+        prospectus_info_for_scoring["market_concentration"] = result.get("market_concentration")
+
+        # 9. 稀缺性 / 评分 / 估值定位
+        try:
+            scarcity = _calc_scarcity_score(prospectus_info_for_scoring, matched, matched_sector)
         except Exception:
             scarcity = 0
         result["scarcity_score"] = scarcity
+        result["market_peer_stats"] = _calc_market_peer_stats(
+            quantitative_peers, company_ps, company_pe, company_pb, scarcity,
+        )
 
         try:
             rev = prospectus_info.get("revenue")
@@ -1408,7 +2067,16 @@ class PeerComparableAnalyzer:
         if result.get("weighted_valuation_position") not in (None, "缺失"):
             result["valuation_position"] = result["weighted_valuation_position"]
 
-        # 11. 总结
+        strong_market_buckets = {
+            _market_position_bucket(v.get("valuation_position"))
+            for k, v in result["market_peer_stats"].items()
+            if k in ("hk", "a_share", "us") and v.get("peer_count", 0) >= 2
+        }
+        strong_market_buckets.discard(None)
+        if len(strong_market_buckets) >= 2:
+            result["warnings"].append("跨市场估值分化，需结合上市地流动性/主题溢价解读")
+
+        # 10. 总结
         try:
             result["summary"] = _build_summary(
                 result["valuation_position"], sk, matched,
@@ -1427,7 +2095,7 @@ class PeerComparableAnalyzer:
             result["extracted_competitors"] + result["unmatched_peer_candidates"]
         ))[:25]
 
-        # 12. 警告
+        # 11. 警告
         if result["peer_ps_count"] == 0:
             result["warnings"].append("quantitative peers 缺少有效PS数据")
         if company_ps is None:
@@ -1445,58 +2113,55 @@ class PeerComparableAnalyzer:
                 f"同行数据已过期({self.meta.get('peer_data_age_days', '?')}天)，建议通过同行库管理页更新"
             )
 
-        try:
-            result["market_share_data"] = self._extract_market_share_data(text)
-        except Exception as e:
-            logger.warning("市场份额提取异常: %s", e)
-
-        try:
-            result["market_size_data"] = self._extract_market_size_data(text)
-        except Exception as e:
-            logger.warning("市场规模提取异常: %s", e)
-
-        dominant = None
-        for ms in result["market_share_data"]:
-            if ms.get("share_pct") is not None:
-                if dominant is None or ms["share_pct"] > dominant["share_pct"]:
-                    dominant = ms
-        if dominant:
-            result["dominant_segment"] = dominant["segment"]
-            result["dominant_share_pct"] = dominant["share_pct"]
-
         hk_listed = [p for p in matched if _is_hk_peer(p) and p.get("type") == "listed"]
         result["scarcity_peers_count"] = len(hk_listed) if hk_listed else q_count
 
-        if result["dominant_share_pct"] is not None and result["dominant_share_pct"] >= 50:
-            detail_parts = [f"在{result['dominant_segment']}市场份额达{result['dominant_share_pct']}%"]
-            if dominant and dominant.get("rank") is not None:
-                detail_parts.append(f"排名第{dominant['rank']}")
-            if dominant and dominant.get("source"):
-                detail_parts.append(f"数据来源: {dominant['source']}")
-            subsector_label = sk or ""
-            if subsector_label:
-                detail_parts.append(f"细分赛道: {subsector_label}")
+        # 生成稀缺性详情：整合市场份额、排名、集中度、相对市场地位
+        detail_parts = []
+        if result["dominant_segment"] and result["dominant_share_pct"] is not None:
+            detail_parts.append(f"在{result['dominant_segment']}市场份额{result['dominant_share_pct']}%")
+        if dominant and dominant.get("rank") is not None:
+            detail_parts.append(f"排名第{dominant['rank']}")
+        if dominant and dominant.get("source"):
+            detail_parts.append(f"数据来源: {dominant['source']}")
+        # 行业集中度
+        conc = result.get("market_concentration") or {}
+        if conc.get("cr3_pct") is not None:
+            detail_parts.append(f"CR3={conc['cr3_pct']}%")
+        elif conc.get("cr5_pct") is not None:
+            detail_parts.append(f"CR5={conc['cr5_pct']}%")
+        # 相对市场地位
+        rmp = result.get("relative_market_position") or {}
+        if rmp.get("rank") is not None and rmp.get("peer_count", 0) > 0:
+            detail_parts.append(f"同行收入排名{rmp['rank']}/{rmp['peer_count']}")
+        subsector_label = sk or ""
+        if subsector_label:
+            detail_parts.append(f"细分赛道: {subsector_label}")
+        if detail_parts:
             result["scarcity_detail"] = " + ".join(detail_parts)
-        elif result["dominant_share_pct"] is not None and result["dominant_share_pct"] >= 20:
-            detail_parts = [f"在{result['dominant_segment']}市场份额{result['dominant_share_pct']}%"]
-            if dominant and dominant.get("rank") is not None:
-                detail_parts.append(f"排名第{dominant['rank']}")
-            subsector_label = sk or ""
-            if subsector_label:
-                detail_parts.append(f"细分赛道: {subsector_label}")
-            result["scarcity_detail"] = " + ".join(detail_parts)
+        elif result["scarcity_peers_count"] is not None:
+            result["scarcity_detail"] = f"港股可比分量约{result['scarcity_peers_count']}家"
 
+        # 稀缺性具体描述（保留原有逻辑，增加集中度和相对排名）
         if result["scarcity_peers_count"] is not None and result["scarcity_peers_count"] <= 3:
             peer_desc = f"港股可比分量仅{result['scarcity_peers_count']}家"
             if result["dominant_share_pct"] is not None and result["dominant_share_pct"] >= 20:
                 result["scarcity_specific_point"] = (
                     f"{peer_desc}，且公司在{result['dominant_segment']}市场份额{result['dominant_share_pct']}%，稀缺性突出"
                 )
+            elif rmp.get("rank") is not None and rmp["rank"] <= 2 and rmp.get("peer_count", 0) >= 2:
+                result["scarcity_specific_point"] = (
+                    f"{peer_desc}，公司在同行中收入排名第{rmp['rank']}，赛道稀缺"
+                )
             else:
                 result["scarcity_specific_point"] = f"{peer_desc}，港股中纯粹对标公司很少"
         elif result["dominant_share_pct"] is not None and result["dominant_share_pct"] >= 50:
             result["scarcity_specific_point"] = (
                 f"在{result['dominant_segment']}市场份额{result['dominant_share_pct']}%，港股中纯粹对标公司很少"
+            )
+        elif rmp.get("rank") is not None and rmp["rank"] == 1 and rmp.get("peer_count", 0) >= 3:
+            result["scarcity_specific_point"] = (
+                f"在{rmp['peer_count']}家同行中收入规模排名第1，行业龙头地位"
             )
 
         return result

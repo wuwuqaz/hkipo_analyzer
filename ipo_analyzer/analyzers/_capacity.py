@@ -1,6 +1,7 @@
 import re
 import logging
 from ..settings import SETTINGS
+from ..industry_router import classify_company
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +64,23 @@ class ProductionCapacityAnalyzer:
                     result['capacity_score'] = 2
                     result['capacity_summary'] = f'产能利用率偏低({util:.0f}%)，募资扩产需谨慎'
                 result['confidence'] = 'regex_context'
+
+            # --- data_availability 元数据 ---
+            profile = classify_company(prospectus_info, text)
+            no_physical_production = profile.is_biotech or profile.is_tech_saas
+            util = result.get('utilization_rate')
+            if util is not None:
+                result['data_availability'] = {
+                    'utilization_rate': {'status': 'available', 'method': 'regex', 'reason': f'产能利用率 {util}%'},
+                }
+            elif no_physical_production:
+                result['data_availability'] = {
+                    'utilization_rate': {'status': 'not_applicable', 'reason': '该类型公司通常无物理产能', 'source_excerpt': None},
+                }
+            else:
+                result['data_availability'] = {
+                    'utilization_rate': {'status': 'not_found', 'reason': '招股书未披露产能利用率', 'source_excerpt': None},
+                }
         except Exception as e:
             logger.warning("%s: %s", type(self).__name__, e)
             result['_error'] = str(e)

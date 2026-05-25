@@ -17,6 +17,7 @@ from api.schemas.common import JobStatus
 from api.services.history_service import HistoryService
 from api.services.storage_service import StorageService
 from api.workers.analyze_worker import run_reanalyze, run_upload_analysis
+from ipo_analyzer._url_validation import sanitize_filename
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +35,14 @@ async def upload_and_analyze(
     if not pdf.filename or not pdf.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
 
+    safe_filename = sanitize_filename(pdf.filename)
     max_size_bytes = config.max_upload_size_mb * 1024 * 1024
+
     chunks = []
     total_size = 0
+    chunk_size = 1024 * 1024
     while True:
-        chunk = await pdf.read(1024 * 1024)
+        chunk = await pdf.read(chunk_size)
         if not chunk:
             break
         total_size += len(chunk)
@@ -52,7 +56,7 @@ async def upload_and_analyze(
     file_bytes = b"".join(chunks)
 
     storage_svc = StorageService(config)
-    upload_path = storage_svc.save_upload(file_bytes, pdf.filename)
+    upload_path = storage_svc.save_upload(file_bytes, safe_filename)
 
     history_svc = HistoryService(str(config.db_path))
     job = history_svc.create_job(

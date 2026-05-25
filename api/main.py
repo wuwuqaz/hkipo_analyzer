@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import get_config
-from api.routers import analyze, blogger, health, history, live, peers, reports
+from api.routers import analyze, backtest, blogger, health, history, live, peers, reports
 
 # 自动加载 .env 文件
 load_dotenv()
@@ -49,3 +49,4 @@ app.include_router(history.router)
 app.include_router(reports.router)
 app.include_router(peers.router)
 app.include_router(blogger.router)
+app.include_router(backtest.router)

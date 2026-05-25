@@ -10,7 +10,9 @@ import os
 import re
 import shutil
 import logging
+import time
 from datetime import date, datetime
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +92,8 @@ def normalize_ticker_for_yahoo(ticker):
     return t.upper()
 
 
-# 静态汇率表 (HKD base)
-_FX_TO_HKD = {
+# 静态汇率表 (HKD base) — 作为动态汇率获取失败的回退
+_FALLBACK_FX_TO_HKD = {
     "HKD": 1.0, "HKD/HKD": 1.0,
     "USD": 7.8, "USD/HKD": 7.8,
     "CNY": 1.08, "CNY/HKD": 1.08,
@@ -99,15 +101,48 @@ _FX_TO_HKD = {
     "RMB": 1.08, "RMB/HKD": 1.08,
 }
 
+_FX_CACHE: dict[str, tuple[float, float]] = {}
+_FX_CACHE_TTL = 86400.0
+
+
+def _fetch_live_fx_rate(currency: str) -> Optional[float]:
+    try:
+        import akshare as ak
+        import time
+        pair = f"{currency}HKD"
+        df = ak.currency_quote(symbol=pair)
+        if df is not None and len(df) > 0:
+            rate = float(df.iloc[-1]["最新价"])
+            if rate > 0:
+                return rate
+    except Exception:
+        pass
+    return None
+
 
 def get_fx_to_hkd(currency):
-    """获取货币对港币汇率，无法识别返回 None"""
+    """获取货币对港币汇率，优先动态获取，失败回退静态表"""
     if not currency:
         return None
     cur = str(currency).upper().strip().replace(" ", "")
-    if '/' in cur:
-        cur = cur.split('/')[0]
-    return _FX_TO_HKD.get(cur)
+    if "/" in cur:
+        cur = cur.split("/")[0]
+
+    now = time.time()
+    cached = _FX_CACHE.get(cur)
+    if cached and (now - cached[1]) < _FX_CACHE_TTL:
+        return cached[0]
+
+    live_rate = _fetch_live_fx_rate(cur)
+    if live_rate is not None and live_rate > 0:
+        _FX_CACHE[cur] = (live_rate, now)
+        return live_rate
+
+    fallback = _FALLBACK_FX_TO_HKD.get(cur)
+    if fallback is not None:
+        _FX_CACHE[cur] = (fallback, now)
+        return fallback
+    return None
 
 
 def to_hkd_million(value, currency):
@@ -290,6 +325,31 @@ class PeerDataStore:
 
 
 # ---------------------------------------------------------------------------
+# CompositeProvider — 优先 AKShare(国内源), 回退 YahooFinance
+# ---------------------------------------------------------------------------
+
+class CompositeProvider:
+    """组合数据源: 港股/A股优先 AKShare, 其余回退 yfinance"""
+
+    def __init__(self):
+        self._ak = AKShareProvider()
+        self._yf = YahooFinanceProvider()
+
+    def fetch_metrics(self, ticker: str) -> dict:
+        t = str(ticker).strip().upper()
+        is_hk = t.endswith(".HK") or re.match(r'^\d{4,5}$', t)
+        is_a = t.endswith(".SS") or t.endswith(".SZ") or re.match(r'^[06]\d{5}$', t)
+
+        if is_hk or is_a:
+            result = self._ak.fetch_metrics(ticker)
+            if not result.get("update_error"):
+                return result
+            logger.info("AKShare 失败 (%s), 回退 yfinance: %s", ticker, result.get("update_error"))
+
+        return self._yf.fetch_metrics(ticker)
+
+
+# ---------------------------------------------------------------------------
 # YahooFinanceProvider — 正确处理币种和单位
 # ---------------------------------------------------------------------------
 
@@ -423,6 +483,167 @@ class YahooFinanceProvider:
 
 
 # ---------------------------------------------------------------------------
+# AKShareProvider — 通过 AKShare 获取港股/A股行情 (国内源, 更稳定)
+# ---------------------------------------------------------------------------
+
+class AKShareProvider:
+    """通过 AKShare 获取港股/A股财务指标
+
+    优先于 YahooFinanceProvider 用于港股代码 (xxxx.HK) 和 A股代码 (xxxx.SZ/SS)
+    返回格式与 YahooFinanceProvider 完全一致 (HKD million 单位)
+    """
+
+    def fetch_metrics(self, ticker: str) -> dict:
+        empty = {
+            "market_cap_hkd_million": None, "revenue_million": None,
+            "net_profit_million": None, "ps": None, "pe": None,
+            "gross_margin_pct": None, "revenue_growth_pct": None,
+            "currency": None, "financial_currency": None,
+            "source_date": date.today().isoformat(),
+            "last_checked_at": date.today().isoformat(),
+            "data_quality": "low", "needs_refresh": True,
+        }
+
+        if not ticker or ticker == "private":
+            empty["update_error"] = "private ticker — 不获取行情"
+            return empty
+
+        ak_code = self._normalize_ticker_for_akshare(ticker)
+        if ak_code is None:
+            empty["update_error"] = f"无法转换为 AKShare 代码: {ticker}"
+            return empty
+
+        try:
+            import akshare as ak
+        except ImportError:
+            empty["update_error"] = "akshare 未安装; pip install akshare"
+            return empty
+
+        is_hk = ".HK" in ticker.upper() or re.match(r'^\d{4,5}$', ticker.strip())
+        currency = "HKD" if is_hk else "CNY"
+        financial_currency = currency
+
+        try:
+            if is_hk:
+                df = ak.stock_hk_financial_indicator_em(symbol=ak_code)
+            else:
+                df = ak.stock_financial_analysis_indicator_em(symbol=ak_code)
+        except Exception as e:
+            empty["update_error"] = f"AKShare 获取 {ak_code} 失败: {e}"
+            return empty
+
+        if df is None or len(df) == 0:
+            empty["update_error"] = f"AKShare 返回 {ak_code} 空数据"
+            return empty
+
+        row = df.iloc[0]
+
+        if is_hk:
+            mkt_cap_raw = row.get("总市值(港元)")
+            pe_raw = row.get("市盈率", row.get("滚动市盈率"))
+            pb_raw = row.get("市净率", row.get("pb"))
+            rev_raw = row.get("营业总收入", row.get("营业总收入(港元)"))
+            np_raw = row.get("净利润", row.get("净利润(港元)"))
+            roe_raw = row.get("股东权益回报率(%)", row.get("roe"))
+            gross_margin_raw = None
+        else:
+            mkt_cap_raw = None
+            pe_raw = row.get("市盈率", row.get("滚动市盈率"))
+            pb_raw = row.get("市净率", row.get("pb"))
+            rev_raw = row.get("营业总收入", row.get("营业总收入(元)"))
+            np_raw = row.get("净利润", row.get("净利润(元)"))
+            roe_raw = row.get("净资产收益率(%)", row.get("roe"))
+            gross_margin_raw = row.get("销售毛利率(%)", row.get("毛利率"))
+
+        def _to_float(v):
+            if v is None:
+                return None
+            try:
+                f = float(v)
+                return f if _is_num(f) else None
+            except (ValueError, TypeError):
+                return None
+
+        fx = get_fx_to_hkd(currency)
+        if fx is None:
+            empty["update_error"] = f"无法获取 {currency}→HKD 汇率"
+            empty["currency"] = currency
+            return empty
+
+        mkt_cap_hkd_m = to_hkd_million(mkt_cap_raw, currency) if _is_num(_to_float(mkt_cap_raw)) else None
+        if mkt_cap_hkd_m is None:
+            mkt_cap_raw_f = _to_float(mkt_cap_raw)
+            if mkt_cap_raw_f is not None:
+                mkt_cap_hkd_m = round(mkt_cap_raw_f * fx / 1_000_000, 2)
+
+        rev_hkd_m = to_hkd_million(rev_raw, financial_currency) if _is_num(_to_float(rev_raw)) else None
+        if rev_hkd_m is None:
+            rev_raw_f = _to_float(rev_raw)
+            if rev_raw_f is not None:
+                rev_hkd_m = round(rev_raw_f * fx / 1_000_000, 2)
+
+        np_hkd_m = to_hkd_million(np_raw, financial_currency) if _is_num(_to_float(np_raw)) else None
+        if np_hkd_m is None:
+            np_raw_f = _to_float(np_raw)
+            if np_raw_f is not None:
+                np_hkd_m = round(np_raw_f * fx / 1_000_000, 2)
+
+        pe = _to_float(pe_raw)
+        if pe is not None and pe < 0:
+            pe = None
+
+        ps = round(mkt_cap_hkd_m / rev_hkd_m, 2) if _is_num(mkt_cap_hkd_m) and _is_num(rev_hkd_m) and rev_hkd_m > 0 else None
+        if pe is None and _is_num(mkt_cap_hkd_m) and _is_num(np_hkd_m) and np_hkd_m > 0:
+            pe = round(mkt_cap_hkd_m / np_hkd_m, 2)
+
+        gross_margin_pct = _to_float(gross_margin_raw)
+
+        result = {
+            "market_cap_hkd_million": mkt_cap_hkd_m,
+            "revenue_million": rev_hkd_m,
+            "net_profit_million": np_hkd_m,
+            "ps": ps,
+            "pe": pe,
+            "gross_margin_pct": gross_margin_pct,
+            "revenue_growth_pct": None,
+            "currency": currency,
+            "financial_currency": financial_currency,
+            "source_date": date.today().isoformat(),
+            "last_checked_at": date.today().isoformat(),
+            "data_quality": "high" if (_is_num(ps) or _is_num(pe)) else "low",
+            "needs_refresh": False,
+        }
+
+        has_valid = _is_num(mkt_cap_hkd_m) or _is_num(rev_hkd_m)
+        if not has_valid:
+            result["data_quality"] = "low"
+            result["needs_refresh"] = True
+            result["update_error"] = f"AKShare 返回 {ak_code} 关键数据缺失"
+
+        return result
+
+    @staticmethod
+    def _normalize_ticker_for_akshare(ticker: str) -> Optional[str]:
+        t = str(ticker).strip()
+        if not t or t == "private":
+            return None
+        if t.endswith(".HK"):
+            code = t[:-3].lstrip("0")
+            return code.zfill(5)
+        if re.match(r'^\d{4,5}$', t):
+            return t.zfill(5)
+        if t.endswith(".SS"):
+            return t.replace(".SS", "") + ".SH"
+        if t.endswith(".SZ"):
+            return t[:-3]
+        if re.match(r'^6\d{5}$', t):
+            return t + ".SH"
+        if re.match(r'^0\d{5}$', t) or re.match(r'^3\d{5}$', t):
+            return t + ".SZ"
+        return None
+
+
+# ---------------------------------------------------------------------------
 # PeerMetricsUpdater — 批量写入只备份一次
 # ---------------------------------------------------------------------------
 
@@ -432,9 +653,9 @@ class PeerMetricsUpdater:
     写入模式：先 load → 在内存批量修改 → 统一 backup + save
     """
 
-    def __init__(self, data_path=None):
+    def __init__(self, data_path=None, provider=None):
         self.store = PeerDataStore(data_path)
-        self.provider = YahooFinanceProvider()
+        self.provider = provider or CompositeProvider()
 
     def update_all(self, stale_only=True, dry_run=True):
         return self._batch_update(stale_only=stale_only, dry_run=dry_run)

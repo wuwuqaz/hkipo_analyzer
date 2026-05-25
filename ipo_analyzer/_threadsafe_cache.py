@@ -1,4 +1,4 @@
-"""线程安全的 LRU 缓存，替代 OrderedDict + 手动管理的模式."""
+"""线程安全 LRU 缓存，替代 OrderedDict + 手动管理的模式."""
 
 from __future__ import annotations
 
@@ -10,17 +10,17 @@ from typing import Any, Optional
 class ThreadSafeLRUCache:
     def __init__(self, maxsize: int = 256):
         self._maxsize = maxsize
-        self._cache: OrderedDict[str, Any] = OrderedDict()
+        self._cache: OrderedDict[Any, Any] = OrderedDict()
         self._lock = threading.Lock()
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: Any) -> Optional[Any]:
         with self._lock:
             if key not in self._cache:
                 return None
             self._cache.move_to_end(key)
             return self._cache[key]
 
-    def put(self, key: str, value: Any) -> None:
+    def put(self, key: Any, value: Any) -> None:
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key)
@@ -30,7 +30,7 @@ class ThreadSafeLRUCache:
                 if len(self._cache) > self._maxsize:
                     self._cache.popitem(last=False)
 
-    def invalidate(self, key: str) -> None:
+    def invalidate(self, key: Any) -> None:
         with self._lock:
             self._cache.pop(key, None)
 
@@ -42,6 +42,6 @@ class ThreadSafeLRUCache:
         with self._lock:
             return len(self._cache)
 
-    def __contains__(self, key: str) -> bool:
+    def __contains__(self, key: Any) -> bool:
         with self._lock:
             return key in self._cache

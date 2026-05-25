@@ -64,14 +64,12 @@ hkipo_analyzer/
 │   ├── peer_comps.yaml             # 同行对比数据库（半动态：可手动更新或通过行情刷新）
 │   └── backups/                    # 更新前自动备份（自动生成）
 ├── api/                            # FastAPI 后端：REST API、任务队列、历史与报告接口
-├── frontend/                       # Next.js 前端：上传、历史、详情、同行库、重新分析
+├── frontend/                       # Next.js 前端：上传、历史、详情、同行库、重新分析、回测
 ├── ipo_analyzer/
 │   ├── __init__.py                 # 包初始化（含 __version__，不 eager import 重依赖）
 │   ├── models.py                   # 核心数据模型（dataclass + dict 兼容层）
 │   ├── settings.py                 # 配置与阈值集中管理
 │   ├── core.py                     # 核心编排（数据流 + 评分 pipeline）
-│   ├── _threadsafe_cache.py         # 线程安全 LRU 缓存（替代散落的 OrderedDict/dict）
-│   ├── _url_validation.py           # URL 域名白名单 + 文件名清理（防 SSRF/路径遍历）
 │   ├── peer_comps.py               # 同行对比与相对估值分析（懒加载 pyyaml）
 │   ├── peer_data.py                # 同行库数据服务层（YAML 读写/备份/行情更新）
 │   ├── downloader.py               # AiPO 孖展数据 + HKEX 招股书下载
@@ -81,6 +79,7 @@ hkipo_analyzer/
 │   ├── prospectus_basic_extractor.py # 招股书基础信息提取
 │   ├── analyzers/                  # 8 个分析器（估值/业务/地理/客户/现金流/产能/研发/风险）
 │   ├── scoring.py                  # 评分系统（基本面/进阶框架/综合评分）
+│   ├── scoring/                    # 评分管道（类型安全，7 步组件）
 │   ├── cornerstone.py              # 基石投资者分析
 │   ├── cache.py                    # 结果缓存（7天 TTL）
 │   ├── history.py                  # 历史数据持久化
@@ -96,6 +95,22 @@ hkipo_analyzer/
 │   │   ├── consensus.py            # 共识汇总
 │   │   ├── service.py              # Service 层编排
 │   │   └── __main__.py             # CLI 入口
+│   ├── backtest/                   # 回测框架 & 贝叶斯权重优化
+│   │   ├── models.py               # BacktestRecord / BacktestResult / OptimizationResult
+│   │   ├── collector.py            # 从 ipo_history.json 提取样本
+│   │   ├── engine.py               # 评分回放 + Spearman IC + 十分位分析
+│   │   ├── metrics.py              # 多目标函数 + LOO CV
+│   │   ├── optimizer.py            # GP+EI 贝叶斯优化（纯 numpy）
+│   │   ├── store.py                # SQLite 持久化
+│   │   ├── cli.py                  # run / optimize / report / status 子命令
+│   │   ├── ipo_models.py           # IPOBacktestRecord / AllotmentExtractionResult / ProspectusSignalResult
+│   │   ├── feature_builder.py      # Rolling 特征构建（防未来函数）
+│   │   └── ipo_backtester.py       # IPO 首日表现回测引擎 + CSV/Markdown 输出
+│   ├── data_sources/               # 本地数据源
+│   │   └── hkex_news_crawler.py    # 本地 PDF 扫描与分类
+│   ├── extractors/                 # 提取器
+│   │   ├── allotment_result_extractor.py   # 配发公告提取
+│   │   └── prospectus_signal_extractor.py  # 招股书信号提取
 │   └── utils.py                    # 共用工具函数
 ├── scripts/
 │   ├── test_peer_comps.py          # 同行对比单元测试
@@ -166,24 +181,18 @@ hkipo_analyzer/
 
 ### 0.5.6-alpha — 2026-05-25
 
-- **concurrency: 线程安全缓存全量替换**：消除 FastAPI 并发场景下的数据竞争风险
-  - 新建 `_threadsafe_cache.py`：带锁 LRU 缓存 `ThreadSafeLRUCache`（maxsize + eviction + contains + len）
-  - `parser.py`：模块级 `OrderedDict` → `ThreadSafeLRUCache(maxsize=8)`，消除 `_PARSE_CACHE` 无锁访问
-  - `scoring.py`：全局 `_optimized_weights_cache` / `_optimized_weights_cache_time` → `ThreadSafeLRUCache`（单 key "weights" 缓存）
-  - `downloader.py`：类级 `_listing_cache: dict = {}` → `ThreadSafeLRUCache(maxsize=128)`
-  - `parser.py`：消除 `self._current_info` 可变实例状态，`_extract_metric_with_fallback` 改为接收 `info` 参数而非读写实例属性
-- **security: URL 校验防 SSRF**：新建 `_url_validation.py`
-  - `validate_download_url()`：域名白名单（仅允许 hkexnews.hk / hkex.com.hk / aipo.com 等），拒绝 ftp/未知域名
-  - `sanitize_filename()`：去除路径遍历字符（`../`）、多余点号、特殊字符
-  - `downloader.py` 集成：`_download_pdf_with_fallback`（httpx + curl）和 `_find_matching_row` 中所有网络 URL 均经校验
-- **security: API 认证与 CORS 加固**
-  - `auth.py`：`HKIPO_REQUIRE_API_TOKEN` 默认开启（`false` → `true`），显式设置 `false` 才关闭
-  - `main.py`：CORS `allow_methods=["*"]` → `["GET","POST","PUT","DELETE","OPTIONS"]`，`allow_headers=["*"]` → `["Authorization","Content-Type","X-API-Token"]`
-- **security: 文件上传安全**
-  - `analyze.py`：`await pdf.read()` 全量读入内存 → 1MB 分块流式读取 + 渐进大小检查
-  - `storage_service.py`：`save_upload` 集成 `sanitize_filename()`，记录文件名日志但不用于存储路径（存储路径使用 UUID）
-- **tests: 新增 20 个测试**：`test_threadsafe_cache.py`（7 个，含并发压力测试）、`test_url_validation.py`（13 个，覆盖合法/非法 URL 和文件名清理）
-- 全部变更零回归：480 通过（+20 新增），7 个预存失败不变
+- **feat: IPO 首日表现/情绪面回测模块**：新增独立的「底色 x 风向」分组回测，不替代现有评分回测
+  - `ipo_analyzer/backtest/ipo_models.py`：`IPOBacktestRecord`（21 字段）、`AllotmentExtractionResult`、`ProspectusSignalResult`
+  - `ipo_analyzer/data_sources/hkex_news_crawler.py`：本地 PDF 扫描，按关键词分类 prospectus / allotment_result / offer_price
+  - `ipo_analyzer/extractors/allotment_result_extractor.py`：从配发公告提取发售价、超购倍数、一手中签率、回拨比例
+  - `ipo_analyzer/extractors/prospectus_signal_extractor.py`：从招股书提取绿鞋、保荐人、基石投资者、独立性判断（related / independent / mixed / unknown）
+  - `ipo_analyzer/backtest/feature_builder.py`：Rolling 特征构建（防未来函数），上市日前 90 天市场中位数、24 个月/20 样本保荐人弹性、底色 good/weak（2+ 条件）、风向 strong/weak（2+ 条件）
+  - `ipo_analyzer/backtest/ipo_backtester.py`：回测引擎，输出 8 类分组统计 + CSV + Markdown 报告
+  - `api/routers/backtest.py`：`GET /api/backtest/ipo-first-day`、`GET /api/backtest/status`
+  - `frontend/src/app/backtest/page.tsx`：回测 UI 页面（统计卡片、分组对比表、2x2 矩阵、可排序个股明细）
+  - 导航栏新增「回测」链接
+  - CLI：`python -m ipo_analyzer ipo-first-day --input ... --output-csv ... --report ...`
+  - 42 个新增测试全部通过，27 个原有回测测试零回归
 
 ### 0.5.5-alpha — 2026-05-25
 
@@ -334,7 +343,8 @@ api/
 │   ├── history.py          # /api/history/records, export
 │   ├── reports.py          # /api/reports/jobs/{id}/json, pdf
 │   ├── peers.py            # /api/peers, peers/refresh
-│   └── blogger.py          # /api/blogger/{code}, blogger/{code}/search
+│   ├── blogger.py          # /api/blogger/{code}, blogger/{code}/search
+│   └── backtest.py         # /api/backtest/ipo-first-day, /api/backtest/status
 ├── schemas/                # Pydantic v2 模型
 ├── services/
 │   ├── storage_service.py  # 上传/结果文件存储
@@ -350,7 +360,9 @@ frontend/
 │   ├── upload/page.tsx     # PDF 上传
 │   ├── history/page.tsx    # 任务历史列表
 │   ├── jobs/[jobId]/page.tsx  # 任务详情与结果展示
-│   └── reanalyze/page.tsx  # 按股票代码重新分析
+│   ├── reanalyze/page.tsx  # 按股票代码重新分析
+│   ├── peers/page.tsx      # 同行库管理
+│   └── backtest/page.tsx   # IPO 首日表现回测
 ├── src/components/results/ # 结果卡片：评分、估值、同行、基石、风险等
 ├── src/lib/api.ts          # 同构 API 客户端（服务端 fetch + 客户端 upload）
 └── src/lib/types.ts        # TypeScript 类型定义
@@ -418,6 +430,7 @@ NGINX_TEMPLATE=full docker compose --profile frontend up -d
 | 同行库管理 | `/peers` | `GET /api/peers`, `POST /api/peers/refresh` | ✅ 已完成 |
 | 博主观点搜索与展示 | Job 详情页卡片 | `GET /api/blogger/{code}`, `POST /api/blogger/{code}/search` | ✅ 已完成 |
 | 报告导出（PDF/JSON） | Job 详情页下载按钮 | `GET /api/reports/jobs/{id}/pdf`, `/json` | ✅ 已完成 |
+| IPO 首日回测 | `/backtest` | `GET /api/backtest/ipo-first-day`, `/api/backtest/status` | ✅ 已完成 |
 
 ---
 

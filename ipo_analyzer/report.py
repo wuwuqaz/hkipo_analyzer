@@ -1076,18 +1076,46 @@ def export_pdf_report(results, output_file):
                 Paragraph(_compact_detail(ps_detail), styles["MutedValue"]),
             ])
 
+            market_stats = peer_comparison.get('market_peer_stats') or {}
+            for market_key in ('hk', 'a_share', 'us'):
+                stat = market_stats.get(market_key) or {}
+                peer_count = stat.get('peer_count') or 0
+                if peer_count <= 0:
+                    continue
+                market_name = stat.get('market') or {'hk': '港股', 'a_share': 'A股', 'us': '美股'}[market_key]
+                market_ps = stat.get('peer_median_ps')
+                market_pe = stat.get('peer_median_pe')
+                market_premium = stat.get('relative_ps_premium_pct')
+                market_position = stat.get('valuation_position') or '--'
+                metric_parts = [f"{peer_count}家"]
+                if market_ps is not None:
+                    metric_parts.append(f"PS {market_ps:.1f}x")
+                if market_pe is not None:
+                    metric_parts.append(f"PE {market_pe:.1f}x")
+                if market_premium is not None:
+                    metric_parts.append(f"溢价 {market_premium:+.0f}%")
+                market_peers = "、".join(
+                    p.get('name', '') for p in (stat.get('peers') or [])[:3] if p.get('name')
+                )
+                pc_rows.append([
+                    Paragraph(f"<b>{market_name}</b>", styles["Value"]),
+                    Paragraph(market_position, styles["Value"]),
+                    Paragraph(_compact_detail(" | ".join(metric_parts) + (f" | {market_peers}" if market_peers else "")), styles["MutedValue"]),
+                ])
+
             # 同行列表（最多5家）
             peers_short = peer_comparison.get('matched_peers', [])[:5]
             for p in peers_short:
                 p_name = p.get('name', '')
                 p_ticker = p.get('ticker', '')
                 p_type = p.get('type', '')
+                p_market = p.get('market') or ('未上市' if p_type != 'listed' else '')
                 p_ps = f"PS {p.get('ps'):.1f}x" if p.get('ps') else '--'
                 p_pe = f"PE {p.get('pe'):.1f}x" if p.get('pe') else '--'
                 p_gm = f"毛利率{p.get('gross_margin_pct'):.0f}%" if p.get('gross_margin_pct') else ''
                 p_gr = f"增长{p.get('revenue_growth_pct'):.0f}%" if p.get('revenue_growth_pct') else ''
                 p_detail = f"{p_ps} {p_pe} {p_gm} {p_gr}"
-                type_tag = "(上市)" if p_type == 'listed' else "(未上市)"
+                type_tag = f"({p_market})" if p_market else ("(上市)" if p_type == 'listed' else "(未上市)")
                 pc_rows.append([
                     Paragraph(f"{p_name} {type_tag}", styles["Value"]),
                     Paragraph(p_ticker, styles["MutedValue"]),

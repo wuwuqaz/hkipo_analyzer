@@ -1,6 +1,8 @@
 """评分系统 — ScoringSystem + 向后兼容的 re-export"""
 
+import os
 import re
+import threading
 from typing import Optional
 
 from .quality_analyzer import ProspectusQualityAnalyzer  # noqa: F401
@@ -16,7 +18,9 @@ from ipo_analyzer.scoring import ScoringPipeline, AnalyzerOutputAdapter
 
 _AH_DUAL_RE = re.compile(r'dual\s+list|a\s*\+\s*h|a股.*h股|h股.*a股|ah上市|a shares?\s+and\s+h shares?', re.IGNORECASE)
 
-_optimized_weights_cache = ThreadSafeLRUCache(maxsize=8)
+_weights_cache_lock = threading.Lock()
+_optimized_weights = ThreadSafeLRUCache(maxsize=8)
+_optimized_weights_mtime: float = 0.0
 
 
 class ScoringSystem:
@@ -154,7 +158,7 @@ class ScoringSystem:
         return 20
 
     @staticmethod
-    def _calc_long_term_adjustments(cashflow, stock_quality, business):
+    def _calc_long_term_adjustments(cashflow, stock_quality, business, earnings_quality=None):
         sw = SETTINGS.scoring
         bonus = 0
         fisher_label = stock_quality.get('fisher_label', '缺失')
@@ -183,6 +187,16 @@ class ScoringSystem:
         wc_risks = cashflow.get('working_capital_risks') or []
         if any(('应收' in str(x)) or ('存货' in str(x)) for x in wc_risks):
             penalty += sw.long_wc_risk_penalty
+
+        # 盈利质量惩罚
+        if earnings_quality:
+            eq_score = earnings_quality.get('earnings_quality_score')
+            if _is_num(eq_score) and eq_score <= 35:
+                penalty += 3  # 盈利质量弱，额外惩罚
+            eq_label = earnings_quality.get('label')
+            if eq_label == '弱':
+                penalty += 2  # 盈利质量标签为弱，再惩罚
+
         return bonus, penalty, fisher_label, lynch_label
 
     @staticmethod
@@ -321,6 +335,7 @@ class ScoringSystem:
         risk_factors = prospectus_info.get('risk_factors') or {}
         stock_quality = prospectus_info.get('stock_quality') or {}
         peer_comparison = prospectus_info.get('peer_comparison') or {}
+        earnings_quality = prospectus_info.get('earnings_quality') or {}
         sw = SETTINGS.scoring
 
         if valuation_score <= 0:
@@ -330,6 +345,16 @@ class ScoringSystem:
         financial_health_score, _ = self._calc_financial_health_score(cashflow)
         growth_quality_score = self._calc_growth_quality_score(prospectus_info)
         stock_connect_score = self._calc_stock_connect_score(prospectus_info)
+
+        # 盈利质量调整：如果盈利质量评分可用，调整财务健康度评分
+        earnings_quality_score = earnings_quality.get('earnings_quality_score')
+        if _is_num(earnings_quality_score) and earnings_quality_score > 0:
+            # 盈利质量强：财务健康度 +5
+            # 盈利质量弱：财务健康度 -5
+            if earnings_quality_score >= 70:
+                financial_health_score = min(100, financial_health_score + 5)
+            elif earnings_quality_score <= 35:
+                financial_health_score = max(0, financial_health_score - 5)
 
         long_raw = (
             fundamental_score * sw.long_fundamental_w
@@ -342,7 +367,7 @@ class ScoringSystem:
         )
 
         bonus, penalty, fisher_label, lynch_label = self._calc_long_term_adjustments(
-            cashflow, stock_quality, business
+            cashflow, stock_quality, business, earnings_quality
         )
         long_raw += bonus
 
@@ -455,8 +480,6 @@ class ScoringSystem:
 
     @staticmethod
     def _try_load_optimized_weights():
-        import os
-
         path = SETTINGS.backtest.optimized_weights_path
         try:
             stat = os.stat(path)
@@ -464,9 +487,12 @@ class ScoringSystem:
         except (OSError, FileNotFoundError):
             return None
 
-        cached = _optimized_weights_cache.get("weights")
-        if cached is not None:
-            return cached
+        global _optimized_weights_mtime
+        with _weights_cache_lock:
+            if mtime == _optimized_weights_mtime:
+                cached = _optimized_weights.get("weights")
+                if cached is not None:
+                    return cached
 
         try:
             import yaml
@@ -477,7 +503,9 @@ class ScoringSystem:
                 required = ["trade", "fundamental", "valuation", "theme", "data_quality"]
                 if all(k in w for k in required):
                     logger.info("加载优化权重: %s", w)
-                    _optimized_weights_cache.put("weights", w)
+                    with _weights_cache_lock:
+                        _optimized_weights.put("weights", w)
+                        _optimized_weights_mtime = mtime
                     return w
         except Exception:
             pass

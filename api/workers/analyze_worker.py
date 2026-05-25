@@ -1,5 +1,7 @@
 import asyncio
+import json
 import logging
+import os
 import traceback
 from typing import Optional
 
@@ -24,6 +26,55 @@ async def _refresh_live_blogger_consensus_async(results, output_dir: str) -> Non
     from ipo_analyzer.core import _refresh_live_blogger_consensus
 
     await asyncio.to_thread(_refresh_live_blogger_consensus, results, output_dir)
+
+
+def _cornerstone_quality(item: dict) -> tuple[int, int, int]:
+    ca = ((item or {}).get("prospectus_info") or {}).get("cornerstone_analysis") or {}
+    rows = ca.get("cornerstone_investors") or []
+    unknown = sum(1 for row in rows if not row.get("category") or row.get("category") == "未知")
+    known = max(0, len(rows) - unknown)
+    try:
+        score = int(ca.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0
+    return (known, len(rows), score)
+
+
+def _protect_cornerstone_regressions(results: list[dict], output_dir: str) -> list[dict]:
+    """Avoid replacing a well-classified cornerstone result with a weaker live parse."""
+    cache_file = os.path.join(output_dir, "results_cache.json")
+    if not os.path.exists(cache_file):
+        return results
+    try:
+        with open(cache_file, "r", encoding="utf-8") as f:
+            existing_items = json.load(f)
+    except Exception:
+        return results
+    if not isinstance(existing_items, list):
+        return results
+
+    existing_by_code = {
+        str(item.get("hk_code") or item.get("stock_code") or "").zfill(5): item
+        for item in existing_items
+        if isinstance(item, dict) and (item.get("hk_code") or item.get("stock_code"))
+    }
+
+    for item in results:
+        code = str(item.get("hk_code") or item.get("stock_code") or "").zfill(5)
+        existing = existing_by_code.get(code)
+        if not existing:
+            continue
+        old_ca = ((existing.get("prospectus_info") or {}).get("cornerstone_analysis") or {})
+        new_pi = item.get("prospectus_info") or {}
+        new_ca = new_pi.get("cornerstone_analysis") or {}
+        if not old_ca or not new_ca:
+            continue
+        if _cornerstone_quality(existing) > _cornerstone_quality(item):
+            new_pi["cornerstone_analysis"] = old_ca
+            new_pi["cornerstone_investors"] = old_ca.get("cornerstone_investors", [])
+            new_pi["cornerstone_pct"] = old_ca.get("cornerstone_pct")
+            item["prospectus_info"] = new_pi
+    return results
 
 
 def run_upload_analysis(job_id: str, upload_path: str,
@@ -192,6 +243,7 @@ def run_live_analysis(job_id: str, force_refresh: bool = False, output_dir: str 
 
             results = result.get("results", [])
             if results:
+                results = _protect_cornerstone_regressions(results, output_dir)
                 from ipo_analyzer.cache import ResultCache
                 cache = ResultCache(output_dir)
                 cache.save(results)

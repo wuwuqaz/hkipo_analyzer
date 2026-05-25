@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 # ---- 基石分析器预编译正则 ----
 _CRE_CONTROL = re.compile(r'[\x00-\x1f\x7f-\x9f\u0002]+')
 _CRE_WHITESPACE = re.compile(r'\s+')
+_CRE_DOT_LEADER = re.compile(r'(?:\s*\.\s*){3,}')
 _CRE_LEADING_PARENS = re.compile(r'^\([0-9]+\)\s*')
 _CRE_NUMBER = re.compile(r'([0-9,]+(?:\.[0-9]+)?)')
 _CRE_PARENS_ONLY = re.compile(r'\([0-9]+\)')
@@ -109,10 +110,7 @@ _HEADER_PREFIX_PATTERNS = [re.compile(p, re.IGNORECASE) for p in [
 def _load_investor_profiles():
     """从 YAML 加载基石投资者档案，加载失败时回退到内置数据。"""
     import yaml as _yaml
-    yaml_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "data", "cornerstone_investors.yaml",
-    )
+    yaml_path = _investor_profiles_yaml_path()
     try:
         with open(yaml_path, "r", encoding="utf-8") as f:
             data = _yaml.safe_load(f)
@@ -124,7 +122,50 @@ def _load_investor_profiles():
     return CornerstoneAnalyzer._BUILTIN_INVESTOR_PROFILES
 
 
+def _investor_profiles_yaml_path():
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data", "cornerstone_investors.yaml",
+    )
+
+
+def investor_profiles_signature():
+    """Return a signature that changes whenever the external profile YAML changes."""
+    yaml_path = _investor_profiles_yaml_path()
+    try:
+        stat = os.stat(yaml_path)
+        return (os.path.abspath(yaml_path), stat.st_mtime, stat.st_size)
+    except OSError:
+        return ("builtin", 0, 0)
+
+
 class CornerstoneAnalyzer:
+    _INVESTOR_PROFILE_SIGNATURE = None
+
+    def __init__(self):
+        self._ensure_investor_profiles_current()
+
+    @classmethod
+    def _set_investor_profiles(cls, profiles, signature=None):
+        cls.INVESTOR_PROFILES = profiles
+        cls._INVESTOR_PROFILE_SIGNATURE = signature or investor_profiles_signature()
+        cls.S_TIER = [
+            (p['name'], p['aliases'])
+            for p in cls.INVESTOR_PROFILES
+            if p['tier'] == 'S'
+        ]
+        cls.A_TIER = [
+            (p['name'], p['aliases'])
+            for p in cls.INVESTOR_PROFILES
+            if p['tier'] == 'A'
+        ]
+
+    @classmethod
+    def _ensure_investor_profiles_current(cls):
+        signature = investor_profiles_signature()
+        if cls._INVESTOR_PROFILE_SIGNATURE != signature:
+            cls._set_investor_profiles(_load_investor_profiles(), signature)
+
     def test_is_noise(line):
         import re
         _CRE_FLUSH_WHITESPACE = re.compile(r'\s+')
@@ -1368,7 +1409,11 @@ class CornerstoneAnalyzer:
         line = _CRE_CONTROL.sub(' ', line)
         line = line.replace('  ', ' ')
         line = _CRE_WHITESPACE.sub(' ', line)
-        return line.strip(' \t\r\n-–—')
+        line = line.strip(' \t\r\n-–—')
+        # Strip PDF dot leaders from table-of-contents formatting (e.g., "Name . . . . . 123")
+        line = _CRE_DOT_LEADER.sub(' ', line)
+        line = _CRE_WHITESPACE.sub(' ', line).strip()
+        return line
 
     @staticmethod
     def _parse_all_numbers(text):
@@ -1525,6 +1570,15 @@ class CornerstoneAnalyzer:
             '基石投资者',
             '基石配售',
         ]
+        def _looks_like_toc_entry(pos):
+            """Check if marker at pos is a table-of-contents entry (dot leaders + page number)."""
+            line_end = context.find('\n', pos)
+            if line_end < 0:
+                line_end = len(context)
+            line = context[pos:line_end]
+            # TOC entries: Title . . . . . . PageNum
+            return bool(_CRE_DOT_LEADER.search(line))
+
         start_idx = -1
         for marker in priority_markers:
             idx = lower_context.find(marker)
@@ -1539,6 +1593,19 @@ class CornerstoneAnalyzer:
                     break
         if start_idx < 0:
             return []
+
+        # Skip TOC entries — find the actual section body
+        if _looks_like_toc_entry(start_idx):
+            # Search for next occurrence after TOC entry
+            search_from = context.find('\n', start_idx) + 1
+            second_idx = -1
+            for marker in fallback_markers:
+                idx = lower_context.find(marker, search_from)
+                if idx >= 0 and not _looks_like_toc_entry(idx):
+                    second_idx = idx
+                    break
+            if second_idx >= 0:
+                start_idx = second_idx
 
         end_markers = [
             'notes:',
@@ -1655,6 +1722,16 @@ class CornerstoneAnalyzer:
 
         def _is_noise(line):
             ll = line.lower()
+            chinese_table_kws = (
+                '假設超額配股權', '基石投資者', '基石投资者', '認購金額', '认购金额',
+                '發售', '发售', '股份數目', '股份数目', '佔發售股份', '占发售股份',
+                '已發行股本', '已发行股本', '概約百分比', '概约百分比',
+                '美元', '港元', '基於發售價', '基于发售价', '附註', '附注',
+                '下表載列', '下表载列',
+            )
+            if any(kw in line for kw in chinese_table_kws):
+                return True
+
             if sum(1 for kw in _TABLE_KWS if kw in ll) >= 2:
                 return True
             
@@ -1737,6 +1814,20 @@ class CornerstoneAnalyzer:
             if _CRE_FLUSH_GENERIC.fullmatch(compact) and len(compact.split()) <= 4 and not any(kw in compact for kw in _INVESTOR_KEYWORDS):
                 return True
             if 'esop' in compact or 'employee share' in compact or 'employee stock' in compact:
+                return True
+            # Financial statement lines that should never be cornerstone investors
+            _FINANCIAL_NOISE = (
+                '年度溢利', '年度亏损', '綜合收益', '綜合虧損', '綜合損益',
+                '應付款項', '應收賬款', '貿易應收款', '其他應付款',
+                '物業', '設備', '固定資產', '在建工程', '無形資產',
+                '虧損撥備', '預期虧損', '預期信貸虧損', '減值虧損',
+                '處置', '折舊', '攤銷', '於20', '會計師報告',
+                '附錄', '財務報表', '資產負債表',
+                'profit', 'loss', 'balance sheet', 'income statement',
+                'property', 'plant', 'equipment', 'intangible',
+                'payables', 'receivables', 'depreciation', 'amortisation',
+            )
+            if any(kw in ll for kw in _FINANCIAL_NOISE):
                 return True
             return False
 
@@ -1858,9 +1949,22 @@ class CornerstoneAnalyzer:
                 return
 
             name_lower = name.lower()
-            bad_keywords = ['appropriate', 'assuming', 'completion', 'global offering', 
+            bad_keywords = ['appropriate', 'assuming', 'completion', 'global offering',
                            'issued share', 'share capital', 'over-allotment', 'offer size']
             if sum(1 for kw in bad_keywords if kw in name_lower) >= 2:
+                name_buffer = []
+                numeric_buffer = []
+                pending_flush = False
+                return
+
+            # Reject names that are clearly financial statement items
+            _FIN_NAME_KW = (
+                '年度溢利', '年度亏损', '綜合收益', '綜合虧損', '應付款項',
+                '貿易應收款', '虧損撥備', '預期虧損', '減值虧損',
+                '會計師報告', '財務報表', '資產負債表', 'income statement',
+                'balance sheet', 'profit loss', 'property plant',
+            )
+            if any(kw in name for kw in _FIN_NAME_KW):
                 name_buffer = []
                 numeric_buffer = []
                 pending_flush = False
@@ -2100,7 +2204,11 @@ class CornerstoneAnalyzer:
                 
                 # 检查 name_buffer 是否在等待 for and on behalf 的续行
                 waiting_for_behalf = 'for and on behalf' in current_name
-                
+
+                # 如果 numeric_buffer 已经有足够数据（>=6个数字），
+                # 下一个名字行应该被当作新投资者
+                has_sufficient_data = len(numeric_buffer) >= 6
+
                 # 检查当前行是否明显是新投资者
                 # 新投资者通常有2个或更多token，且包含投资者类型关键词
                 is_new_investor = (
@@ -2108,8 +2216,11 @@ class CornerstoneAnalyzer:
                     and any(kw in line_lower for kw in ['capital', 'asset', 'management', 'investments', 'star', 'group', 'corporation', 'ventures'])
                     and not line_lower.startswith('fund')
                     and not line_lower.startswith('scsp')
+                ) or (
+                    # Chinese investor name: 3+ chars, has_sufficient_data
+                    len(line) >= 3 and has_sufficient_data
                 )
-                
+
                 # 检查当前行是否看起来是续行
                 # 续行通常很短（<=4个token），且不包含数字
                 # 但如果包含 footnote 标记（如 ў），可能更长
@@ -2120,19 +2231,21 @@ class CornerstoneAnalyzer:
                     and not _is_noise(line)
                 )
                 
-                # 如果 numeric_buffer 已经有足够数据（>=6个数字），
-                # 下一个名字行应该被当作新投资者
-                has_sufficient_data = len(numeric_buffer) >= 6
-                
+                # If this is a total/summary row, flush previous and stop
+                if lower_line in ('總計', '总计', 'total', '合計', '合计'):
+                    flush_row()
+                    break
+
                 # 如果在等待 for and on behalf 的续行，且名字还不完整，优先当作续行
                 if waiting_for_behalf and not has_complete_name:
                     name_buffer.append(line)
+                # 如果已收集到足够数据，任何新名字都触发 flush（优先于续行判断）
+                elif has_sufficient_data:
+                    flush_row()
+                    name_buffer = [line]
                 elif looks_like_continuation and not has_complete_name:
                     name_buffer.append(line)
                 elif is_new_investor:
-                    flush_row()
-                    name_buffer = [line]
-                elif has_sufficient_data:
                     flush_row()
                     name_buffer = [line]
                 else:
@@ -2156,6 +2269,9 @@ class CornerstoneAnalyzer:
                     continue
 
             if lower_line == 'notes:':
+                break
+            if lower_line in ('總計', '总计', 'total', '合計', '合计'):
+                flush_row()
                 break
 
             name_buffer.append(line)
@@ -2260,37 +2376,37 @@ class CornerstoneAnalyzer:
             if full_name and full_name not in anchors:
                 anchors.append(full_name)
 
-            related_matches = []
-            related_profiles = []
-            seen = set()
-            for anchor in anchors:
-                detail_window = self._extract_cornerstone_detail_window(
-                    narrative,
-                    anchor,
-                    stop_anchors=row_stop_anchors,
-                )
-                if not detail_window:
-                    continue
-                for profile in self._matched_profiles(detail_window):
-                    key = (profile.get('name'), profile.get('tier'))
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    related_profiles.append(profile)
-                    related_matches.append(self._profile_match_payload(profile))
-
             direct_matches = []
             direct_profiles = []
+            direct_seen = set()
             row_text = f"{row.get('name', '')} {row.get('short_name', '')}"
             for profile in self._matched_profiles(row_text):
                 key = (profile.get('name'), profile.get('tier'))
-                if key not in seen:
-                    seen.add(key)
-                    direct_profiles.append(profile)
-                    direct_matches.append(self._profile_match_payload(profile))
-            if direct_profiles:
-                related_profiles = []
-                related_matches = []
+                if key in direct_seen:
+                    continue
+                direct_seen.add(key)
+                direct_profiles.append(profile)
+                direct_matches.append(self._profile_match_payload(profile))
+
+            related_matches = []
+            related_profiles = []
+            seen = set()
+            if not direct_profiles:
+                for anchor in anchors:
+                    detail_window = self._extract_cornerstone_detail_window(
+                        narrative,
+                        anchor,
+                        stop_anchors=row_stop_anchors,
+                    )
+                    if not detail_window:
+                        continue
+                    for profile in self._matched_profiles(detail_window):
+                        key = (profile.get('name'), profile.get('tier'))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        related_profiles.append(profile)
+                        related_matches.append(self._profile_match_payload(profile))
 
             # Prefer direct row-name matches over nearby narrative windows to avoid
             # short anchors (e.g. "ICBCUBS") inheriting the previous investor's profile.
@@ -2523,11 +2639,19 @@ class CornerstoneAnalyzer:
 
     def _build_combination_summary(self, rows):
         categories = [row.get('category', '') for row in rows]
+        sector = getattr(self, '_last_sector', 'unknown')
+        strategic_missing_label = (
+            '无产业药企/核心客户型战略基石'
+            if sector == 'healthcare'
+            else '无产业资本/核心客户型战略基石'
+        )
         groups = []
         if any('主权' in cat or '养老金' in cat for cat in categories):
             groups.append('国际主权/养老金')
         if any('全球顶级长线资管' in cat for cat in categories):
             groups.append('顶级资管')
+        if any('多策略' in cat or '对冲基金' in cat for cat in categories):
+            groups.append('多策略/对冲基金')
         if any('量化做市商' in cat for cat in categories):
             groups.append('量化做市商')
         if any('医疗专业基金' in cat for cat in categories):
@@ -2566,10 +2690,11 @@ class CornerstoneAnalyzer:
         if not any('主权' in cat or '养老金' in cat for cat in categories):
             missing.append('无国际主权')
         if not any('产业战略' in cat for cat in categories):
-            missing.append('无产业药企/客户型战略基石')
+            missing.append(strategic_missing_label)
         return f"{tier_info}；{' + '.join(groups)}" + ("；" + "、".join(missing) if missing else "")
 
     def _build_v2_result(self, cornerstone_rows, matched, cornerstone_pct, sector, sector_match, spv_flags):
+        self._last_sector = sector
         profile_rows = self._v2_profile_rows(cornerstone_rows, matched, sector)
         row_weights = []
         for row in profile_rows:
@@ -2669,7 +2794,10 @@ class CornerstoneAnalyzer:
         if not any('主权' in cat or '养老金' in cat for cat in categories):
             concerns.append('无国际主权: 未见GIC/Temasek/QIA/ADIA等主权或养老金基石')
         if not any('产业战略' in cat for cat in categories):
-            concerns.append('无产业药企/核心客户型战略基石，产业协同背书不足')
+            if sector == 'healthcare':
+                concerns.append('无产业药企/核心客户型战略基石，产业协同背书不足')
+            else:
+                concerns.append('无产业资本/核心客户型战略基石，产业协同背书不足')
         if spv_flags:
             concerns.append('SPV检查: ' + '；'.join(spv_flags[:3]))
         if weak_rows:
@@ -2798,18 +2926,8 @@ class CornerstoneAnalyzer:
         return result
 
 
-# 模块级加载：优先从 YAML 读取，失败回退到内置数据
-CornerstoneAnalyzer.INVESTOR_PROFILES = _load_investor_profiles()
-CornerstoneAnalyzer.S_TIER = [
-    (p['name'], p['aliases'])
-    for p in CornerstoneAnalyzer.INVESTOR_PROFILES
-    if p['tier'] == 'S'
-]
-CornerstoneAnalyzer.A_TIER = [
-    (p['name'], p['aliases'])
-    for p in CornerstoneAnalyzer.INVESTOR_PROFILES
-    if p['tier'] == 'A'
-]
+# 模块级加载：优先从 YAML 读取，失败回退到内置数据；运行中 YAML 变更会自动重载
+CornerstoneAnalyzer._set_investor_profiles(_load_investor_profiles(), investor_profiles_signature())
 
 
 # ---------------------------------------------------------------------------

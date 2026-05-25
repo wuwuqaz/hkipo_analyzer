@@ -263,6 +263,78 @@ def test_robot_factory_automation_peer_matching_and_weighting():
     assert result["valuation_position"] != "缺失"
 
 
+def test_peer_comparison_outputs_market_parallel_stats_when_hk_samples_exist():
+    prospectus_info = {
+        "sector": "hardtech",
+        "revenue": 387.36,
+        "revenue_y1": 267.83,
+        "market_cap_hkd_million": 7471.0,
+        "gross_margin": 24.8,
+        "business_breakdown": {
+            "growth_source": "主业增长 + 新业务贡献",
+            "segments": [
+                {"name": "Robot bodies", "share_pct": 32.0},
+                {"name": "Robotic solutions", "share_pct": 68.0},
+            ],
+            "business_model_label": "机器人解决方案为主",
+            "segment_moat_label": "方案驱动",
+        },
+        "rnd_pipeline": {
+            "pipeline_quality_label": "中",
+            "technology_moat_score": 6,
+            "hardtech_moat_reasons": ["专利286项", "在手订单约501.6M"],
+            "industry_rank": "第4位",
+        },
+        "_extracted_text": "Industrial robot body and robotic solution automation system",
+    }
+
+    result = PeerComparableAnalyzer().analyze(
+        prospectus_info,
+        prospectus_info["_extracted_text"],
+        {"company_name": "拓璞数控", "hk_code": "07688"},
+    )
+
+    stats = result["market_peer_stats"]
+    assert result["comparison_mode"] == "by_market"
+    assert result["primary_comparison_market"] == "composite"
+    assert stats["hk"]["peer_count"] >= 2
+    assert stats["a_share"]["peer_count"] >= 2
+    assert result["quantitative_basis"] == "composite_listed_peers"
+    assert result["quantitative_peer_count"] > stats["hk"]["peer_count"]
+    assert stats["a_share"]["valuation_position"] != "样本不足，仅作定性参考"
+    assert all(p["market"] == "A股" for p in stats["a_share"]["peers"])
+
+
+def test_peer_comparison_marks_single_market_sample_as_reference_only():
+    prospectus_info = {
+        "sector": "hardtech",
+        "revenue": 748.0,
+        "revenue_y1": 467.5,
+        "market_cap_hkd_million": 8786.68,
+        "financial_currency": "RMB",
+        "business_breakdown": {
+            "segments": [
+                {"name": "Visual Perception Products", "share_pct": 81.1},
+                {"name": "Robot lawn mowers", "share_pct": 18.3},
+            ],
+            "growth_source": "主业增长 + 新业务贡献",
+        },
+    }
+    text = "visual perception products sensors algorithm modules robot lawn mowers"
+
+    result = PeerComparableAnalyzer().analyze(
+        prospectus_info,
+        text,
+        {"company_name": "LDROBOT", "hk_code": "01236"},
+    )
+
+    stats = result["market_peer_stats"]
+    assert stats["hk"]["peer_count"] == 1
+    assert stats["hk"]["valuation_position"] == "单一样本参考"
+    assert stats["a_share"]["peer_count"] >= 2
+    assert stats["a_share"]["valuation_position"] != "单一样本参考"
+
+
 def test_consumer_3d_printing_peer_matching_uses_additive_manufacturing_peers():
     prospectus_info = {
         "sector": "hardtech",

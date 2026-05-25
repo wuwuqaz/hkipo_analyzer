@@ -9,6 +9,8 @@ import type {
   HistoryListResponse,
   BloggerConsensusResponse,
   PeerListResponse,
+  IpoFirstDayBacktestResponse,
+  BacktestStatusResponse,
 } from "./types";
 
 type ApiHealthResponse = {
@@ -310,4 +312,16 @@ export function refreshPeers(dryRun: boolean, staleOnly: boolean): Promise<Recor
     },
     body: JSON.stringify({ dry_run: dryRun, stale_only: staleOnly }),
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Backtest API                                                        */
+/* ------------------------------------------------------------------ */
+
+export async function fetchIpoFirstDayBacktest(): Promise<IpoFirstDayBacktestResponse> {
+  return fetchJson<IpoFirstDayBacktestResponse>("/backtest/ipo-first-day");
+}
+
+export async function fetchBacktestStatus(): Promise<BacktestStatusResponse> {
+  return fetchJson<BacktestStatusResponse>("/backtest/status");
 }

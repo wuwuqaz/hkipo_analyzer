@@ -548,6 +548,32 @@ class WorkingCapitalCashFlowAnalyzer:
             )
             if result['operating_cash_flow'] is not None or inv_days is not None or result.get('cash_and_cash_equivalents') is not None:
                 result['confidence'] = 'regex_context'
+
+            # --- data_availability 元数据 ---
+            availability = {}
+
+            def _avail_cf(key, val, na_reason=None):
+                if val is not None and val != '缺失':
+                    availability[key] = {'status': 'available', 'method': 'computed', 'reason': f'{key} 已提取'}
+                elif na_reason:
+                    availability[key] = {'status': 'not_applicable', 'reason': na_reason, 'source_excerpt': None}
+                else:
+                    availability[key] = {'status': 'not_found', 'reason': f'招股书未披露 {key}', 'source_excerpt': None}
+
+            _avail_cf('operating_cash_flow', result.get('operating_cash_flow'))
+            _avail_cf('ocf_to_revenue', result.get('ocf_to_revenue'),
+                      '收入基数极小，OCF/收入无意义' if profile.is_early_stage() else None)
+            _avail_cf('cash_and_cash_equivalents', result.get('cash_and_cash_equivalents'))
+            _avail_cf('inventory_amount', result.get('inventory_amount'))
+            _avail_cf('receivables_amount', result.get('receivables_amount'))
+            _avail_cf('monthly_cash_burn', result.get('monthly_cash_burn'),
+                      '经营现金流为正，月耗现金不适用' if result.get('operating_cash_flow') is not None and result['operating_cash_flow'] >= 0 else None)
+            _avail_cf('working_capital_trend_label', result.get('working_capital_trend_label', '缺失'))
+            _avail_cf('working_capital_pressure_label', result.get('working_capital_pressure_label', '缺失'))
+            _avail_cf('cash_quality_label', result.get('cash_quality_label', '缺失'))
+            _avail_cf('post_ipo_cash_runway_years', result.get('post_ipo_cash_runway_years'))
+
+            result['data_availability'] = availability
         except Exception as e:
             logger.warning("%s: %s", type(self).__name__, e)
             result['_error'] = str(e)

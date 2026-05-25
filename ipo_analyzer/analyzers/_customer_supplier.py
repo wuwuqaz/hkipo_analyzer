@@ -2,6 +2,7 @@ import re
 import logging
 from ..utils import _is_num
 from ..settings import SETTINGS
+from ..industry_router import classify_company
 logger = logging.getLogger(__name__)
 
 
@@ -406,6 +407,52 @@ class CustomerSupplierAnalyzer:
             result.update(quality)
             if quality.get('customer_quality_score', 0) > 0:
                 result['confidence'] = 'regex_context'
+
+            # --- data_availability 元数据 ---
+            listing_suffix = prospectus_info.get('listing_suffix', '')
+            is_biotech = sector == 'healthcare' or listing_suffix == 'B'
+            profile = classify_company(prospectus_info, text)
+            is_early_stage = profile.is_early_stage()
+            availability = {}
+
+            def _avail_cust(key, val, na_reason=None):
+                if val is not None:
+                    availability[key] = {'status': 'available', 'method': 'regex', 'reason': f'{key} 已提取'}
+                elif na_reason:
+                    availability[key] = {'status': 'not_applicable', 'reason': na_reason, 'source_excerpt': None}
+                else:
+                    availability[key] = {'status': 'not_found', 'reason': f'招股书未披露 {key}', 'source_excerpt': None}
+
+            _avail_cust('top5_customer_revenue_pct', result.get('top5_customer_revenue_pct'),
+                        '生物科技公司通常无商业客户' if is_biotech else None)
+            _avail_cust('largest_customer_revenue_pct', result.get('largest_customer_revenue_pct'),
+                        '生物科技公司通常无商业客户' if is_biotech else None)
+            _avail_cust('top5_supplier_purchase_pct', result.get('top5_supplier_purchase_pct'))
+            _avail_cust('largest_supplier_purchase_pct', result.get('largest_supplier_purchase_pct'))
+
+            cust_na = is_biotech or is_early_stage
+            _avail_cust('customer_retention_rate_pct', result.get('customer_retention_rate_pct'),
+                        '该公司无商业客户，客户留存率不适用' if cust_na else None)
+            _avail_cust('net_dollar_retention_rate_pct', result.get('net_dollar_retention_rate_pct'),
+                        '该公司无商业客户，NDR不适用' if cust_na else None)
+
+            cl = result.get('concentration_risk_label', '缺失')
+            if cl != '缺失':
+                availability['concentration_risk_label'] = {'status': 'available', 'method': 'computed', 'reason': f'客户/供应商集中度: {cl}'}
+            elif is_biotech:
+                availability['concentration_risk_label'] = {'status': 'not_applicable', 'reason': '生物科技公司无商业客户，集中度不适用'}
+            else:
+                availability['concentration_risk_label'] = {'status': 'not_found', 'reason': '缺乏客户数据无法计算集中度'}
+
+            cq_score = result.get('customer_quality_score', 0)
+            if cq_score > 0:
+                availability['customer_quality_score'] = {'status': 'available', 'method': 'computed', 'reason': f'客户质量评分 {cq_score}/100'}
+            elif is_biotech:
+                availability['customer_quality_score'] = {'status': 'not_applicable', 'reason': '生物科技公司无商业客户，客户质量不适用'}
+            else:
+                availability['customer_quality_score'] = {'status': 'not_found', 'reason': '未提取到客户质量相关信息'}
+
+            result['data_availability'] = availability
         except Exception as e:
             logger.warning("%s: %s", type(self).__name__, e)
             result['_error'] = str(e)

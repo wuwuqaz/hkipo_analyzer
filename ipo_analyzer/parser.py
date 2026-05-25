@@ -3,9 +3,7 @@ import os
 import logging
 import copy
 from datetime import datetime
-from typing import Optional
-
-from ._threadsafe_cache import ThreadSafeLRUCache
+from typing import Any, Optional
 
 from .utils import _is_num
 from .table_extraction import extract_financial_table_by_row
@@ -14,6 +12,7 @@ from .text_extractor import extract_pdf_text
 from .identity_validator import validate_pdf_identity
 from .prospectus_basic_extractor import extract_prospectus_basic_info
 from .settings import SETTINGS
+from ._threadsafe_cache import ThreadSafeLRUCache
 
 logger = logging.getLogger(__name__)
 
@@ -801,7 +800,7 @@ class ProspectusParser:
 
     def extract_info(self, text):
         """提取关键信息"""
-        info = {}
+        info: dict[str, Any] = {}
 
         for pattern in _PRICE_PATTERNS:
             matches = pattern.findall(text)

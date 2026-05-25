@@ -149,7 +149,12 @@ class RnDPipelineAnalyzer:
             result['rd_staff_count'] = _extract_best_int([
                 r'(\d+)\s+(?:R&D|research\s+and\s+development)\s+(?:staff|employees|personnel)',
                 r'(\d+)\s+名?\s*研发人员',
-                r'研发人员[^\n\r]{0,40}?(\d+)\s+名?',
+                r'研发人员[^\n\r]{0,40}?(\d+)\s*名?',
+                r'(?:有|拥有|约|approximately|about)\s*(\d+)\s*(?:名|位)?\s*(?:研发|R&D)',
+                r'R&D\s+(?:team|headcount|department)[^\n\r]{0,30}?(\d+)',
+                r'(\d+)\s*(?:research|development)\s+(?:person|engineer|scientist)',
+                r'our\s+R&D\s+team\s+(?:comprises?|consists?\s+of|has)\s+(?:approximately\s+)?(\d+)',
+                r'(?:comprises?|consisting\s+of|with)\s+(?:approximately\s+)?(\d+)\s+(?:R&D|research)',
             ], min_value=1)
 
             rd_staff_ratio = None
@@ -193,20 +198,28 @@ class RnDPipelineAnalyzer:
                     break
 
             rank_val = None
-            for pat in [
-                r'ranked\s+(?:No\.?\s*)?(\d+)(?:st|nd|rd|th)?',
-                r'No\.?\s*(\d+)(?:st|nd|rd|th)?',
-                r'第\s*(\d+)\s*(?:大|位|名)',
+            rank_total = None
+            for pat, has_total in [
+                (r'ranked\s+(?:No\.?\s*)?(\d+)(?:st|nd|rd|th)?\s+(?:among|out\s+of)\s+(\d+)', True),
+                (r'第\s*(\d+)\s*(?:位|名|大)\s*(?:among|在).*?(\d+)\s*(?:家|个)', True),
+                (r'ranked\s+(?:No\.?\s*)?(\d+)(?:st|nd|rd|th)?', False),
+                (r'No\.?\s*(\d+)(?:st|nd|rd|th)?', False),
+                (r'第\s*(\d+)\s*(?:大|位|名)', False),
             ]:
                 m = re.search(pat, raw_text, re.IGNORECASE)
                 if m:
                     try:
                         rank_val = int(m.group(1))
+                        if has_total and m.lastindex and m.lastindex >= 2:
+                            rank_total = int(m.group(2))
                         break
                     except ValueError:
                         continue
             if rank_val is not None:
-                result['industry_rank'] = f'第{rank_val}位'
+                if rank_total:
+                    result['industry_rank'] = f'第{rank_val}位/{rank_total}家'
+                else:
+                    result['industry_rank'] = f'第{rank_val}位'
 
             tam_matches = re.findall(r'(?:TAM|market\s+size|market\s+opportunity|市场规模|潜在市场规模)[^\n\r]{0,120}', raw_text, re.IGNORECASE)
             if tam_matches:
@@ -357,6 +370,49 @@ class RnDPipelineAnalyzer:
             if rd_ratio is not None or is_biotech:
                 if result['confidence'] == 'missing':
                     result['confidence'] = 'regex_context'
+
+            # --- data_availability 元数据 ---
+            availability = {}
+
+            def _avail_rnd(key, val, na_reason=None):
+                if val is not None:
+                    availability[key] = {'status': 'available', 'method': 'regex', 'reason': f'{key} 已提取'}
+                elif na_reason:
+                    availability[key] = {'status': 'not_applicable', 'reason': na_reason, 'source_excerpt': None}
+                else:
+                    availability[key] = {'status': 'not_found', 'reason': f'招股书未披露 {key}', 'source_excerpt': None}
+
+            _avail_rnd('patent_count', result.get('patent_count'))
+            if result.get('patent_count') is None and availability.get('patent_count', {}).get('status') == 'not_found':
+                availability['patent_count']['reason'] = '招股书未检索到专利披露，不等同于确认无专利'
+
+            _avail_rnd('software_copyright_count', result.get('software_copyright_count'))
+            if result.get('software_copyright_count') is None and availability.get('software_copyright_count', {}).get('status') == 'not_found':
+                availability['software_copyright_count']['reason'] = '招股书未检索到软著披露，不等同于确认无软著'
+
+            _avail_rnd('rd_staff_count', result.get('rd_staff_count'))
+            _avail_rnd('rd_staff_ratio', result.get('rd_staff_ratio'))
+            _avail_rnd('backlog_amount', result.get('backlog_amount'),
+                       '生物科技公司通常无在手订单' if is_biotech else None)
+            _avail_rnd('industry_rank', result.get('industry_rank'))
+
+            # hardtech_moat_label
+            hml = result.get('hardtech_moat_label', '缺失')
+            if hml != '缺失':
+                availability['hardtech_moat_label'] = {'status': 'available', 'method': 'computed', 'reason': f'硬科技护城河: {hml}'}
+            elif not is_hardtech or is_biotech:
+                availability['hardtech_moat_label'] = {'status': 'not_applicable', 'reason': '硬科技护城河仅适用于硬科技/机器人公司'}
+            else:
+                availability['hardtech_moat_label'] = {'status': 'not_found', 'reason': '未提取到硬科技护城河相关数据'}
+
+            # technology_moat_score
+            tms = result.get('technology_moat_score', 0)
+            if tms > 0:
+                availability['technology_moat_score'] = {'status': 'available', 'method': 'computed', 'reason': f'技术壁垒评分 {tms}/10'}
+            else:
+                availability['technology_moat_score'] = {'status': 'not_found', 'reason': '缺乏数据无法计算技术壁垒评分'}
+
+            result['data_availability'] = availability
         except Exception as e:
             logger.warning("%s: %s", type(self).__name__, e)
             result['_error'] = str(e)

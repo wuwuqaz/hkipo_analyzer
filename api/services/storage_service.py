@@ -1,18 +1,14 @@
 from __future__ import annotations
 
 import json
-import logging
 import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger(__name__)
-
 from api.config import APIConfig, get_config
 from ipo_analyzer.json_utils import fast_dump_file
-from ipo_analyzer._url_validation import sanitize_filename
 
 _RESULT_READ_CACHE: dict[str, tuple[float, dict]] = {}
 _READ_CACHE_MAX = 20
@@ -42,9 +38,7 @@ class StorageService:
 
     def save_upload(self, file_bytes: bytes, filename: str) -> Path:
         self.ensure_dirs()
-        safe_name = sanitize_filename(filename)
         file_uuid = str(uuid.uuid4())
-        logger.info("保存上传文件: %s -> %s.pdf", safe_name, file_uuid)
         dest = self.upload_path(file_uuid)
         dest.write_bytes(file_bytes)
         return dest

@@ -29,6 +29,7 @@ from .analyzers import (
     SectorAnalyzer,
     CompanyProfileAnalyzer,
     InvestmentThesisAnalyzer,
+    EarningsQualityAnalyzer,
 )
 from .scoring import ProspectusQualityAnalyzer, SignalComponentAnalyzer, ScoringSystem
 from .peer_comps import PeerComparableAnalyzer
@@ -699,6 +700,18 @@ def _run_investskill_analyzers(prospectus_info):
         )
     except Exception as e:
         logger.warning("公司简介提取异常: %s", e)
+
+    # 盈利质量综合分析
+    try:
+        earnings_quality_result = EarningsQualityAnalyzer().analyze(prospectus_info, '')
+        prospectus_info['earnings_quality'] = earnings_quality_result
+        logger.info(
+            "盈利质量: %s (评分=%d)",
+            earnings_quality_result.get('label', '缺失'),
+            earnings_quality_result.get('earnings_quality_score', 0),
+        )
+    except Exception as e:
+        logger.warning("盈利质量分析异常: %s", e)
 
 
 def _collect_analyzer_errors(prospectus_info):
@@ -1449,6 +1462,17 @@ def reanalyze_ipo(stock_code=None, company_name=None, pdf_path=None, uploaded_fi
     
     # 处理股票代码下载
     elif stock_code and not pdf_path_final:
+        # 优先检查本地 storage 目录是否已有 PDF
+        storage_dir = os.path.join(os.path.dirname(output_dir), "storage") if os.path.basename(output_dir) != "storage" else output_dir
+        for search_dir in (output_dir, "storage"):
+            candidate = os.path.join(search_dir, f"{stock_code}_prospectus.pdf")
+            if os.path.isfile(candidate):
+                pdf_path_final = candidate
+                source_type = 'local_pdf'
+                messages.append(f"使用本地已有PDF: {os.path.basename(candidate)}")
+                break
+
+    if stock_code and not pdf_path_final:
         try:
             downloader = ProspectusDownloader()
             pdf_path_final = downloader.download_from_hkex(stock_code, company_name)

@@ -898,6 +898,218 @@ def test_cornerstone_unknown_investor_does_not_crash():
     assert rows[0].get('role_note') == '未纳入高质量基石词库，按普通基石处理'
 
 
+def test_creality_traditional_chinese_cornerstone_table_keeps_first_row():
+    """创想三维式繁体中文表头后第一家基石（泰康人寿）不能被表头吞掉。"""
+    from ipo_analyzer.cornerstone import CornerstoneAnalyzer
+
+    text = """
+    基石投資者
+    下表載列基石配售的詳情：
+    假設超額配股權未獲行使
+    假設超額配股權獲行使
+    基石投資者
+    認購金額
+    認購金額
+    發售
+    股份數目(3)
+    佔發售股份
+    的概約百分比
+    佔已發行股本
+    的概約百分比
+    佔發售股份
+    的概約百分比
+    佔已發行股本
+    的概約百分比
+    （美元）(1)(2)
+    （港元）(1)(2)
+    基於發售價18.80港元
+    泰康人壽
+    20,000,000
+    156,554,000
+    8,327,250
+    11.34%
+    1.78%
+    9.86%
+    1.74%
+    中信興業國際
+    15,000,000
+    117,415,500
+    6,245,400
+    8.51%
+    1.34%
+    7.40%
+    1.31%
+    總計
+    35,000,000
+    273,969,500
+    14,572,650
+    19.85%
+    3.12%
+    17.26%
+    3.05%
+    附註：
+    """
+
+    rows = CornerstoneAnalyzer()._extract_cornerstone_rows(text)
+
+    assert [row['name'] for row in rows] == ['泰康人壽', '中信興業國際']
+    assert rows[0]['offer_shares_pct'] == 11.34
+
+
+def test_creality_cornerstone_profiles_are_classified_from_traditional_aliases():
+    """创想三维基石名单应识别繁体别名和新增机构画像。"""
+    from ipo_analyzer.cornerstone import CornerstoneAnalyzer
+
+    analyzer = CornerstoneAnalyzer()
+    rows = [
+        {'name': '泰康人壽', 'short_name': '泰康人壽', 'offer_shares_pct': 11.34},
+        {'name': '中信興業國際', 'short_name': '中信興業國際', 'offer_shares_pct': 8.51},
+        {'name': 'CPE Greater China', 'short_name': 'CPE Greater China', 'offer_shares_pct': 5.67},
+        {'name': 'Martis Fund', 'short_name': 'Martis Fund', 'offer_shares_pct': 4.54},
+        {'name': '博約基金', 'short_name': '博約基金', 'offer_shares_pct': 2.84},
+        {'name': 'GBAHIL', 'short_name': 'GBAHIL', 'offer_shares_pct': 2.84},
+        {'name': 'Apex', 'short_name': 'Apex', 'offer_shares_pct': 2.84},
+        {'name': 'Oasis Fund', 'short_name': 'Oasis Fund', 'offer_shares_pct': 2.27},
+        {'name': 'Jump Trading', 'short_name': 'Jump Trading', 'offer_shares_pct': 2.27},
+        {'name': 'Polymer', 'short_name': 'Polymer', 'offer_shares_pct': 1.13},
+        {'name': '鼎鑫證券', 'short_name': '鼎鑫證券', 'offer_shares_pct': 1.13},
+        {'name': 'Colloway', 'short_name': 'Colloway', 'offer_shares_pct': 1.13},
+        {'name': 'Seven Grand', 'short_name': 'Seven Grand', 'offer_shares_pct': 1.13},
+        {'name': 'ICSA', 'short_name': 'ICSA', 'offer_shares_pct': 1.13},
+        {'name': 'Optimas Capital', 'short_name': 'Optimas Capital', 'offer_shares_pct': 1.13},
+    ]
+
+    enriched = analyzer._enrich_cornerstone_rows(
+        "基石投資者 泰康人壽 中信興業國際 Oasis Fund Jump Trading ICSA",
+        rows,
+    )
+    by_name = {row['name']: row for row in enriched}
+
+    assert by_name['泰康人壽']['tier'] == 'A'
+    assert by_name['中信興業國際']['category'] == '国资/产业资本'
+    assert by_name['Martis Fund']['category'] == 'PE/VC/成长基金'
+    assert by_name['博約基金']['category'] == '国资/产业基金'
+    assert by_name['GBAHIL']['category'] == '产业战略/区域基金'
+    assert by_name['Apex']['category'] == '产业战略/消费电子'
+    assert by_name['Oasis Fund']['tier'] == 'A'
+    assert by_name['Jump Trading']['category'] == '量化做市商/自营交易'
+    assert by_name['Polymer']['category'] == '多策略对冲基金'
+    assert by_name['鼎鑫證券']['category'] == '券商/资管平台'
+    assert by_name['Colloway']['category'] == '产业战略/家族办公室'
+    assert by_name['Seven Grand']['category'] == '事件驱动基金'
+    assert by_name['ICSA']['tier'] == 'A'
+    assert by_name['Optimas Capital']['category'] == '亚洲资管平台'
+    assert all(row['category'] != '未知' for row in enriched)
+
+
+def test_cornerstone_profiles_reload_when_yaml_signature_changes(monkeypatch):
+    """运行中的 API 进程不应长期持有旧基石词库。"""
+    import ipo_analyzer.cornerstone as cornerstone_module
+    from ipo_analyzer.cornerstone import CornerstoneAnalyzer
+
+    original_profiles = CornerstoneAnalyzer.INVESTOR_PROFILES
+    original_signature = CornerstoneAnalyzer._INVESTOR_PROFILE_SIGNATURE
+    try:
+        CornerstoneAnalyzer._set_investor_profiles(
+            [{
+                'name': 'Old Profile',
+                'tier': 'B',
+                'category': '未知',
+                'aliases': ['old-profile'],
+                'role_note': '',
+                'sector_tags': ['all'],
+            }],
+            ('old', 1, 1),
+        )
+        monkeypatch.setattr(
+            cornerstone_module,
+            "investor_profiles_signature",
+            lambda: ('new', 2, 2),
+        )
+        monkeypatch.setattr(
+            cornerstone_module,
+            "_load_investor_profiles",
+            lambda: [{
+                'name': 'Reloaded Profile',
+                'tier': 'A',
+                'category': '测试分类',
+                'aliases': ['reloaded-profile'],
+                'role_note': '',
+                'sector_tags': ['all'],
+            }],
+        )
+
+        analyzer = CornerstoneAnalyzer()
+
+        assert analyzer._best_profile('reloaded-profile')['name'] == 'Reloaded Profile'
+        assert analyzer._best_profile('old-profile') is None
+    finally:
+        CornerstoneAnalyzer._set_investor_profiles(original_profiles, original_signature)
+
+
+def test_live_worker_preserves_better_cached_cornerstone(tmp_path):
+    """live 刷新不应把已正确分类的基石结果覆盖成低质量旧结果。"""
+    import json
+    from api.workers.analyze_worker import _protect_cornerstone_regressions
+
+    good_cornerstone = {
+        "score": 75,
+        "label": "A级",
+        "summary": "共15家基石(A级5+B级10)",
+        "cornerstone_pct": 49.9,
+        "cornerstone_investors": [
+            {"name": f"基石{i}", "category": "PE/VC/成长基金", "tier": "B"}
+            for i in range(15)
+        ],
+    }
+    bad_cornerstone = {
+        "score": 59,
+        "label": "B级",
+        "summary": "共14家基石(A级1)",
+        "cornerstone_pct": 49.9,
+        "cornerstone_investors": [
+            {"name": "CPE Greater China", "category": "PE/VC/成长基金", "tier": "A"},
+            *[
+                {"name": f"未识别{i}", "category": "未知", "tier": None}
+                for i in range(13)
+            ],
+        ],
+    }
+
+    cache_items = [{
+        "hk_code": "03388",
+        "company_name": "创想三维",
+        "prospectus_info": {
+            "cornerstone_analysis": good_cornerstone,
+            "cornerstone_investors": good_cornerstone["cornerstone_investors"],
+            "cornerstone_pct": 49.9,
+        },
+    }]
+    (tmp_path / "results_cache.json").write_text(
+        json.dumps(cache_items, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    live_results = [{
+        "hk_code": "03388",
+        "company_name": "创想三维",
+        "prospectus_info": {
+            "cornerstone_analysis": bad_cornerstone,
+            "cornerstone_investors": bad_cornerstone["cornerstone_investors"],
+            "cornerstone_pct": 49.9,
+        },
+    }]
+
+    protected = _protect_cornerstone_regressions(live_results, str(tmp_path))
+    protected_pi = protected[0]["prospectus_info"]
+
+    assert protected_pi["cornerstone_analysis"]["score"] == 75
+    assert protected_pi["cornerstone_analysis"]["label"] == "A级"
+    assert len(protected_pi["cornerstone_analysis"]["cornerstone_investors"]) == 15
+    assert protected_pi["cornerstone_investors"] == good_cornerstone["cornerstone_investors"]
+    assert protected_pi["cornerstone_pct"] == 49.9
+
+
 def test_cornerstone_analysis_keeps_source_excerpt():
     """基石分析应保留 PDF 文本摘录，方便人工核对。"""
     from ipo_analyzer.cornerstone import CornerstoneAnalyzer

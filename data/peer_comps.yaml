@@ -1,725 +1,1583 @@
-# 同行对比数据库
-# 用于 IPO 招股书自动匹配可比公司
-# private 公司不参与 PS/PE 中位数计算，仅作定性参考
-# source_date: 数据采集时间，提醒使用者数据时效性
-# data_quality: high/moderate/low 表示数据可靠性
-
 meta:
-  source_date: "2026-04"
-  data_quality: "moderate"
-  last_checked_at: "2026-05-06"
+  source_date: 2026-05
+  data_quality: moderate
+  last_checked_at: '2026-05-25'
   stale_after_days: 90
-  update_script: "python3 scripts/update_peer_comps.py --stale-only --write"
-
+  update_script: python3 scripts/update_peer_comps.py --stale-only --write
+  sectors_count: 5
+  subsectors_count: 18
+  peers_count: 71
 hardtech:
   saas_cloud_platform:
     keywords:
-      - SaaS
-      - cloud platform
-      - subscription
-      - recurring revenue
-      - ARR
-      - NRR
-      - software platform
-      - 雲平台
-      - 云平台
-      - 訂閱
-      - 订阅
-      - 软件即服务
+    - SaaS
+    - cloud platform
+    - subscription
+    - recurring revenue
+    - ARR
+    - NRR
+    - software platform
+    - 雲平台
+    - 云平台
+    - 訂閱
+    - 订阅
+    - 软件即服务
     peers:
-      - name: Salesforce
-        ticker: "CRM"
-        type: listed
-        tags: [saas, cloud, subscription, enterprise software]
-        market_cap_hkd_million: 2200000
-        revenue_million: 290000
-        net_profit_million: 33000
-        ps: 7.6
-        pe: 66.0
-        gross_margin_pct: 76.0
-        revenue_growth_pct: 9.0
-        notes: "全球企业SaaS龙头，适合作为成熟SaaS估值上沿参考"
-      - name: ServiceNow
-        ticker: "NOW"
-        type: listed
-        tags: [saas, cloud, workflow, enterprise software]
-        market_cap_hkd_million: 1450000
-        revenue_million: 85000
-        net_profit_million: 11000
-        ps: 17.0
-        pe: 130.0
-        gross_margin_pct: 79.0
-        revenue_growth_pct: 22.0
-        notes: "高增长企业软件平台，适合作为PS/Growth参考"
-      - name: 金山云
-        ticker: "3896.HK"
-        type: listed
-        tags: [cloud, software, platform]
-        market_cap_hkd_million: 18000
-        revenue_million: 7600
-        net_profit_million: -1600
-        ps: 2.4
-        pe: null
-        gross_margin_pct: 15.0
-        revenue_growth_pct: 5.0
-        notes: "港股云服务参考，毛利结构与纯SaaS不同，仅作本地市场锚"
-
+    - name: Salesforce
+      ticker: CRM
+      type: listed
+      tags:
+      - saas
+      - cloud
+      - subscription
+      - enterprise software
+      market_cap_hkd_million: 2200000
+      revenue_million: 290000
+      net_profit_million: 33000
+      ps: 7.6
+      pe: 66.0
+      gross_margin_pct: 76.0
+      revenue_growth_pct: 9.0
+      notes: 全球企业SaaS龙头，适合作为成熟SaaS估值上沿参考
+    - name: ServiceNow
+      ticker: NOW
+      type: listed
+      tags:
+      - saas
+      - cloud
+      - workflow
+      - enterprise software
+      market_cap_hkd_million: 1450000
+      revenue_million: 85000
+      net_profit_million: 11000
+      ps: 17.0
+      pe: 130.0
+      gross_margin_pct: 79.0
+      revenue_growth_pct: 22.0
+      notes: 高增长企业软件平台，适合作为PS/Growth参考
+    - name: 金山云
+      ticker: 3896.HK
+      type: listed
+      tags:
+      - cloud
+      - software
+      - platform
+      market_cap_hkd_million: 18000
+      revenue_million: 7600
+      net_profit_million: -1600
+      ps: 2.4
+      pe: null
+      gross_margin_pct: 15.0
+      revenue_growth_pct: 5.0
+      notes: 港股云服务参考，毛利结构与纯SaaS不同，仅作本地市场锚
   consumer_3d_printing:
     keywords:
-      - 3D printing
-      - 3D printer
-      - 3D printers
-      - additive manufacturing
-      - 3D printing filaments
-      - 3D scanner
-      - 3D scanners
-      - consumer-grade 3D printing
-      - desktop 3D printer
-      - Creality
-      - 3D打印
-      - 3D打印機
-      - 3D打印机
-      - 增材製造
-      - 增材制造
-      - 打印耗材
-      - 3D掃描儀
-      - 3D扫描仪
+    - 3D printing
+    - 3D printer
+    - 3D printers
+    - additive manufacturing
+    - 3D printing filaments
+    - 3D scanner
+    - 3D scanners
+    - consumer-grade 3D printing
+    - desktop 3D printer
+    - Creality
+    - 3D打印
+    - 3D打印機
+    - 3D打印机
+    - 增材製造
+    - 增材制造
+    - 打印耗材
+    - 3D掃描儀
+    - 3D扫描仪
     business_line_groups:
       printers:
         label: 3D打印机
-        segment_keywords: [3D printer, 3D printers, 3D打印機, 3D打印机]
-        peer_tags: [3d printing, printer, additive manufacturing]
+        segment_keywords:
+        - 3D printer
+        - 3D printers
+        - 3D打印機
+        - 3D打印机
+        peer_tags:
+        - 3d printing
+        - printer
+        - additive manufacturing
       consumables:
         label: 3D打印耗材
-        segment_keywords: [filament, filaments, consumables, 打印耗材, 耗材]
-        peer_tags: [materials, filament, consumables]
+        segment_keywords:
+        - filament
+        - filaments
+        - consumables
+        - 打印耗材
+        - 耗材
+        peer_tags:
+        - materials
+        - filament
+        - consumables
       scanners:
         label: 3D扫描仪
-        segment_keywords: [3D scanner, 3D scanners, 3D掃描儀, 3D扫描仪]
-        peer_tags: [scanner, 3d scanning]
+        segment_keywords:
+        - 3D scanner
+        - 3D scanners
+        - 3D掃描儀
+        - 3D扫描仪
+        peer_tags:
+        - scanner
+        - 3d scanning
     peers:
-      - name: Stratasys
-        ticker: "SSYS"
-        type: listed
-        tags: [3d printing, additive manufacturing, printer, materials]
-        market_cap_hkd_million: 4600
-        revenue_million: 4300
-        net_profit_million: 100
-        ps: 1.1
-        pe: 46.0
-        gross_margin_pct: 44.0
-        revenue_growth_pct: -2.0
-        notes: "国际3D打印设备及材料公司，工业/专业场景占比高"
-      - name: 3D Systems
-        ticker: "DDD"
-        type: listed
-        tags: [3d printing, additive manufacturing, printer, healthcare]
-        market_cap_hkd_million: 3250
-        revenue_million: 3020
-        net_profit_million: 230
-        ps: 1.1
-        pe: null
-        gross_margin_pct: 41.0
-        revenue_growth_pct: -8.0
-        notes: "老牌3D打印公司，工业/医疗业务，经营波动较大"
-      - name: Materialise
-        ticker: "MTLS"
-        type: listed
-        tags: [3d printing, software, additive manufacturing, healthcare]
-        market_cap_hkd_million: 2600
-        revenue_million: 2450
-        net_profit_million: 70
-        ps: 1.1
-        pe: null
-        gross_margin_pct: 56.0
-        revenue_growth_pct: 4.0
-        notes: "3D打印软件、医疗及制造服务公司，软件属性更强"
-      - name: 铂力特
-        ticker: "688333.SH"
-        type: listed
-        tags: [industrial additive manufacturing, metal 3d printing, aerospace]
-        market_cap_hkd_million: 25000
-        revenue_million: 1750
-        net_profit_million: 250
-        ps: 14.0
-        pe: 100.0
-        gross_margin_pct: 48.0
-        revenue_growth_pct: 35.0
-        notes: "A股金属增材制造龙头，工业/航空航天主题溢价高，仅作高估值参考"
-      - name: 华曙高科
-        ticker: "688433.SH"
-        type: listed
-        tags: [industrial additive manufacturing, 3d printing equipment, metal printing]
-        market_cap_hkd_million: 35000
-        revenue_million: 800
-        net_profit_million: 80
-        ps: 40.0
-        pe: null
-        gross_margin_pct: 49.0
-        revenue_growth_pct: 20.0
-        notes: "A股工业级3D打印设备公司，主题估值高，仅作定性参考"
-      - name: Bambu Lab
-        ticker: "private"
-        type: private
-        tags: [consumer 3d printing, desktop 3d printer, printer]
-        notes: "消费级3D打印重要竞争者，未上市，适合作为竞争格局定性参考"
-
+    - name: Stratasys
+      ticker: SSYS
+      type: listed
+      tags:
+      - 3d printing
+      - additive manufacturing
+      - printer
+      - materials
+      market_cap_hkd_million: 4600
+      revenue_million: 4300
+      net_profit_million: 100
+      ps: 1.1
+      pe: 46.0
+      gross_margin_pct: 44.0
+      revenue_growth_pct: -2.0
+      notes: 国际3D打印设备及材料公司，工业/专业场景占比高
+    - name: 3D Systems
+      ticker: DDD
+      type: listed
+      tags:
+      - 3d printing
+      - additive manufacturing
+      - printer
+      - healthcare
+      market_cap_hkd_million: 3250
+      revenue_million: 3020
+      net_profit_million: 230
+      ps: 1.1
+      pe: null
+      gross_margin_pct: 41.0
+      revenue_growth_pct: -8.0
+      notes: 老牌3D打印公司，工业/医疗业务，经营波动较大
+    - name: Materialise
+      ticker: MTLS
+      type: listed
+      tags:
+      - 3d printing
+      - software
+      - additive manufacturing
+      - healthcare
+      market_cap_hkd_million: 2600
+      revenue_million: 2450
+      net_profit_million: 70
+      ps: 1.1
+      pe: null
+      gross_margin_pct: 56.0
+      revenue_growth_pct: 4.0
+      notes: 3D打印软件、医疗及制造服务公司，软件属性更强
+    - name: 铂力特
+      ticker: 688333.SH
+      type: listed
+      tags:
+      - industrial additive manufacturing
+      - metal 3d printing
+      - aerospace
+      market_cap_hkd_million: 25000
+      revenue_million: 1750
+      net_profit_million: 250
+      ps: 14.0
+      pe: 100.0
+      gross_margin_pct: 48.0
+      revenue_growth_pct: 35.0
+      notes: A股金属增材制造龙头，工业/航空航天主题溢价高，仅作高估值参考
+    - name: 华曙高科
+      ticker: 688433.SH
+      type: listed
+      tags:
+      - industrial additive manufacturing
+      - 3d printing equipment
+      - metal printing
+      market_cap_hkd_million: 35000
+      revenue_million: 800
+      net_profit_million: 80
+      ps: 40.0
+      pe: null
+      gross_margin_pct: 49.0
+      revenue_growth_pct: 20.0
+      notes: A股工业级3D打印设备公司，主题估值高，仅作定性参考
+    - name: Bambu Lab
+      ticker: private
+      type: private
+      tags:
+      - consumer 3d printing
+      - desktop 3d printer
+      - printer
+      notes: 消费级3D打印重要竞争者，未上市，适合作为竞争格局定性参考
   robotics_visual_perception:
     keywords:
-      - robot
-      - visual perception
-      - lidar
-      - sensor
-      - algorithm module
-      - robot lawn mower
-      - robotics
-      - perception system
-      - autonomous
-      - intelligent driving
-      - lawn mower
-      - robotic
+    - robot
+    - visual perception
+    - lidar
+    - sensor
+    - algorithm module
+    - robot lawn mower
+    - robotics
+    - perception system
+    - autonomous
+    - intelligent driving
+    - lawn mower
+    - robotic
     business_line_groups:
       visual_perception:
         label: 视觉感知业务
-        segment_keywords: [visual perception, sensor, algorithm module]
-        peer_tags: [lidar, perception, sensor]
+        segment_keywords:
+        - visual perception
+        - sensor
+        - algorithm module
+        peer_tags:
+        - lidar
+        - perception
+        - sensor
       robot_lawn_mower:
         label: 割草机器人业务
-        segment_keywords: [robot lawn mower, lawn mower, mower]
-        peer_tags: [mower, cleaning robot, smart home]
+        segment_keywords:
+        - robot lawn mower
+        - lawn mower
+        - mower
+        peer_tags:
+        - mower
+        - cleaning robot
+        - smart home
     peers:
-      - name: 速腾聚创
-        ticker: "2498.HK"
-        type: listed
-        tags: [lidar, perception, robotics]
-        market_cap_hkd_million: 35000
-        revenue_million: 2300
-        net_profit_million: -450
-        ps: 15.2
-        pe: null
-        gross_margin_pct: 46.0
-        revenue_growth_pct: 72.0
-        notes: "激光雷达龙头，亏损但收入高速增长"
-      - name: 禾赛科技
-        ticker: "HSAI"
-        type: listed
-        tags: [lidar, perception, robotics]
-        market_cap_hkd_million: 28000
-        revenue_million: 1800
-        net_profit_million: -600
-        ps: 15.6
-        pe: null
-        gross_margin_pct: 42.0
-        revenue_growth_pct: 58.0
-        notes: "美股上市激光雷达，持续亏损"
-      - name: 石头科技
-        ticker: "688169.SH"
-        type: listed
-        tags: [robotics, cleaning robot, smart home]
-        market_cap_hkd_million: 42000
-        revenue_million: 8600
-        net_profit_million: 1450
-        ps: 4.9
-        pe: 29.0
-        gross_margin_pct: 55.0
-        revenue_growth_pct: 30.0
-        notes: "清洁机器人龙头，利润稳定"
-      - name: 九号公司
-        ticker: "689009.SH"
-        type: listed
-        tags: [robotics, smart mobility, mower, electric]
-        market_cap_hkd_million: 32000
-        revenue_million: 12000
-        net_profit_million: 420
-        ps: 2.7
-        pe: 76.2
-        gross_margin_pct: 29.0
-        revenue_growth_pct: 18.0
-        notes: "智能出行+割草机器人，低利润率高增长"
-      - name: 追觅科技
-        ticker: "private"
-        type: private
-        tags: [robotics, cleaning robot, mower, smart home]
-        notes: "未上市，高速增长的扫地机器人独角兽"
-      - name: 科沃斯
-        ticker: "603486.SH"
-        type: listed
-        tags: [robotics, cleaning robot, smart home]
-        market_cap_hkd_million: 26000
-        revenue_million: 15500
-        net_profit_million: 600
-        ps: 1.7
-        pe: 43.3
-        gross_margin_pct: 45.0
-        revenue_growth_pct: 8.0
-        notes: "服务机器人与智能家居清洁设备龙头"
-      - name: iRobot
-        ticker: "IRBT"
-        type: listed
-        tags: [robotics, cleaning robot, smart home]
-        market_cap_hkd_million: 1800
-        revenue_million: 6800
-        net_profit_million: -1200
-        ps: 0.3
-        pe: null
-        gross_margin_pct: 22.0
-        revenue_growth_pct: -15.0
-        notes: "海外扫地机器人品牌，经营承压，仅作智能家居机器人参考"
-
+    - name: 速腾聚创
+      ticker: 2498.HK
+      type: listed
+      tags:
+      - lidar
+      - perception
+      - robotics
+      market_cap_hkd_million: 35000
+      revenue_million: 2300
+      net_profit_million: -450
+      ps: 15.2
+      pe: null
+      gross_margin_pct: 46.0
+      revenue_growth_pct: 72.0
+      notes: 激光雷达龙头，亏损但收入高速增长
+    - name: 禾赛科技
+      ticker: HSAI
+      type: listed
+      tags:
+      - lidar
+      - perception
+      - robotics
+      market_cap_hkd_million: 28000
+      revenue_million: 1800
+      net_profit_million: -600
+      ps: 15.6
+      pe: null
+      gross_margin_pct: 42.0
+      revenue_growth_pct: 58.0
+      notes: 美股上市激光雷达，持续亏损
+    - name: 石头科技
+      ticker: 688169.SH
+      type: listed
+      tags:
+      - robotics
+      - cleaning robot
+      - smart home
+      market_cap_hkd_million: 42000
+      revenue_million: 8600
+      net_profit_million: 1450
+      ps: 4.9
+      pe: 29.0
+      gross_margin_pct: 55.0
+      revenue_growth_pct: 30.0
+      notes: 清洁机器人龙头，利润稳定
+    - name: 九号公司
+      ticker: 689009.SH
+      type: listed
+      tags:
+      - robotics
+      - smart mobility
+      - mower
+      - electric
+      market_cap_hkd_million: 32000
+      revenue_million: 12000
+      net_profit_million: 420
+      ps: 2.7
+      pe: 76.2
+      gross_margin_pct: 29.0
+      revenue_growth_pct: 18.0
+      notes: 智能出行+割草机器人，低利润率高增长
+    - name: 追觅科技
+      ticker: private
+      type: private
+      tags:
+      - robotics
+      - cleaning robot
+      - mower
+      - smart home
+      notes: 未上市，高速增长的扫地机器人独角兽
+    - name: 科沃斯
+      ticker: 603486.SH
+      type: listed
+      tags:
+      - robotics
+      - cleaning robot
+      - smart home
+      market_cap_hkd_million: 26000
+      revenue_million: 15500
+      net_profit_million: 600
+      ps: 1.7
+      pe: 43.3
+      gross_margin_pct: 45.0
+      revenue_growth_pct: 8.0
+      notes: 服务机器人与智能家居清洁设备龙头
+    - name: iRobot
+      ticker: IRBT
+      type: listed
+      tags:
+      - robotics
+      - cleaning robot
+      - smart home
+      market_cap_hkd_million: 1800
+      revenue_million: 6800
+      net_profit_million: -1200
+      ps: 0.3
+      pe: null
+      gross_margin_pct: 22.0
+      revenue_growth_pct: -15.0
+      notes: 海外扫地机器人品牌，经营承压，仅作智能家居机器人参考
   robotics_factory_automation:
     keywords:
-      - industrial robot
-      - industrial robotics
-      - robot body
-      - robotic solution
-      - robotics automation
-      - automation system
-      - scara
-      - six-axis robot
-      - parallel robot
-      - agv
-      - amr
-      - controller
-      - vision system
-      - wafer handling
-      - factory automation
-      - 机器人本体
-      - 机器人解决方案
-      - 工业机器人
-      - 自动化系统
-      - 并联机器人
-      - 移动机器人
-      - 控制器
-      - 视觉系统
+    - industrial robot
+    - industrial robotics
+    - robot body
+    - robotic solution
+    - robotics automation
+    - automation system
+    - scara
+    - six-axis robot
+    - parallel robot
+    - agv
+    - amr
+    - controller
+    - vision system
+    - wafer handling
+    - factory automation
+    - 机器人本体
+    - 机器人解决方案
+    - 工业机器人
+    - 自动化系统
+    - 并联机器人
+    - 移动机器人
+    - 控制器
+    - 视觉系统
     business_line_groups:
       robot_body:
         label: 机器人本体
-        segment_keywords: [robot body, industrial robot, scara, six-axis, parallel robot, wafer handling, 机器人本体, 工业机器人]
-        peer_tags: [industrial robot, robot, automation, robot body]
+        segment_keywords:
+        - robot body
+        - industrial robot
+        - scara
+        - six-axis
+        - parallel robot
+        - wafer handling
+        - 机器人本体
+        - 工业机器人
+        peer_tags:
+        - industrial robot
+        - robot
+        - automation
+        - robot body
       robot_solution:
         label: 机器人解决方案
-        segment_keywords: [robotic solution, automation system, agv, amr, factory automation, 机器人解决方案, 自动化系统, 移动机器人]
-        peer_tags: [automation, system integration, agv, amr, robotics]
+        segment_keywords:
+        - robotic solution
+        - automation system
+        - agv
+        - amr
+        - factory automation
+        - 机器人解决方案
+        - 自动化系统
+        - 移动机器人
+        peer_tags:
+        - automation
+        - system integration
+        - agv
+        - amr
+        - robotics
       robot_component:
         label: 关键部件
-        segment_keywords: [controller, vision system, 控制器, 视觉系统]
-        peer_tags: [controller, vision, sensing, robotics]
+        segment_keywords:
+        - controller
+        - vision system
+        - 控制器
+        - 视觉系统
+        peer_tags:
+        - controller
+        - vision
+        - sensing
+        - robotics
     peers:
-      - name: 汇川技术
-        ticker: "300124.SZ"
-        type: listed
-        tags: [industrial automation, servo, controller, robotics]
-        market_cap_hkd_million: 210000
-        revenue_million: 34000
-        net_profit_million: 7500
-        ps: 6.2
-        pe: 28.0
-        gross_margin_pct: 36.0
-        revenue_growth_pct: 18.0
-        notes: "工业自动化平台龙头，伺服/控制器/机器人相关业务强"
-      - name: 埃斯顿
-        ticker: "002747.SZ"
-        type: listed
-        tags: [industrial robot, robotics, automation, controller]
-        market_cap_hkd_million: 17000
-        revenue_million: 3200
-        net_profit_million: -650
-        ps: 5.3
-        pe: null
-        gross_margin_pct: 32.0
-        revenue_growth_pct: 22.0
-        notes: "国产工业机器人代表，持续投入、仍在爬坡"
-      - name: 新松机器人
-        ticker: "300024.SZ"
-        type: listed
-        tags: [industrial robot, automation, agv, amr]
-        market_cap_hkd_million: 12000
-        revenue_million: 2800
-        net_profit_million: -900
-        ps: 4.3
-        pe: null
-        gross_margin_pct: 29.0
-        revenue_growth_pct: 10.0
-        notes: "机器人系统集成与自动化，行业认知度高"
-      - name: 埃夫特
-        ticker: "688165.SH"
-        type: listed
-        tags: [industrial robot, robotics, automation, robot body]
-        market_cap_hkd_million: 9000
-        revenue_million: 1800
-        net_profit_million: -500
-        ps: 5.0
-        pe: null
-        gross_margin_pct: 27.0
-        revenue_growth_pct: 16.0
-        notes: "工业机器人本体与系统业务，亏损但赛道相近"
-      - name: 优必选
-        ticker: "9880.HK"
-        type: listed
-        tags: [robotics, humanoid, robot body, controller]
-        market_cap_hkd_million: 26000
-        revenue_million: 1100
-        net_profit_million: -2500
-        ps: 23.6
-        pe: null
-        gross_margin_pct: 32.0
-        revenue_growth_pct: 40.0
-        notes: "人形机器人/通用机器人标的，估值弹性高"
-      - name: 越疆机器人
-        ticker: "2432.HK"
-        type: listed
-        tags: [robotics, cobot, robot body, automation]
-        market_cap_hkd_million: 30000
-        revenue_million: 1200
-        net_profit_million: -1200
-        ps: 25.0
-        pe: null
-        gross_margin_pct: 60.0
-        revenue_growth_pct: 58.0
-        notes: "协作机器人龙头，港股机器人估值参照"
-      - name: 极智嘉
-        ticker: "private"
-        type: private
-        tags: [agv, amr, logistics robotics, automation]
-        notes: "仓储/物流机器人独角兽，适合作为系统集成/AMR参考"
-
+    - name: 汇川技术
+      ticker: 300124.SZ
+      type: listed
+      tags:
+      - industrial automation
+      - servo
+      - controller
+      - robotics
+      market_cap_hkd_million: 210000
+      revenue_million: 34000
+      net_profit_million: 7500
+      ps: 6.2
+      pe: 28.0
+      gross_margin_pct: 36.0
+      revenue_growth_pct: 18.0
+      notes: 工业自动化平台龙头，伺服/控制器/机器人相关业务强
+    - name: 埃斯顿
+      ticker: 002747.SZ
+      type: listed
+      tags:
+      - industrial robot
+      - robotics
+      - automation
+      - controller
+      market_cap_hkd_million: 17000
+      revenue_million: 3200
+      net_profit_million: -650
+      ps: 5.3
+      pe: null
+      gross_margin_pct: 32.0
+      revenue_growth_pct: 22.0
+      notes: 国产工业机器人代表，持续投入、仍在爬坡
+    - name: 新松机器人
+      ticker: 300024.SZ
+      type: listed
+      tags:
+      - industrial robot
+      - automation
+      - agv
+      - amr
+      market_cap_hkd_million: 12000
+      revenue_million: 2800
+      net_profit_million: -900
+      ps: 4.3
+      pe: null
+      gross_margin_pct: 29.0
+      revenue_growth_pct: 10.0
+      notes: 机器人系统集成与自动化，行业认知度高
+    - name: 埃夫特
+      ticker: 688165.SH
+      type: listed
+      tags:
+      - industrial robot
+      - robotics
+      - automation
+      - robot body
+      market_cap_hkd_million: 9000
+      revenue_million: 1800
+      net_profit_million: -500
+      ps: 5.0
+      pe: null
+      gross_margin_pct: 27.0
+      revenue_growth_pct: 16.0
+      notes: 工业机器人本体与系统业务，亏损但赛道相近
+    - name: 优必选
+      ticker: 9880.HK
+      type: listed
+      tags:
+      - robotics
+      - humanoid
+      - robot body
+      - controller
+      market_cap_hkd_million: 26000
+      revenue_million: 1100
+      net_profit_million: -2500
+      ps: 23.6
+      pe: null
+      gross_margin_pct: 32.0
+      revenue_growth_pct: 40.0
+      notes: 人形机器人/通用机器人标的，估值弹性高
+    - name: 越疆机器人
+      ticker: 2432.HK
+      type: listed
+      tags:
+      - robotics
+      - cobot
+      - robot body
+      - automation
+      market_cap_hkd_million: 30000
+      revenue_million: 1200
+      net_profit_million: -1200
+      ps: 25.0
+      pe: null
+      gross_margin_pct: 60.0
+      revenue_growth_pct: 58.0
+      notes: 协作机器人龙头，港股机器人估值参照
+    - name: 极智嘉
+      ticker: private
+      type: private
+      tags:
+      - agv
+      - amr
+      - logistics robotics
+      - automation
+      notes: 仓储/物流机器人独角兽，适合作为系统集成/AMR参考
   ai_chip_semiconductor:
     keywords:
-      - chip
-      - semiconductor
-      - AI accelerator
-      - ASIC
-      - edge computing
-      - NPU
-      - processor
+    - chip
+    - semiconductor
+    - AI accelerator
+    - ASIC
+    - edge computing
+    - NPU
+    - processor
+    - GPU
+    - TPU
+    - AI芯片
+    - 半导体
+    - 芯片设计
+    - 算力
+    - 芯片
     peers:
-      - name: 寒武纪
-        ticker: "688256.SH"
-        type: listed
-        tags: [AI chip, semiconductor, NPU]
-        market_cap_hkd_million: 65000
-        revenue_million: 1200
-        net_profit_million: -800
-        ps: 54.2
-        pe: null
-        gross_margin_pct: 62.0
-        revenue_growth_pct: 45.0
-        notes: "AI芯片龙头，持续亏损但收入快速增长"
-      - name: 地平线
-        ticker: "9660.HK"
-        type: listed
-        tags: [AI chip, autonomous driving, edge computing]
-        market_cap_hkd_million: 50000
-        revenue_million: 1500
-        net_profit_million: -1200
-        ps: 33.3
-        pe: null
-        gross_margin_pct: 68.0
-        revenue_growth_pct: 55.0
-        notes: "自动驾驶芯片，亏损型平台公司"
-
+    - name: 寒武纪
+      ticker: 688256.SH
+      type: listed
+      tags:
+      - AI chip
+      - semiconductor
+      - NPU
+      market_cap_hkd_million: 65000
+      revenue_million: 1200
+      net_profit_million: -800
+      ps: 54.2
+      pe: null
+      gross_margin_pct: 62.0
+      revenue_growth_pct: 45.0
+      notes: AI芯片龙头，持续亏损但收入快速增长
+    - name: 地平线
+      ticker: 9660.HK
+      type: listed
+      tags:
+      - AI chip
+      - autonomous driving
+      - edge computing
+      market_cap_hkd_million: 50000
+      revenue_million: 1500
+      net_profit_million: -1200
+      ps: 33.3
+      pe: null
+      gross_margin_pct: 68.0
+      revenue_growth_pct: 55.0
+      notes: 自动驾驶芯片，亏损型平台公司
 consumer:
   consumer_hardware_brand:
     keywords:
-      - consumer hardware
-      - smart device
-      - home appliance
-      - wearable
-      - 出海硬件
-      - 消费硬件
-      - 智能设备
-      - 消費電子
-      - 消费电子
+    - consumer hardware
+    - smart device
+    - home appliance
+    - wearable
+    - 出海硬件
+    - 消费硬件
+    - 智能设备
+    - 消費電子
+    - 消费电子
     peers:
-      - name: 小熊电器
-        ticker: "002959.SZ"
-        type: listed
-        tags: [consumer hardware, home appliance, brand]
-        market_cap_hkd_million: 8500
-        revenue_million: 4700
-        net_profit_million: 420
-        ps: 1.8
-        pe: 20.0
-        gross_margin_pct: 37.0
-        revenue_growth_pct: 8.0
-        notes: "消费电器品牌，适合作为硬件品牌利润率参考"
-      - name: 安克创新
-        ticker: "300866.SZ"
-        type: listed
-        tags: [consumer hardware, export brand, accessories]
-        market_cap_hkd_million: 65000
-        revenue_million: 21000
-        net_profit_million: 2100
-        ps: 3.1
-        pe: 31.0
-        gross_margin_pct: 44.0
-        revenue_growth_pct: 22.0
-        notes: "出海消费电子品牌，可参考PS、PE与现金流质量"
-      - name: SharkNinja
-        ticker: "SN"
-        type: listed
-        tags: [consumer hardware, appliance, global brand]
-        market_cap_hkd_million: 98000
-        revenue_million: 42000
-        net_profit_million: 2800
-        ps: 2.3
-        pe: 35.0
-        gross_margin_pct: 49.0
-        revenue_growth_pct: 18.0
-        notes: "全球化小家电品牌，适合作为出海消费硬件参考"
-
+    - name: 小熊电器
+      ticker: 002959.SZ
+      type: listed
+      tags:
+      - consumer hardware
+      - home appliance
+      - brand
+      market_cap_hkd_million: 8500
+      revenue_million: 4700
+      net_profit_million: 420
+      ps: 1.8
+      pe: 20.0
+      gross_margin_pct: 37.0
+      revenue_growth_pct: 8.0
+      notes: 消费电器品牌，适合作为硬件品牌利润率参考
+    - name: 安克创新
+      ticker: 300866.SZ
+      type: listed
+      tags:
+      - consumer hardware
+      - export brand
+      - accessories
+      market_cap_hkd_million: 65000
+      revenue_million: 21000
+      net_profit_million: 2100
+      ps: 3.1
+      pe: 31.0
+      gross_margin_pct: 44.0
+      revenue_growth_pct: 22.0
+      notes: 出海消费电子品牌，可参考PS、PE与现金流质量
+    - name: SharkNinja
+      ticker: SN
+      type: listed
+      tags:
+      - consumer hardware
+      - appliance
+      - global brand
+      market_cap_hkd_million: 98000
+      revenue_million: 42000
+      net_profit_million: 2800
+      ps: 2.3
+      pe: 35.0
+      gross_margin_pct: 49.0
+      revenue_growth_pct: 18.0
+      notes: 全球化小家电品牌，适合作为出海消费硬件参考
+  food_beverage_retail:
+    keywords:
+    - food & beverage
+    - restaurant
+    - fast food
+    - coffee
+    - tea
+    - retail
+    - consumer brand
+    - FMCG
+    - convenience store
+    - supermarket
+    - 餐饮
+    - 火锅
+    - 茶饮
+    - 咖啡
+    - 烘焙
+    - 快消
+    - 连锁
+    - 零售
+    - 便利店
+    - 超市
+    - 预制菜
+    peers:
+    - name: 海底捞
+      ticker: 6862.HK
+      type: listed
+      tags:
+      - restaurant
+      - hotpot
+      - F&B
+      - chain
+      market_cap_hkd_million: 72000
+      revenue_million: 43000
+      net_profit_million: 4000
+      ps: 1.7
+      pe: 16.1
+      gross_margin_pct: 58.0
+      revenue_growth_pct: 15.0
+      needs_refresh: true
+      notes: 港股餐饮龙头，火锅连锁标杆
+    - name: 农夫山泉
+      ticker: 9633.HK
+      type: listed
+      tags:
+      - beverage
+      - water
+      - tea
+      - FMCG
+      market_cap_hkd_million: 380000
+      revenue_million: 46000
+      net_profit_million: 13000
+      ps: 8.3
+      pe: 29.2
+      gross_margin_pct: 60.0
+      revenue_growth_pct: 12.0
+      needs_refresh: true
+      notes: 港股饮品龙头，饮用水+茶饮双引擎，估值溢价高
+    - name: 特步国际
+      ticker: 1368.HK
+      type: listed
+      tags:
+      - sportswear
+      - retail
+      - consumer brand
+      market_cap_hkd_million: 5000
+      revenue_million: 17000
+      net_profit_million: 800
+      ps: 0.3
+      pe: 6.3
+      gross_margin_pct: 43.0
+      revenue_growth_pct: 6.0
+      needs_refresh: true
+      notes: 港股运动服饰参考，低估值样本
+    - name: 名创优品
+      ticker: 9896.HK
+      type: listed
+      tags:
+      - retail
+      - consumer brand
+      - lifestyle
+      - franchise
+      market_cap_hkd_million: 33000
+      revenue_million: 21000
+      net_profit_million: 1200
+      ps: 1.6
+      pe: 27.5
+      gross_margin_pct: 62.0
+      revenue_growth_pct: 20.0
+      needs_refresh: true
+      notes: 全球化生活日用品零售连锁，高毛利特许经营模式
+  gaming_entertainment:
+    keywords:
+    - gaming
+    - game
+    - mobile game
+    - online game
+    - esports
+    - streaming
+    - short video
+    - live streaming
+    - virtual world
+    - metaverse
+    - 游戏
+    - 手游
+    - 网游
+    - 电竞
+    - 短视频
+    - 直播
+    - 泛娱乐
+    - 影视
+    - 动漫
+    - IP
+    peers:
+    - name: 网易
+      ticker: 9999.HK
+      type: listed
+      tags:
+      - gaming
+      - online game
+      - mobile
+      market_cap_hkd_million: 1900000
+      revenue_million: 100000
+      net_profit_million: 32000
+      ps: 19.0
+      pe: 59.4
+      gross_margin_pct: 63.0
+      revenue_growth_pct: 5.0
+      needs_refresh: true
+      notes: 港股游戏龙头，自研能力强但增速放缓
+    - name: 腾讯控股
+      ticker: 0700.HK
+      type: listed
+      tags:
+      - gaming
+      - social
+      - platform
+      - streaming
+      market_cap_hkd_million: 4025000
+      revenue_million: 212000
+      net_profit_million: 58000
+      ps: 19.0
+      pe: 15.3
+      gross_margin_pct: 53.0
+      revenue_growth_pct: 8.0
+      needs_refresh: true
+      notes: 全球游戏收入第一，社交+游戏+支付生态
+    - name: Bilibili
+      ticker: 9626.HK
+      type: listed
+      tags:
+      - gaming
+      - streaming
+      - anime
+      - youth community
+      market_cap_hkd_million: 15000
+      revenue_million: 32000
+      net_profit_million: -1000
+      ps: 0.5
+      pe: null
+      gross_margin_pct: 25.0
+      revenue_growth_pct: 15.0
+      needs_refresh: true
+      notes: Z世代泛娱乐社区，游戏+广告双轮驱动但薄利
+    - name: 金山软件
+      ticker: 3888.HK
+      type: listed
+      tags:
+      - gaming
+      - office software
+      - cloud
+      market_cap_hkd_million: 28000
+      revenue_million: 11000
+      net_profit_million: 500
+      ps: 2.5
+      pe: 56.0
+      gross_margin_pct: 65.0
+      revenue_growth_pct: 20.0
+      needs_refresh: true
+      notes: 游戏+办公软件双主业，WPS全球化和MMO游戏
 financial:
   brokerage_wealth_insurance:
     keywords:
-      - brokerage
-      - wealth management
-      - asset management
-      - insurance
-      - securities
-      - bank
-      - 券商
-      - 财富管理
-      - 財富管理
-      - 保险
-      - 保險
-      - 银行
-      - 銀行
+    - brokerage
+    - wealth management
+    - asset management
+    - insurance
+    - securities
+    - bank
+    - 券商
+    - 财富管理
+    - 財富管理
+    - 保险
+    - 保險
+    - 银行
+    - 銀行
     peers:
-      - name: 香港交易所
-        ticker: "0388.HK"
-        type: listed
-        tags: [exchange, financial infrastructure]
-        market_cap_hkd_million: 420000
-        revenue_million: 21000
-        net_profit_million: 12500
-        pb: 11.0
-        pe: 34.0
-        notes: "交易所平台属性强，估值明显高于普通金融机构"
-      - name: 中金公司
-        ticker: "3908.HK"
-        type: listed
-        tags: [brokerage, investment banking, wealth management]
-        market_cap_hkd_million: 47000
-        revenue_million: 23000
-        net_profit_million: 6200
-        pb: 0.7
-        pe: 7.6
-        notes: "投行/券商参考，PB与ROE比PS更有意义"
-      - name: 友邦保险
-        ticker: "1299.HK"
-        type: listed
-        tags: [insurance, life insurance, financial]
-        market_cap_hkd_million: 650000
-        revenue_million: 180000
-        net_profit_million: 33000
-        pb: 1.8
-        pe: 20.0
-        notes: "保险龙头，适合参考PB、EV和ROE，不适合普通PS框架"
-
-
+    - name: 香港交易所
+      ticker: 0388.HK
+      type: listed
+      tags:
+      - exchange
+      - financial infrastructure
+      market_cap_hkd_million: 420000
+      revenue_million: 21000
+      net_profit_million: 12500
+      pb: 11.0
+      pe: 34.0
+      notes: 交易所平台属性强，估值明显高于普通金融机构
+    - name: 中金公司
+      ticker: 3908.HK
+      type: listed
+      tags:
+      - brokerage
+      - investment banking
+      - wealth management
+      market_cap_hkd_million: 47000
+      revenue_million: 23000
+      net_profit_million: 6200
+      pb: 0.7
+      pe: 7.6
+      notes: 投行/券商参考，PB与ROE比PS更有意义
+    - name: 友邦保险
+      ticker: 1299.HK
+      type: listed
+      tags:
+      - insurance
+      - life insurance
+      - financial
+      market_cap_hkd_million: 650000
+      revenue_million: 180000
+      net_profit_million: 33000
+      pb: 1.8
+      pe: 20.0
+      notes: 保险龙头，适合参考PB、EV和ROE，不适合普通PS框架
+  property_management:
+    keywords:
+    - property management
+    - REIT
+    - real estate investment trust
+    - 物业管理
+    - 物管
+    - 商管
+    - 产业园
+    - 产业园运营
+    - REIT
+    - 房地产信托
+    peers:
+    - name: 碧桂园服务
+      ticker: 6098.HK
+      type: listed
+      tags:
+      - property management
+      - residential
+      market_cap_hkd_million: 8000
+      revenue_million: 30000
+      net_profit_million: 2500
+      ps: 0.3
+      pe: 3.2
+      gross_margin_pct: 28.0
+      revenue_growth_pct: -5.0
+      needs_refresh: true
+      notes: 港股物管代表，低估值周期
+    - name: 万物云
+      ticker: 2602.HK
+      type: listed
+      tags:
+      - property management
+      - residential
+      - commercial
+      market_cap_hkd_million: 15000
+      revenue_million: 38000
+      net_profit_million: 3000
+      ps: 0.4
+      pe: 5.0
+      gross_margin_pct: 18.0
+      revenue_growth_pct: 3.0
+      needs_refresh: true
+      notes: 万科旗下物管平台，运营稳定
+    - name: 华润万象生活
+      ticker: 1209.HK
+      type: listed
+      tags:
+      - property management
+      - commercial
+      - retail
+      market_cap_hkd_million: 55000
+      revenue_million: 21000
+      net_profit_million: 4500
+      ps: 2.6
+      pe: 12.2
+      gross_margin_pct: 35.0
+      revenue_growth_pct: 15.0
+      needs_refresh: true
+      notes: 商管+物管双轮驱动，华润旗下精品物业
+    - name: 领展房产基金
+      ticker: 0823.HK
+      type: listed
+      tags:
+      - REIT
+      - retail
+      - property
+      market_cap_hkd_million: 120000
+      revenue_million: 13000
+      net_profit_million: 7000
+      ps: 9.2
+      pe: 17.1
+      gross_margin_pct: 80.0
+      revenue_growth_pct: 4.0
+      needs_refresh: true
+      notes: 港股最大REIT，物业组合以零售物业为主，股息率参考
+  logistics_supply_chain:
+    keywords:
+    - logistics
+    - supply chain
+    - shipping
+    - port
+    - freight
+    - warehouse
+    - cold chain
+    - delivery
+    - express
+    - 物流
+    - 航运
+    - 港口
+    - 仓储
+    - 冷链
+    - 快递
+    - 供应链
+    - 货运
+    - 集装箱
+    peers:
+    - name: 京东物流
+      ticker: 2618.HK
+      type: listed
+      tags:
+      - logistics
+      - supply chain
+      - warehouse
+      - delivery
+      market_cap_hkd_million: 30000
+      revenue_million: 170000
+      net_profit_million: 1200
+      ps: 0.2
+      pe: 25.0
+      gross_margin_pct: 8.0
+      revenue_growth_pct: 10.0
+      needs_refresh: true
+      notes: 一体化供应链物流龙头，薄利规模型
+    - name: 中通快递
+      ticker: 2057.HK
+      type: listed
+      tags:
+      - express
+      - delivery
+      - logistics
+      market_cap_hkd_million: 140000
+      revenue_million: 43000
+      net_profit_million: 7000
+      ps: 3.3
+      pe: 20.0
+      gross_margin_pct: 32.0
+      revenue_growth_pct: 12.0
+      needs_refresh: true
+      notes: 快递龙头，利润率行业领先
+    - name: 嘉里物流
+      ticker: 0636.HK
+      type: listed
+      tags:
+      - logistics
+      - freight
+      - warehouse
+      - international
+      market_cap_hkd_million: 40000
+      revenue_million: 60000
+      net_profit_million: 1500
+      ps: 0.7
+      pe: 26.7
+      gross_margin_pct: 10.0
+      revenue_growth_pct: -5.0
+      needs_refresh: true
+      notes: 国际货运代理+仓储物流，顺丰控股子公司
+    - name: 顺丰控股
+      ticker: 002352.SZ
+      type: listed
+      tags:
+      - express
+      - supply chain
+      - logistics
+      - aviation
+      market_cap_hkd_million: 220000
+      revenue_million: 290000
+      net_profit_million: 9000
+      ps: 0.8
+      pe: 24.4
+      gross_margin_pct: 14.0
+      revenue_growth_pct: 8.0
+      needs_refresh: true
+      notes: A股快递+综合物流龙头，品牌溢价+航空网络
 healthcare:
   ai_drug_delivery_nanomedicine:
     keywords:
-      - AI drug
-      - drug delivery
-      - nanomaterial
-      - LNP
-      - RNA
-      - formulation
-      - NanoForge
-      - nanoparticle
-      - targeted delivery
-      - AI driven
-      - artificial intelligence drug
-      - nanomedicine
+    - AI drug
+    - drug delivery
+    - nanomaterial
+    - LNP
+    - RNA
+    - formulation
+    - NanoForge
+    - nanoparticle
+    - targeted delivery
+    - AI driven
+    - artificial intelligence drug
+    - nanomedicine
     peers:
-      - name: 晶泰科技
-        ticker: "2228.HK"
-        type: listed
-        tags: [AI drug discovery, platform, quantum]
-        market_cap_hkd_million: 18000
-        revenue_million: 120
-        net_profit_million: -700
-        ps: 150.0
-        pe: null
-        gross_margin_pct: 55.0
-        revenue_growth_pct: 20.0
-        notes: "AI制药平台，收入基数极小PS极高"
-      - name: 英矽智能
-        ticker: "03696.HK"
-        type: listed
-        tags: [AI drug discovery, platform]
-        source_date: "2026-05-06"
-        source_url: "https://www.hkexnews.hk/"
-        last_checked_at: "2026-05-06"
-        data_quality: low
-        needs_refresh: true
-        market_cap_hkd_million: null
-        revenue_million: null
-        net_profit_million: null
-        ps: null
-        pe: null
-        gross_margin_pct: null
-        revenue_growth_pct: null
-        notes: "2025-12-30于港交所主板上市；估值指标待接入行情/财报源后自动更新"
-      - name: Moderna
-        ticker: "MRNA"
-        type: listed
-        aliases: ["Moderna Inc", "Moderna Therapeutics"]
-        tags: [mRNA, LNP, platform]
-        market_cap_hkd_million: 280000
-        revenue_million: 45000
-        net_profit_million: -3000
-        ps: 6.2
-        pe: null
-        gross_margin_pct: 75.0
-        revenue_growth_pct: -40.0
-        notes: "mRNA平台龙头，收入波动大"
-      - name: BioNTech
-        ticker: "BNTX"
-        type: listed
-        aliases: ["BioNTech SE", "BioNTech in the mRNA"]
-        tags: [mRNA, LNP, platform]
-        market_cap_hkd_million: 180000
-        revenue_million: 25000
-        net_profit_million: 5000
-        ps: 7.2
-        pe: 36.0
-        gross_margin_pct: 80.0
-        revenue_growth_pct: -50.0
-        notes: "mRNA平台，疫情后收入回落"
-      - name: Alnylam
-        ticker: "ALNY"
-        type: listed
-        aliases: ["Alnylam Pharmaceuticals", "Alnylam Pharma"]
-        tags: [RNA therapeutics, delivery platform]
-        market_cap_hkd_million: 200000
-        revenue_million: 15000
-        net_profit_million: -2000
-        ps: 13.3
-        pe: null
-        gross_margin_pct: 85.0
-        revenue_growth_pct: 25.0
-        notes: "RNAi疗法龙头，递送平台价值高"
-
+    - name: 晶泰科技
+      ticker: 2228.HK
+      type: listed
+      tags:
+      - AI drug discovery
+      - platform
+      - quantum
+      market_cap_hkd_million: 18000
+      revenue_million: 120
+      net_profit_million: -700
+      ps: 150.0
+      pe: null
+      gross_margin_pct: 55.0
+      revenue_growth_pct: 20.0
+      notes: AI制药平台，收入基数极小PS极高
+    - name: 英矽智能
+      ticker: 03696.HK
+      type: listed
+      tags:
+      - AI drug discovery
+      - platform
+      source_date: '2026-05-06'
+      source_url: https://www.hkexnews.hk/
+      last_checked_at: '2026-05-06'
+      data_quality: low
+      needs_refresh: true
+      market_cap_hkd_million: null
+      revenue_million: null
+      net_profit_million: null
+      ps: null
+      pe: null
+      gross_margin_pct: null
+      revenue_growth_pct: null
+      notes: 2025-12-30于港交所主板上市；估值指标待接入行情/财报源后自动更新
+    - name: Moderna
+      ticker: MRNA
+      type: listed
+      aliases:
+      - Moderna Inc
+      - Moderna Therapeutics
+      tags:
+      - mRNA
+      - LNP
+      - platform
+      market_cap_hkd_million: 280000
+      revenue_million: 45000
+      net_profit_million: -3000
+      ps: 6.2
+      pe: null
+      gross_margin_pct: 75.0
+      revenue_growth_pct: -40.0
+      notes: mRNA平台龙头，收入波动大
+    - name: BioNTech
+      ticker: BNTX
+      type: listed
+      aliases:
+      - BioNTech SE
+      - BioNTech in the mRNA
+      tags:
+      - mRNA
+      - LNP
+      - platform
+      market_cap_hkd_million: 180000
+      revenue_million: 25000
+      net_profit_million: 5000
+      ps: 7.2
+      pe: 36.0
+      gross_margin_pct: 80.0
+      revenue_growth_pct: -50.0
+      notes: mRNA平台，疫情后收入回落
+    - name: Alnylam
+      ticker: ALNY
+      type: listed
+      aliases:
+      - Alnylam Pharmaceuticals
+      - Alnylam Pharma
+      tags:
+      - RNA therapeutics
+      - delivery platform
+      market_cap_hkd_million: 200000
+      revenue_million: 15000
+      net_profit_million: -2000
+      ps: 13.3
+      pe: null
+      gross_margin_pct: 85.0
+      revenue_growth_pct: 25.0
+      notes: RNAi疗法龙头，递送平台价值高
   innovative_drug_biotech:
     keywords:
-      - biotech
-      - biopharmaceutical
-      - drug candidate
-      - clinical trial
-      - innovative drug
-      - 18A
-      - phase 1
-      - phase 2
-      - phase 3
-      - IND
-      - NDA
-      - BLA
+    - biotech
+    - biopharmaceutical
+    - drug candidate
+    - clinical trial
+    - innovative drug
+    - 18A
+    - phase 1
+    - phase 2
+    - phase 3
+    - IND
+    - NDA
+    - BLA
     peers:
-      - name: 百济神州
-        ticker: "6160.HK"
-        type: listed
-        tags: [biotech, oncology, platform]
-        market_cap_hkd_million: 180000
-        revenue_million: 25000
-        net_profit_million: -8000
-        ps: 7.2
-        pe: null
-        gross_margin_pct: 82.0
-        revenue_growth_pct: 65.0
-        notes: "创新药龙头，收入高速增长"
-      - name: 信达生物
-        ticker: "1801.HK"
-        type: listed
-        tags: [biotech, oncology, platform]
-        market_cap_hkd_million: 60000
-        revenue_million: 6000
-        net_profit_million: -2000
-        ps: 10.0
-        pe: null
-        gross_margin_pct: 78.0
-        revenue_growth_pct: 35.0
-        notes: "生物制药，接近盈亏平衡"
-      - name: 荣昌生物
-        ticker: "9995.HK"
-        type: listed
-        tags: [biotech, ADC, platform]
-        market_cap_hkd_million: 35000
-        revenue_million: 1500
-        net_profit_million: -1500
-        ps: 23.3
-        pe: null
-        gross_margin_pct: 70.0
-        revenue_growth_pct: 40.0
-        notes: "ADC平台，亏损但管线价值高"
-
+    - name: 百济神州
+      ticker: 6160.HK
+      type: listed
+      tags:
+      - biotech
+      - oncology
+      - platform
+      market_cap_hkd_million: 180000
+      revenue_million: 25000
+      net_profit_million: -8000
+      ps: 7.2
+      pe: null
+      gross_margin_pct: 82.0
+      revenue_growth_pct: 65.0
+      notes: 创新药龙头，收入高速增长
+    - name: 信达生物
+      ticker: 1801.HK
+      type: listed
+      tags:
+      - biotech
+      - oncology
+      - platform
+      market_cap_hkd_million: 60000
+      revenue_million: 6000
+      net_profit_million: -2000
+      ps: 10.0
+      pe: null
+      gross_margin_pct: 78.0
+      revenue_growth_pct: 35.0
+      notes: 生物制药，接近盈亏平衡
+    - name: 荣昌生物
+      ticker: 9995.HK
+      type: listed
+      tags:
+      - biotech
+      - ADC
+      - platform
+      market_cap_hkd_million: 35000
+      revenue_million: 1500
+      net_profit_million: -1500
+      ps: 23.3
+      pe: null
+      gross_margin_pct: 70.0
+      revenue_growth_pct: 40.0
+      notes: ADC平台，亏损但管线价值高
   medical_device_surgery:
     keywords:
-      - medical device
-      - surgical
-      - implant
-      - orthopaedic
-      - catheter
-      - stent
-      - interventional
+    - medical device
+    - surgical
+    - implant
+    - orthopaedic
+    - catheter
+    - stent
+    - interventional
     peers:
-      - name: 微创医疗
-        ticker: "0853.HK"
-        type: listed
-        tags: [medical device, surgery, implant]
-        market_cap_hkd_million: 25000
-        revenue_million: 8000
-        net_profit_million: -2500
-        ps: 3.1
-        pe: null
-        gross_margin_pct: 60.0
-        revenue_growth_pct: 12.0
-        notes: "高值耗材龙头，持续亏损"
-      - name: 先健科技
-        ticker: "1302.HK"
-        type: listed
-        tags: [medical device, interventional, implant]
-        market_cap_hkd_million: 8000
-        revenue_million: 1200
-        net_profit_million: 250
-        ps: 6.7
-        pe: 32.0
-        gross_margin_pct: 72.0
-        revenue_growth_pct: 18.0
-        notes: "结构性心脏病器械"
-
+    - name: 微创医疗
+      ticker: 0853.HK
+      type: listed
+      tags:
+      - medical device
+      - surgery
+      - implant
+      market_cap_hkd_million: 25000
+      revenue_million: 8000
+      net_profit_million: -2500
+      ps: 3.1
+      pe: null
+      gross_margin_pct: 60.0
+      revenue_growth_pct: 12.0
+      notes: 高值耗材龙头，持续亏损
+    - name: 先健科技
+      ticker: 1302.HK
+      type: listed
+      tags:
+      - medical device
+      - interventional
+      - implant
+      market_cap_hkd_million: 8000
+      revenue_million: 1200
+      net_profit_million: 250
+      ps: 6.7
+      pe: 32.0
+      gross_margin_pct: 72.0
+      revenue_growth_pct: 18.0
+      notes: 结构性心脏病器械
   healthcare_cmo_cro:
     keywords:
-      - CMO
-      - CDMO
-      - CRO
-      - contract manufacturing
-      - contract research
-      - drug manufacturing
-      - bioprocess
+    - CMO
+    - CDMO
+    - CRO
+    - contract manufacturing
+    - contract research
+    - drug manufacturing
+    - bioprocess
     peers:
-      - name: 药明康德
-        ticker: "2359.HK"
-        type: listed
-        tags: [CRO, CDMO, platform]
-        market_cap_hkd_million: 120000
-        revenue_million: 40000
-        net_profit_million: 9500
-        ps: 3.0
-        pe: 12.6
-        gross_margin_pct: 41.0
-        revenue_growth_pct: 5.0
-        notes: "CRO/CDMO龙头，利润稳定"
-      - name: 康龙化成
-        ticker: "3759.HK"
-        type: listed
-        tags: [CRO, CDMO]
-        market_cap_hkd_million: 25000
-        revenue_million: 11000
-        net_profit_million: 1500
-        ps: 2.3
-        pe: 16.7
-        gross_margin_pct: 36.0
-        revenue_growth_pct: 8.0
-        notes: "CRO/CDMO，利润较好"
+    - name: 药明康德
+      ticker: 2359.HK
+      type: listed
+      tags:
+      - CRO
+      - CDMO
+      - platform
+      market_cap_hkd_million: 120000
+      revenue_million: 40000
+      net_profit_million: 9500
+      ps: 3.0
+      pe: 12.6
+      gross_margin_pct: 41.0
+      revenue_growth_pct: 5.0
+      notes: CRO/CDMO龙头，利润稳定
+    - name: 康龙化成
+      ticker: 3759.HK
+      type: listed
+      tags:
+      - CRO
+      - CDMO
+      market_cap_hkd_million: 25000
+      revenue_million: 11000
+      net_profit_million: 1500
+      ps: 2.3
+      pe: 16.7
+      gross_margin_pct: 36.0
+      revenue_growth_pct: 8.0
+      notes: CRO/CDMO，利润较好
+  medical_aesthetics_consumables:
+    keywords:
+    - medical aesthetics
+    - dermal filler
+    - botulinum toxin
+    - hyaluronic acid
+    - skin booster
+    - anti-aging
+    - cosmeceutical
+    - beauty device
+    - 医美
+    - 玻尿酸
+    - 肉毒素
+    - 美容注射
+    - 填充剂
+    - 抗衰
+    - 再生针
+    - 胶原蛋白
+    - 再生医美
+    - 轻医美
+    peers:
+    - name: 爱美客
+      ticker: 300896.SZ
+      type: listed
+      tags:
+      - medical aesthetics
+      - dermal filler
+      - hyaluronic acid
+      market_cap_hkd_million: 43000
+      revenue_million: 3100
+      net_profit_million: 2000
+      ps: 13.9
+      pe: 21.5
+      gross_margin_pct: 95.0
+      revenue_growth_pct: 28.0
+      needs_refresh: true
+      notes: A股医美龙头，毛利率极高，轻医美注射类
+    - name: 华熙生物
+      ticker: 688363.SH
+      type: listed
+      tags:
+      - hyaluronic acid
+      - medical aesthetics
+      - functional skincare
+      market_cap_hkd_million: 19000
+      revenue_million: 6300
+      net_profit_million: 250
+      ps: 3.0
+      pe: 76.0
+      gross_margin_pct: 73.0
+      revenue_growth_pct: -8.0
+      needs_refresh: true
+      notes: 玻尿酸原料+功能性护肤品，转型阵痛中
+    - name: 锦波生物
+      ticker: 832982.BJ
+      type: listed
+      tags:
+      - collagen
+      - recombinant
+      - medical aesthetics
+      market_cap_hkd_million: 16000
+      revenue_million: 1500
+      net_profit_million: 500
+      ps: 10.7
+      pe: 32.0
+      gross_margin_pct: 90.0
+      revenue_growth_pct: 140.0
+      needs_refresh: true
+      notes: 重组胶原蛋白龙头，高速增长阶段
+    - name: 巨子生物
+      ticker: 2367.HK
+      type: listed
+      tags:
+      - collagen
+      - recombinant
+      - medical aesthetics
+      - skincare
+      market_cap_hkd_million: 50000
+      revenue_million: 6500
+      net_profit_million: 3200
+      ps: 7.7
+      pe: 15.6
+      gross_margin_pct: 87.0
+      revenue_growth_pct: 45.0
+      needs_refresh: true
+      notes: 重组胶原蛋白+功效护肤，港股医美消费龙头
+    - name: Allergan Aesthetics
+      ticker: ABBV
+      type: listed
+      aliases:
+      - Allergan
+      - Botox
+      tags:
+      - botulinum toxin
+      - dermal filler
+      - medical aesthetics
+      market_cap_hkd_million: 3100000
+      revenue_million: 490000
+      net_profit_million: 60000
+      ps: 6.3
+      pe: 51.7
+      gross_margin_pct: 72.0
+      revenue_growth_pct: 5.0
+      needs_refresh: true
+      notes: Botox母公司(艾伯维)，全球医美肉毒素龙头，仅作估值参考
+energy:
+  green_energy_solar:
+    keywords:
+    - solar
+    - photovoltaic
+    - PV
+    - renewable energy
+    - solar cell
+    - solar module
+    - inverter
+    - polysilicon
+    - energy storage
+    - 光伏
+    - 太阳能
+    - 逆变器
+    - 储能
+    - 组件
+    - 硅片
+    - 多晶硅
+    - 新能源
+    - 碳中和
+    peers:
+    - name: 隆基绿能
+      ticker: 601012.SH
+      type: listed
+      tags:
+      - solar
+      - PV module
+      - monocrystalline
+      market_cap_hkd_million: 26000
+      revenue_million: 101000
+      net_profit_million: -6800
+      ps: 0.3
+      pe: null
+      gross_margin_pct: 12.0
+      revenue_growth_pct: -25.0
+      needs_refresh: true
+      notes: 全球最大单晶硅片+组件龙头，光伏产能过剩期严重亏损
+    - name: 通威股份
+      ticker: 600438.SH
+      type: listed
+      tags:
+      - polysilicon
+      - solar cell
+      - agriculture
+      market_cap_hkd_million: 19000
+      revenue_million: 105000
+      net_profit_million: -3000
+      ps: 0.2
+      pe: null
+      gross_margin_pct: 16.0
+      revenue_growth_pct: -20.0
+      needs_refresh: true
+      notes: 多晶硅+电池片双龙头，硅料价格暴跌导致亏损
+    - name: 阳光电源
+      ticker: 300274.SZ
+      type: listed
+      tags:
+      - inverter
+      - energy storage
+      - solar
+      market_cap_hkd_million: 120000
+      revenue_million: 65000
+      net_profit_million: 9000
+      ps: 1.8
+      pe: 13.3
+      gross_margin_pct: 30.0
+      revenue_growth_pct: 12.0
+      needs_refresh: true
+      notes: 全球逆变器龙头+储能系统集成商，盈利稳定
+    - name: 信义光能
+      ticker: 0968.HK
+      type: listed
+      tags:
+      - solar
+      - PV glass
+      - polysilicon
+      market_cap_hkd_million: 25000
+      revenue_million: 21000
+      net_profit_million: 800
+      ps: 1.2
+      pe: 31.3
+      gross_margin_pct: 25.0
+      revenue_growth_pct: -5.0
+      needs_refresh: true
+      notes: 港股光伏玻璃+EVA龙头，行业周期底部
+    - name: 福莱特玻璃
+      ticker: 6865.HK
+      type: listed
+      tags:
+      - solar
+      - PV glass
+      - glass
+      market_cap_hkd_million: 20000
+      revenue_million: 19000
+      net_profit_million: 1500
+      ps: 1.1
+      pe: 13.3
+      gross_margin_pct: 24.0
+      revenue_growth_pct: -8.0
+      needs_refresh: true
+      notes: 港股光伏玻璃双寡头之一，和信义光能竞争
+  ev_smart_driving:
+    keywords:
+    - electric vehicle
+    - EV
+    - smart driving
+    - autonomous driving
+    - intelligent driving
+    - autonomous vehicle
+    - self-driving
+    - ADAS
+    - 新能源车
+    - 电动车
+    - 智能驾驶
+    - 自动驾驶
+    - 辅助驾驶
+    - 智驾
+    - 车载芯片
+    - 车载操作系统
+    - 智能座舱
+    peers:
+    - name: 比亚迪
+      ticker: 1211.HK
+      type: listed
+      tags:
+      - EV
+      - battery
+      - smart driving
+      market_cap_hkd_million: 835000
+      revenue_million: 838000
+      net_profit_million: 42000
+      ps: 1.0
+      pe: 19.9
+      gross_margin_pct: 22.0
+      revenue_growth_pct: 30.0
+      needs_refresh: true
+      notes: 全球新能源车销量冠军，垂直整合之王
+    - name: 蔚来
+      ticker: 9866.HK
+      type: listed
+      tags:
+      - EV
+      - premium
+      - smart driving
+      - battery swap
+      market_cap_hkd_million: 80000
+      revenue_million: 70000
+      net_profit_million: -16000
+      ps: 1.1
+      pe: null
+      gross_margin_pct: 10.0
+      revenue_growth_pct: 40.0
+      needs_refresh: true
+      notes: 高端智能电动车，换电模式创新但持续高投入亏损
+    - name: 理想汽车
+      ticker: 2015.HK
+      type: listed
+      tags:
+      - EV
+      - range extender
+      - family SUV
+      - smart cockpit
+      market_cap_hkd_million: 200000
+      revenue_million: 145000
+      net_profit_million: 8000
+      ps: 1.4
+      pe: 25.0
+      gross_margin_pct: 21.0
+      revenue_growth_pct: 45.0
+      needs_refresh: true
+      notes: 增程式家庭SUV爆款，已实现盈利，估值对标特斯拉
+    - name: 小鹏汽车
+      ticker: 9868.HK
+      type: listed
+      tags:
+      - EV
+      - smart driving
+      - autonomous
+      - flying car
+      market_cap_hkd_million: 90000
+      revenue_million: 45000
+      net_profit_million: -10000
+      ps: 2.0
+      pe: null
+      gross_margin_pct: 14.0
+      revenue_growth_pct: 65.0
+      needs_refresh: true
+      notes: 智驾技术标签强，MONA系列放量但整体仍亏损
+    - name: 德赛西威
+      ticker: 002920.SZ
+      type: listed
+      tags:
+      - smart cockpit
+      - ADAS
+      - intelligent driving
+      - infotainment
+      market_cap_hkd_million: 65000
+      revenue_million: 30000
+      net_profit_million: 2000
+      ps: 2.2
+      pe: 32.5
+      gross_margin_pct: 22.0
+      revenue_growth_pct: 35.0
+      needs_refresh: true
+      notes: A股智能座舱+智驾龙头，与高通/地平线深度合作

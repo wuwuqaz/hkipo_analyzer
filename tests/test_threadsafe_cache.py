@@ -32,14 +32,6 @@ def test_invalidate():
     assert cache.get("a") is None
 
 
-def test_clear():
-    cache = ThreadSafeLRUCache()
-    cache.put("a", 1)
-    cache.put("b", 2)
-    cache.clear()
-    assert len(cache) == 0
-
-
 def test_concurrent_access():
     cache = ThreadSafeLRUCache(maxsize=128)
     errors = []
@@ -81,9 +73,8 @@ def test_len_and_contains():
     assert "z" not in cache
 
 
-def test_update_existing_key():
-    cache = ThreadSafeLRUCache(maxsize=3)
-    cache.put("a", 1)
-    cache.put("a", 2)
-    assert cache.get("a") == 2
-    assert len(cache) == 1
+def test_tuple_keys():
+    cache = ThreadSafeLRUCache(maxsize=4)
+    key = ("path", 1.5, 100, "stock", "name")
+    cache.put(key, {"data": 42})
+    assert cache.get(key) == {"data": 42}

@@ -143,7 +143,7 @@ class ScoringPipeline:
             reasons=rec.reasons,
             dimension_grades=rec.dimension_grades,
             score_trace=trace,
-            weight_profile=profile.name,
+            weight_profile={"name": profile.name, "weights": weights, "reason": profile.reason},
             debug_info={
                 "raw_score": raw_score,
                 "adjustments": {

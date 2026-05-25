@@ -1,0 +1,264 @@
+meta:
+  version: '1.0'
+  last_updated: '2026-05-20'
+  description: 港股保荐人历史战绩数据库
+  scoring_window_months: 24
+  total_sponsors: 26
+
+sponsors:
+  - name: 中金公司
+    tier: S
+    aliases:
+      - CICC
+      - 中国国际金融
+      - 中国国际金融股份有限公司
+    recent_ipo_count: 45
+    break_rate: 0.22
+    avg_first_day_return: 4.5
+    avg_oversub_ratio: 120
+    sector_strength:
+      - biotech
+      - technology
+    note: 头部中资投行，项目最多
+
+  - name: 摩根士丹利
+    tier: S
+    aliases:
+      - Morgan Stanley
+      - 摩根士丹利亚洲
+      - Morgan Stanley Asia
+    recent_ipo_count: 38
+    break_rate: 0.18
+    avg_first_day_return: 5.8
+    avg_oversub_ratio: 150
+    sector_strength:
+      - technology
+      - consumer
+    note: 顶级外资，科技消费领域强势
+
+  - name: 高盛
+    tier: S
+    aliases:
+      - Goldman Sachs
+      - 高盛亚洲
+      - Goldman Sachs Asia
+    recent_ipo_count: 32
+    break_rate: 0.20
+    avg_first_day_return: 5.2
+    avg_oversub_ratio: 140
+
+  - name: 中信证券
+    tier: A
+    aliases:
+      - 中信证券国际
+      - CITIC Securities
+      - 中信里昂
+      - CLSA
+    recent_ipo_count: 30
+    break_rate: 0.28
+    avg_first_day_return: 3.5
+    avg_oversub_ratio: 90
+    note: 中资头部，项目多但破发率偏高
+
+  - name: 华泰国际
+    tier: A
+    aliases:
+      - 华泰金融
+      - Huatai International
+    recent_ipo_count: 25
+    break_rate: 0.25
+    avg_first_day_return: 3.8
+
+  - name: 招银国际
+    tier: A
+    aliases:
+      - CMB International
+      - 招商银行国际
+    recent_ipo_count: 28
+    break_rate: 0.24
+    avg_first_day_return: 3.6
+    note: 银行系投行，中高评级
+
+  - name: 建银国际
+    tier: A
+    aliases:
+      - CCB International
+      - 建设银行国际
+    recent_ipo_count: 22
+    break_rate: 0.30
+    avg_first_day_return: 2.8
+    note: 银行系，破发率较高
+
+  - name: 农银国际
+    tier: B
+    aliases:
+      - ABC International
+      - 农业银行国际
+    recent_ipo_count: 18
+    break_rate: 0.35
+    avg_first_day_return: 2.0
+
+  - name: 海通国际
+    tier: B
+    aliases:
+      - Haitong International
+      - 海通证券
+    recent_ipo_count: 20
+    break_rate: 0.38
+    avg_first_day_return: 1.8
+
+  - name: 申万宏源
+    tier: B
+    aliases:
+      - 申万宏源国际
+      - Shenwan Hongyuan
+    recent_ipo_count: 12
+    break_rate: 0.42
+    avg_first_day_return: 0.5
+
+  - name: 国泰君安
+    tier: B
+    aliases:
+      - 国泰君安国际
+      - Guotai Junan
+    recent_ipo_count: 16
+    break_rate: 0.40
+    avg_first_day_return: 1.2
+
+  - name: UBS
+    tier: A
+    aliases:
+      - 瑞银
+      - 瑞士银行
+      - UBS AG
+    recent_ipo_count: 25
+    break_rate: 0.26
+    avg_first_day_return: 3.2
+
+  - name: 美林
+    tier: A
+    aliases:
+      - Merrill Lynch
+      - BofA Securities
+    recent_ipo_count: 18
+    break_rate: 0.22
+    avg_first_day_return: 4.0
+
+  - name: 招商证券
+    tier: B
+    aliases:
+      - 招商证券国际
+      - China Merchants Securities
+    recent_ipo_count: 15
+    break_rate: 0.40
+    avg_first_day_return: 1.0
+
+  - name: 光大证券
+    tier: B
+    aliases:
+      - 光大证券国际
+      - Everbright Securities
+    recent_ipo_count: 10
+    break_rate: 0.45
+    avg_first_day_return: 0.0
+
+  - name: 工银国际
+    tier: A
+    aliases:
+      - ICBC International
+      - 工商银行国际
+    recent_ipo_count: 20
+    break_rate: 0.28
+    avg_first_day_return: 2.5
+
+  - name: 中信建投
+    tier: A
+    aliases:
+      - 中信建投国际
+      - China Securities International
+    recent_ipo_count: 15
+    break_rate: 0.30
+    avg_first_day_return: 2.2
+
+  - name: 法国巴黎银行
+    tier: A
+    aliases:
+      - BNP Paribas
+      - 法巴
+    recent_ipo_count: 12
+    break_rate: 0.25
+    avg_first_day_return: 3.0
+
+  - name: 花旗
+    tier: A
+    aliases:
+      - Citigroup
+      - Citi
+      - 花旗银行
+    recent_ipo_count: 15
+    break_rate: 0.22
+    avg_first_day_return: 4.2
+
+  - name: 瑞士信贷
+    tier: B
+    aliases:
+      - Credit Suisse
+      - 瑞信
+    recent_ipo_count: 10
+    break_rate: 0.38
+    avg_first_day_return: 1.5
+    note: 已被瑞银收购，历史数据保留
+
+  - name: 星展银行
+    tier: B
+    aliases:
+      - DBS
+      - 星展
+    recent_ipo_count: 8
+    break_rate: 0.42
+    avg_first_day_return: 1.0
+
+  - name: 平安证券
+    tier: B
+    aliases:
+      - 平安证券国际
+      - Ping An Securities
+    recent_ipo_count: 8
+    break_rate: 0.45
+    avg_first_day_return: -0.5
+
+  - name: 银河国际
+    tier: B
+    aliases:
+      - 银河证券国际
+      - Galaxy International
+    recent_ipo_count: 6
+    break_rate: 0.50
+    avg_first_day_return: -1.0
+
+  - name: 广发证券
+    tier: C
+    aliases:
+      - 广发国际
+      - GF Securities
+    recent_ipo_count: 5
+    break_rate: 0.55
+    avg_first_day_return: -2.0
+
+  - name: 中银国际
+    tier: A
+    aliases:
+      - BOC International
+      - 中银国际亚洲
+      - BOCI
+    recent_ipo_count: 22
+    break_rate: 0.26
+    avg_first_day_return: 3.2
+
+  - name: 未知保荐人
+    tier: C
+    aliases: []
+    recent_ipo_count: 0
+    break_rate: 0.50
+    avg_first_day_return: 0.0
+    note: 兜底默认值，用于未匹配到的保荐人
