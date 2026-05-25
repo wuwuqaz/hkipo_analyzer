@@ -14,6 +14,7 @@ import httpx
 from .utils import _normalize_company_name, _normalize_stock_code
 from .settings import SETTINGS
 from ._threadsafe_cache import ThreadSafeLRUCache
+from ._url_validation import validate_download_url
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +282,10 @@ class ProspectusDownloader:
                     logger.info("  → 命中新上市信息页: %s %s", row.get("stock_code", ""), row.get("stock_name", ""))
                     return f"https://www1.hkexnews.hk{href}"
                 if href.startswith('http'):
+                    try:
+                        validate_download_url(href)
+                    except ValueError:
+                        continue
                     logger.info("  → 命中新上市信息页: %s %s", row.get("stock_code", ""), row.get("stock_name", ""))
                     return href
 
@@ -297,6 +302,7 @@ class ProspectusDownloader:
         last_error = None
         for url in candidate_urls:
             try:
+                validate_download_url(url)
                 response = _retry_request(httpx.get, url, timeout=SETTINGS.network.pdf_download_timeout, follow_redirects=True)
                 if response.status_code == 200 and response.content.lstrip()[:4] == b'%PDF':
                     return response, url
@@ -305,6 +311,10 @@ class ProspectusDownloader:
                 continue
 
         for url in candidate_urls:
+            try:
+                validate_download_url(url)
+            except ValueError:
+                continue
             tmp_path = None
             try:
                 fd, tmp_path = tempfile.mkstemp(suffix='.pdf')
