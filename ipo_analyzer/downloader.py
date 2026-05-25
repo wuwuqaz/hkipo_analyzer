@@ -13,6 +13,7 @@ import httpx
 
 from .utils import _normalize_company_name, _normalize_stock_code
 from .settings import SETTINGS
+from ._threadsafe_cache import ThreadSafeLRUCache
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,7 @@ class AiPOMarginClient:
 class ProspectusDownloader:
     """招股书下载器"""
 
-    _listing_cache = {}
+    _listing_cache = ThreadSafeLRUCache(maxsize=128)
 
     def __init__(self, cache_dir=None):
         if cache_dir is None:
@@ -205,12 +206,13 @@ class ProspectusDownloader:
 
     def _fetch_new_listing_rows(self, page_url):
         """抓取新上市信息页的表格行（带缓存）"""
-        if page_url in self._listing_cache:
-            return self._listing_cache[page_url]
+        cached = self._listing_cache.get(page_url)
+        if cached is not None:
+            return cached
         try:
             response = _retry_request(httpx.get, page_url, headers=self.headers, timeout=SETTINGS.network.default_timeout, follow_redirects=True)
             if response.status_code != 200:
-                self._listing_cache[page_url] = []
+                self._listing_cache.put(page_url, [])
                 return []
 
             html = response.text
@@ -229,12 +231,12 @@ class ProspectusDownloader:
                     'raw_html': row_html,
                 }
                 rows.append(row)
-            self._listing_cache[page_url] = rows
+            self._listing_cache.put(page_url, rows)
             return rows
         except Exception as e:
             logger = logging.getLogger(__name__)
             logger.warning(f"_fetch_new_listing_rows 失败 ({page_url}): {e}")
-            self._listing_cache[page_url] = []
+            self._listing_cache.put(page_url, [])
             return []
 
     @staticmethod
